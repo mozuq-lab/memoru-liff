@@ -46,23 +46,23 @@ describe('GeneratePage', () => {
 
   describe('テストケース1: 文字数制限のバリデーション', () => {
     it('2000文字を超えるとエラーメッセージが表示される', async () => {
-      const user = userEvent.setup();
       renderGeneratePage();
 
       const textarea = screen.getByTestId('input-text');
       const longText = 'a'.repeat(2001);
-      await user.type(textarea, longText);
+      // userEvent.typeは2001文字だと非常に遅いのでfireEventを使用
+      fireEvent.change(textarea, { target: { value: longText } });
 
       expect(screen.getByTestId('over-limit-error')).toHaveTextContent('文字数制限を超えています');
     });
 
     it('2000文字を超えると生成ボタンが無効化される', async () => {
-      const user = userEvent.setup();
       renderGeneratePage();
 
       const textarea = screen.getByTestId('input-text');
       const longText = 'a'.repeat(2001);
-      await user.type(textarea, longText);
+      // userEvent.typeは2001文字だと非常に遅いのでfireEventを使用
+      fireEvent.change(textarea, { target: { value: longText } });
 
       const generateButton = screen.getByTestId('generate-button');
       expect(generateButton).toBeDisabled();
