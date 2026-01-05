@@ -124,7 +124,7 @@ TASK-0005 ──► TASK-0006 ──► TASK-0007 ──┬──► TASK-0008 �
 
 | 状態 | タスクID | タスク名 | 工数 | タイプ | 信頼性 |
 |------|----------|---------|------|--------|--------|
-| [ ] | [TASK-0012](TASK-0012.md) | LIFF SDK + Keycloak OIDC 認証連携 | 8h | TDD | 🔵 |
+| [x] | [TASK-0012](TASK-0012.md) | LIFF SDK + Keycloak OIDC 認証連携 | 8h | TDD | 🔵 |
 | [x] | [TASK-0013](TASK-0013.md) | React アプリ基盤構築 | 4h | DIRECT | 🔵 |
 | [ ] | [TASK-0014](TASK-0014.md) | ホーム画面・ナビゲーション | 6h | TDD | 🟡 |
 | [ ] | [TASK-0015](TASK-0015.md) | AIカード生成画面 | 8h | TDD | 🔵 |
