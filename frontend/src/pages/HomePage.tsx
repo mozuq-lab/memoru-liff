@@ -68,6 +68,7 @@ export const HomePage = () => {
         <section
           className="bg-white rounded-lg shadow p-6 mb-6"
           aria-label="今日の復習状況"
+          data-testid="today-review-section"
         >
           <h2 className="text-lg font-semibold text-gray-700 mb-2">
             今日の復習

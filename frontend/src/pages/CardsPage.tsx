@@ -67,7 +67,7 @@ export const CardsPage = () => {
   return (
     <div className="flex flex-col min-h-screen pb-20">
       <header className="bg-white shadow-sm p-4 mb-4">
-        <h1 className="text-xl font-bold text-gray-800">カード一覧</h1>
+        <h1 className="text-xl font-bold text-gray-800" data-testid="cards-title">カード一覧</h1>
         <p className="text-sm text-gray-600" data-testid="card-count">
           {cards.length}枚のカード
         </p>
