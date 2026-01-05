@@ -88,7 +88,15 @@ memoru-liff/
 │   ├── src/                   # Lambda関数ソース
 │   ├── tests/                 # テスト
 │   └── template.yaml          # SAMテンプレート
-└── frontend/                  # React LIFF アプリ (未作成)
+└── frontend/                  # React LIFF アプリ
+    ├── src/
+    │   ├── components/        # 共通コンポーネント
+    │   ├── contexts/          # React Context
+    │   ├── hooks/             # カスタムフック
+    │   ├── pages/             # ページコンポーネント
+    │   ├── services/          # APIサービス
+    │   └── types/             # TypeScript型定義
+    └── vite.config.ts         # Vite設定
 ```
 
 ## 開発コマンド
@@ -112,6 +120,24 @@ make test
 
 # デプロイ（開発環境）
 make deploy-dev
+```
+
+### フロントエンド
+
+```bash
+cd frontend
+
+# 依存関係インストール
+npm install
+
+# 開発サーバー起動
+npm run dev
+
+# ビルド
+npm run build
+
+# 型チェック
+npm run type-check
 ```
 
 ### インフラ
