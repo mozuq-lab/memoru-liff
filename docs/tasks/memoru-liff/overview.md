@@ -32,8 +32,8 @@
 
 ## 全体進捗
 
-- [ ] Phase 1: 基盤構築 (5タスク)
-- [ ] Phase 2: バックエンド実装 (6タスク)
+- [ ] Phase 1: 基盤構築 (5タスク) - IaCテンプレート作成完了、デプロイ待ち
+- [x] Phase 2: バックエンド実装 (6タスク) - ✅ 完了
 - [ ] Phase 3: フロントエンド実装 (8タスク)
 - [ ] Phase 4: 統合テスト (3タスク)
 
@@ -55,11 +55,11 @@
 
 | 状態 | タスクID | タスク名 | 工数 | タイプ | 信頼性 |
 |------|----------|---------|------|--------|--------|
-| [ ] | [TASK-0001](TASK-0001.md) | Keycloak ECS/Fargate インフラ構築 | 8h | DIRECT | 🔵 |
+| [~] | [TASK-0001](TASK-0001.md) | Keycloak ECS/Fargate インフラ構築 | 8h | DIRECT | 🔵 |
 | [ ] | [TASK-0002](TASK-0002.md) | Keycloak Realm/Client 設定 | 4h | DIRECT | 🔵 |
-| [ ] | [TASK-0003](TASK-0003.md) | DynamoDB テーブル作成 | 4h | DIRECT | 🔵 |
-| [ ] | [TASK-0004](TASK-0004.md) | CloudFront + S3 LIFF ホスティング構築 | 4h | DIRECT | 🔵 |
-| [ ] | [TASK-0005](TASK-0005.md) | API Gateway + Lambda 基盤構築 | 8h | DIRECT | 🔵 |
+| [x] | [TASK-0003](TASK-0003.md) | DynamoDB テーブル作成 | 4h | DIRECT | 🔵 |
+| [~] | [TASK-0004](TASK-0004.md) | CloudFront + S3 LIFF ホスティング構築 | 4h | DIRECT | 🔵 |
+| [x] | [TASK-0005](TASK-0005.md) | API Gateway + Lambda 基盤構築 | 8h | DIRECT | 🔵 |
 
 ### 依存関係
 
@@ -91,12 +91,12 @@ TASK-0004 （独立）
 
 | 状態 | タスクID | タスク名 | 工数 | タイプ | 信頼性 |
 |------|----------|---------|------|--------|--------|
-| [ ] | [TASK-0006](TASK-0006.md) | ユーザー管理API実装 | 8h | TDD | 🔵 |
-| [ ] | [TASK-0007](TASK-0007.md) | カード管理API実装 | 8h | TDD | 🔵 |
-| [ ] | [TASK-0008](TASK-0008.md) | SM-2アルゴリズム・復習API実装 | 8h | TDD | 🔵 |
-| [ ] | [TASK-0009](TASK-0009.md) | AIカード生成API実装 | 8h | TDD | 🔵 |
-| [ ] | [TASK-0010](TASK-0010.md) | LINE Webhook・Postback処理実装 | 8h | TDD | 🔵 |
-| [ ] | [TASK-0011](TASK-0011.md) | 定期通知Lambda実装 | 8h | TDD | 🔵 |
+| [x] | [TASK-0006](TASK-0006.md) | ユーザー管理API実装 | 8h | TDD | 🔵 |
+| [x] | [TASK-0007](TASK-0007.md) | カード管理API実装 | 8h | TDD | 🔵 |
+| [x] | [TASK-0008](TASK-0008.md) | SM-2アルゴリズム・復習API実装 | 8h | TDD | 🔵 |
+| [x] | [TASK-0009](TASK-0009.md) | AIカード生成API実装 | 8h | TDD | 🔵 |
+| [x] | [TASK-0010](TASK-0010.md) | LINE Webhook・Postback処理実装 | 8h | TDD | 🔵 |
+| [x] | [TASK-0011](TASK-0011.md) | 定期通知Lambda実装 | 8h | TDD | 🔵 |
 
 ### 依存関係
 
@@ -108,10 +108,10 @@ TASK-0005 ──► TASK-0006 ──► TASK-0007 ──┬──► TASK-0008 �
 
 ### Phase 2 完了条件
 
-- [ ] 全APIエンドポイントが動作確認完了
-- [ ] 単体テストカバレッジ80%以上
-- [ ] SM-2アルゴリズムが正確に動作
-- [ ] LINE Webhookが署名検証を通過
+- [x] 全APIエンドポイントが動作確認完了
+- [x] 単体テストカバレッジ80%以上
+- [x] SM-2アルゴリズムが正確に動作
+- [x] LINE Webhookが署名検証を通過
 
 ---
 
