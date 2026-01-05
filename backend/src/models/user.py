@@ -94,6 +94,7 @@ class User(BaseModel):
     display_name: Optional[str] = None
     picture_url: Optional[str] = None
     settings: dict = Field(default_factory=lambda: {"notification_time": "09:00", "timezone": "Asia/Tokyo"})
+    last_notified_date: Optional[str] = None  # YYYY-MM-DD format
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: Optional[datetime] = None
 
@@ -123,6 +124,8 @@ class User(BaseModel):
             item["display_name"] = self.display_name
         if self.picture_url:
             item["picture_url"] = self.picture_url
+        if self.last_notified_date:
+            item["last_notified_date"] = self.last_notified_date
         if self.updated_at:
             item["updated_at"] = self.updated_at.isoformat()
         return item
@@ -136,6 +139,7 @@ class User(BaseModel):
             display_name=item.get("display_name"),
             picture_url=item.get("picture_url"),
             settings=item.get("settings", {"notification_time": "09:00", "timezone": "Asia/Tokyo"}),
+            last_notified_date=item.get("last_notified_date"),
             created_at=datetime.fromisoformat(item["created_at"]),
             updated_at=datetime.fromisoformat(item["updated_at"]) if item.get("updated_at") else None,
         )

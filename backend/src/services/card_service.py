@@ -312,6 +312,37 @@ class CardService:
         except ClientError as e:
             raise CardServiceError(f"Failed to get due cards: {e}")
 
+    def get_due_card_count(
+        self,
+        user_id: str,
+        before: Optional[datetime] = None,
+    ) -> int:
+        """Get count of cards due for review.
+
+        Args:
+            user_id: The user's ID.
+            before: Get cards due before this time (defaults to now).
+
+        Returns:
+            Number of cards due for review.
+        """
+        if before is None:
+            before = datetime.utcnow()
+
+        try:
+            response = self.table.query(
+                IndexName="user_id-due-index",
+                KeyConditionExpression="user_id = :user_id AND next_review_at <= :before",
+                ExpressionAttributeValues={
+                    ":user_id": user_id,
+                    ":before": before.isoformat(),
+                },
+                Select="COUNT",
+            )
+            return response.get("Count", 0)
+        except ClientError as e:
+            raise CardServiceError(f"Failed to get due card count: {e}")
+
     def update_review_data(
         self,
         user_id: str,

@@ -317,3 +317,61 @@ def create_error_message() -> Dict[str, Any]:
         "type": "text",
         "text": "申し訳ありません、エラーが発生しました。\n\nしばらくしてからもう一度お試しください。",
     }
+
+
+def create_reminder_message(due_count: int) -> Dict[str, Any]:
+    """Create review reminder push message.
+
+    Args:
+        due_count: Number of cards due for review.
+
+    Returns:
+        Flex Message JSON structure.
+    """
+    return {
+        "type": "flex",
+        "altText": "復習リマインド",
+        "contents": {
+            "type": "bubble",
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": "📚 復習の時間です！",
+                        "weight": "bold",
+                        "size": "lg",
+                        "align": "center",
+                        "color": "#1DB446",
+                    },
+                    {
+                        "type": "text",
+                        "text": f"{due_count}枚のカードが復習を待っています",
+                        "wrap": True,
+                        "size": "md",
+                        "align": "center",
+                        "margin": "md",
+                        "color": "#666666",
+                    },
+                ],
+                "paddingAll": "20px",
+            },
+            "footer": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {
+                        "type": "button",
+                        "action": {
+                            "type": "postback",
+                            "label": "復習を始める",
+                            "data": "action=start",
+                        },
+                        "style": "primary",
+                        "color": "#1DB446",
+                    }
+                ],
+            },
+        },
+    }

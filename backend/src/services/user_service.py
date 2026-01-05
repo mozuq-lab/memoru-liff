@@ -2,7 +2,7 @@
 
 import os
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
 import boto3
 from botocore.exceptions import ClientError
@@ -190,6 +190,56 @@ class UserService:
         except ClientError as e:
             raise UserServiceError(f"Failed to query user by LINE ID: {e}")
 
+    def get_linked_users(self, limit: int = 100) -> List[User]:
+        """Get all users with LINE account linked.
+
+        Args:
+            limit: Maximum number of users to return per scan.
+
+        Returns:
+            List of users with LINE account linked.
+        """
+        users = []
+        try:
+            # Scan the table for users with line_user_id
+            scan_kwargs = {
+                "FilterExpression": "attribute_exists(line_user_id)",
+                "Limit": limit,
+            }
+
+            while True:
+                response = self.table.scan(**scan_kwargs)
+                for item in response.get("Items", []):
+                    users.append(User.from_dynamodb_item(item))
+
+                # Check for more pages
+                if "LastEvaluatedKey" not in response:
+                    break
+                scan_kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
+
+            return users
+        except ClientError as e:
+            raise UserServiceError(f"Failed to get linked users: {e}")
+
+    def update_last_notified_date(self, user_id: str, date_str: str) -> None:
+        """Update user's last notification date.
+
+        Args:
+            user_id: The user's unique identifier.
+            date_str: Date string in YYYY-MM-DD format.
+        """
+        try:
+            self.table.update_item(
+                Key={"user_id": user_id},
+                UpdateExpression="SET last_notified_date = :date, updated_at = :updated_at",
+                ExpressionAttributeValues={
+                    ":date": date_str,
+                    ":updated_at": datetime.utcnow().isoformat(),
+                },
+            )
+        except ClientError as e:
+            raise UserServiceError(f"Failed to update last notified date: {e}")
+
     def update_settings(self, user_id: str, notification_time: Optional[str] = None, timezone: Optional[str] = None) -> User:
         """Update user settings.
 
@@ -210,14 +260,17 @@ class UserService:
         # Build update expression
         update_parts = []
         expression_values = {}
+        expression_names = {}
 
         if notification_time is not None:
             update_parts.append("settings.notification_time = :notification_time")
             expression_values[":notification_time"] = notification_time
 
         if timezone is not None:
-            update_parts.append("settings.timezone = :timezone")
+            # 'timezone' is a reserved keyword in DynamoDB
+            update_parts.append("settings.#tz = :timezone")
             expression_values[":timezone"] = timezone
+            expression_names["#tz"] = "timezone"
 
         if not update_parts:
             return user
@@ -227,11 +280,15 @@ class UserService:
         expression_values[":updated_at"] = now.isoformat()
 
         try:
-            self.table.update_item(
-                Key={"user_id": user_id},
-                UpdateExpression="SET " + ", ".join(update_parts),
-                ExpressionAttributeValues=expression_values,
-            )
+            update_kwargs = {
+                "Key": {"user_id": user_id},
+                "UpdateExpression": "SET " + ", ".join(update_parts),
+                "ExpressionAttributeValues": expression_values,
+            }
+            if expression_names:
+                update_kwargs["ExpressionAttributeNames"] = expression_names
+
+            self.table.update_item(**update_kwargs)
 
             # Update local user object
             if notification_time is not None:
