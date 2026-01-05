@@ -390,6 +390,220 @@ Resources:
         Environment: !Ref Environment
         Application: memoru
 
+  #============================================================
+  # CloudWatch Monitoring (Production Only)
+  #============================================================
+
+  # SNS Topic for Alerts
+  AlertSNSTopic:
+    Type: AWS::SNS::Topic
+    Condition: IsProd
+    Properties:
+      TopicName: !Sub memoru-${Environment}-alerts
+      DisplayName: Memoru LIFF Alerts
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: memoru
+
+  # Lambda Error Alarm
+  LambdaErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: IsProd
+    Properties:
+      AlarmName: !Sub memoru-${Environment}-lambda-errors
+      AlarmDescription: Lambda function error rate exceeds threshold
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref ApiFunction
+      AlarmActions:
+        - !Ref AlertSNSTopic
+      TreatMissingData: notBreaching
+
+  # API Gateway 5xx Error Alarm
+  ApiGateway5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: IsProd
+    Properties:
+      AlarmName: !Sub memoru-${Environment}-api-5xx-errors
+      AlarmDescription: API Gateway 5xx error rate exceeds threshold
+      MetricName: 5xx
+      Namespace: AWS/ApiGateway
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 10
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: ApiId
+          Value: !Ref HttpApi
+      AlarmActions:
+        - !Ref AlertSNSTopic
+      TreatMissingData: notBreaching
+
+  # DynamoDB Throttle Alarm
+  DynamoDBThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: IsProd
+    Properties:
+      AlarmName: !Sub memoru-${Environment}-dynamodb-throttle
+      AlarmDescription: DynamoDB throttling detected
+      MetricName: ThrottledRequests
+      Namespace: AWS/DynamoDB
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: TableName
+          Value: !Ref CardsTable
+      AlarmActions:
+        - !Ref AlertSNSTopic
+      TreatMissingData: notBreaching
+
+  # CloudWatch Dashboard
+  MonitoringDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Condition: IsProd
+    Properties:
+      DashboardName: !Sub memoru-${Environment}-dashboard
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "title": "Lambda Invocations & Errors",
+                "metrics": [
+                  ["AWS/Lambda", "Invocations", "FunctionName", "${ApiFunction}", {"color": "#2ca02c"}],
+                  [".", "Errors", ".", ".", {"color": "#d62728"}],
+                  [".", "Invocations", "FunctionName", "${LineWebhookFunction}", {"color": "#1f77b4"}],
+                  [".", "Errors", ".", ".", {"color": "#ff7f0e"}]
+                ],
+                "region": "${AWS::Region}",
+                "period": 300,
+                "stat": "Sum"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "title": "Lambda Duration",
+                "metrics": [
+                  ["AWS/Lambda", "Duration", "FunctionName", "${ApiFunction}", {"stat": "p50"}],
+                  ["...", {"stat": "p90"}],
+                  ["...", {"stat": "p99"}]
+                ],
+                "region": "${AWS::Region}",
+                "period": 300
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 6,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "title": "API Gateway Requests",
+                "metrics": [
+                  ["AWS/ApiGateway", "Count", "ApiId", "${HttpApi}", {"color": "#2ca02c"}],
+                  [".", "5xx", ".", ".", {"color": "#d62728"}],
+                  [".", "4xx", ".", ".", {"color": "#ff7f0e"}]
+                ],
+                "region": "${AWS::Region}",
+                "period": 300,
+                "stat": "Sum"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 6,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "title": "API Gateway Latency",
+                "metrics": [
+                  ["AWS/ApiGateway", "Latency", "ApiId", "${HttpApi}", {"stat": "p50"}],
+                  ["...", {"stat": "p90"}],
+                  ["...", {"stat": "p99"}]
+                ],
+                "region": "${AWS::Region}",
+                "period": 300
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 12,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "title": "DynamoDB - Users Table",
+                "metrics": [
+                  ["AWS/DynamoDB", "ConsumedReadCapacityUnits", "TableName", "${UsersTable}"],
+                  [".", "ConsumedWriteCapacityUnits", ".", "."]
+                ],
+                "region": "${AWS::Region}",
+                "period": 300,
+                "stat": "Sum"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 8,
+              "y": 12,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "title": "DynamoDB - Cards Table",
+                "metrics": [
+                  ["AWS/DynamoDB", "ConsumedReadCapacityUnits", "TableName", "${CardsTable}"],
+                  [".", "ConsumedWriteCapacityUnits", ".", "."]
+                ],
+                "region": "${AWS::Region}",
+                "period": 300,
+                "stat": "Sum"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 16,
+              "y": 12,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "title": "DynamoDB - Reviews Table",
+                "metrics": [
+                  ["AWS/DynamoDB", "ConsumedReadCapacityUnits", "TableName", "${ReviewsTable}"],
+                  [".", "ConsumedWriteCapacityUnits", ".", "."]
+                ],
+                "region": "${AWS::Region}",
+                "period": 300,
+                "stat": "Sum"
+              }
+            }
+          ]
+        }
+
 Outputs:
   # DynamoDB Tables
   UsersTableName:
@@ -447,3 +661,16 @@ Outputs:
     Value: !GetAtt LineWebhookFunction.Arn
     Export:
       Name: !Sub memoru-${Environment}-line-webhook-function-arn
+
+  # Monitoring (Production Only)
+  AlertSNSTopicArn:
+    Condition: IsProd
+    Description: SNS Topic ARN for alerts
+    Value: !Ref AlertSNSTopic
+    Export:
+      Name: !Sub memoru-${Environment}-alerts-topic-arn
+
+  DashboardName:
+    Condition: IsProd
+    Description: CloudWatch Dashboard name
+    Value: !Sub memoru-${Environment}-dashboard
