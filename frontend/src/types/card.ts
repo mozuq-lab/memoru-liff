@@ -37,6 +37,11 @@ export interface GeneratedCard {
   suggested_tags: string[];
 }
 
+/** フロントエンド用の一時ID付き生成カード */
+export interface GeneratedCardWithId extends GeneratedCard {
+  tempId: string;
+}
+
 export interface GenerateCardsResponse {
   generated_cards: GeneratedCard[];
   generation_info: {

@@ -127,7 +127,7 @@ TASK-0005 ──► TASK-0006 ──► TASK-0007 ──┬──► TASK-0008 �
 | [x] | [TASK-0012](TASK-0012.md) | LIFF SDK + Keycloak OIDC 認証連携 | 8h | TDD | 🔵 |
 | [x] | [TASK-0013](TASK-0013.md) | React アプリ基盤構築 | 4h | DIRECT | 🔵 |
 | [x] | [TASK-0014](TASK-0014.md) | ホーム画面・ナビゲーション | 6h | TDD | 🟡 |
-| [ ] | [TASK-0015](TASK-0015.md) | AIカード生成画面 | 8h | TDD | 🔵 |
+| [x] | [TASK-0015](TASK-0015.md) | AIカード生成画面 | 8h | TDD | 🔵 |
 | [ ] | [TASK-0016](TASK-0016.md) | カード一覧画面 | 6h | TDD | 🟡 |
 | [ ] | [TASK-0017](TASK-0017.md) | カード詳細・編集画面 | 6h | TDD | 🟡 |
 | [ ] | [TASK-0018](TASK-0018.md) | 設定画面（通知時間設定） | 4h | TDD | 🔵 |
