@@ -29,6 +29,19 @@ from ..services.review_service import (
     InvalidGradeError,
 )
 from ..models.review import ReviewRequest
+from ..models.generate import (
+    GenerateCardsRequest,
+    GenerateCardsResponse,
+    GeneratedCardResponse,
+    GenerationInfoResponse,
+)
+from ..services.bedrock import (
+    BedrockService,
+    BedrockTimeoutError,
+    BedrockRateLimitError,
+    BedrockInternalError,
+    BedrockParseError,
+)
 
 logger = Logger()
 tracer = Tracer()
@@ -38,6 +51,7 @@ app = APIGatewayHttpResolver()
 user_service = UserService()
 card_service = CardService()
 review_service = ReviewService()
+bedrock_service = BedrockService()
 
 
 def get_user_id_from_context() -> str:
@@ -177,6 +191,89 @@ def update_user_settings():
         raise NotFoundError("User not found")
     except Exception as e:
         logger.error(f"Error updating settings: {e}")
+        raise
+
+
+# =============================================================================
+# AI Card Generation Endpoints
+# =============================================================================
+
+
+@app.post("/cards/generate")
+@tracer.capture_method
+def generate_cards():
+    """Generate flashcards from input text using AI."""
+    user_id = get_user_id_from_context()
+    logger.info(f"Generating cards for user_id: {user_id}")
+
+    try:
+        body = app.current_event.json_body
+        request = GenerateCardsRequest(**body)
+    except ValidationError as e:
+        logger.warning(f"Validation error: {e}")
+        return Response(
+            status_code=400,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": "Invalid request", "details": e.errors()}),
+        )
+    except json.JSONDecodeError:
+        return Response(
+            status_code=400,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": "Invalid JSON body"}),
+        )
+
+    try:
+        result = bedrock_service.generate_cards(
+            input_text=request.input_text,
+            card_count=request.card_count,
+            difficulty=request.difficulty,
+            language=request.language,
+        )
+
+        response = GenerateCardsResponse(
+            generated_cards=[
+                GeneratedCardResponse(
+                    front=card.front,
+                    back=card.back,
+                    suggested_tags=card.suggested_tags,
+                )
+                for card in result.cards
+            ],
+            generation_info=GenerationInfoResponse(
+                input_length=result.input_length,
+                model_used=result.model_used,
+                processing_time_ms=result.processing_time_ms,
+            ),
+        )
+        return response.model_dump(mode="json")
+
+    except BedrockTimeoutError:
+        return Response(
+            status_code=504,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": "AI generation timed out"}),
+        )
+    except BedrockRateLimitError:
+        return Response(
+            status_code=429,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": "Too many requests, please retry later"}),
+        )
+    except BedrockInternalError:
+        return Response(
+            status_code=502,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": "AI service temporarily unavailable"}),
+        )
+    except BedrockParseError:
+        return Response(
+            status_code=500,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": "Failed to parse AI response"}),
+        )
+    except Exception as e:
+        logger.error(f"Error generating cards: {e}")
         raise
 
 
