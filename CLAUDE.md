@@ -16,7 +16,18 @@ LINE ベースの暗記カードアプリケーション。SRS (Spaced Repetitio
 2. **タスクタイプに応じた実装**:
    - **TDD タスク**: `/tsumiki:tdd-red` → `/tsumiki:tdd-green` → `/tsumiki:tdd-refactor`
    - **DIRECT タスク**: `/tsumiki:direct-setup` → `/tsumiki:direct-verify`
-3. **タスク完了後にコミット**
+3. **タスクファイルの更新**: 完了条件のチェックボックスを `[x]` に更新
+4. **タスク完了後にコミット**
+
+#### タスクファイル更新ルール
+
+タスク完了時は以下のファイルを更新する:
+
+1. **個別タスクファイル** (`TASK-XXXX.md`):
+   - 完了条件の `[ ]` を `[x]` に変更
+2. **概要ファイル** (`overview.md`):
+   - タスク一覧の状態列を更新 (`[ ]` → `[x]` または `[~]`)
+   - Phase完了条件のチェックボックスを更新
 
 ### コミットルール
 
@@ -36,8 +47,8 @@ LINE ベースの暗記カードアプリケーション。SRS (Spaced Repetitio
 
 ### 現在の進捗
 
-- [x] Phase 1: 基盤インフラ構築 (TASK-0001 ~ TASK-0005)
-- [ ] Phase 2: バックエンド実装 (TASK-0006 ~ TASK-0011)
+- [~] Phase 1: 基盤インフラ構築 (TASK-0001 ~ TASK-0005) - IaCテンプレート作成完了、デプロイ待ち
+- [x] Phase 2: バックエンド実装 (TASK-0006 ~ TASK-0011)
 - [ ] Phase 3: フロントエンド実装 (TASK-0012 ~ TASK-0019)
 - [ ] Phase 4: 統合テスト (TASK-0020 ~ TASK-0022)
 
