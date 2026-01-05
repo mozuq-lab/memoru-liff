@@ -1,0 +1,38 @@
+[
+  {
+    "ParameterKey": "Environment",
+    "ParameterValue": "dev"
+  },
+  {
+    "ParameterKey": "DomainName",
+    "ParameterValue": "keycloak.example.com"
+  },
+  {
+    "ParameterKey": "HostedZoneId",
+    "ParameterValue": ""
+  },
+  {
+    "ParameterKey": "CertificateArn",
+    "ParameterValue": ""
+  },
+  {
+    "ParameterKey": "VpcCidr",
+    "ParameterValue": "10.0.0.0/16"
+  },
+  {
+    "ParameterKey": "KeycloakImage",
+    "ParameterValue": "quay.io/keycloak/keycloak:24.0"
+  },
+  {
+    "ParameterKey": "KeycloakAdminUser",
+    "ParameterValue": "admin"
+  },
+  {
+    "ParameterKey": "DBInstanceClass",
+    "ParameterValue": "db.t3.micro"
+  },
+  {
+    "ParameterKey": "DBAllocatedStorage",
+    "ParameterValue": "20"
+  }
+]

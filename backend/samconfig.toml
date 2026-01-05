@@ -1,0 +1,59 @@
+# SAM CLI Configuration for Memoru LIFF Backend
+
+version = 0.1
+
+[default]
+[default.global.parameters]
+stack_name = "memoru-backend-dev"
+
+[default.build.parameters]
+cached = true
+parallel = true
+use_container = false
+
+[default.validate.parameters]
+lint = true
+
+[default.deploy.parameters]
+capabilities = "CAPABILITY_IAM CAPABILITY_AUTO_EXPAND"
+confirm_changeset = true
+resolve_s3 = true
+region = "ap-northeast-1"
+parameter_overrides = "Environment=dev KeycloakIssuer=https://keycloak.example.com/realms/memoru"
+
+[default.local_start_api.parameters]
+warm_containers = "EAGER"
+docker_network = "memoru-network"
+
+[default.local_invoke.parameters]
+docker_network = "memoru-network"
+
+# Development environment
+[dev]
+[dev.deploy.parameters]
+stack_name = "memoru-backend-dev"
+capabilities = "CAPABILITY_IAM CAPABILITY_AUTO_EXPAND"
+confirm_changeset = false
+resolve_s3 = true
+region = "ap-northeast-1"
+parameter_overrides = "Environment=dev KeycloakIssuer=https://keycloak.example.com/realms/memoru"
+
+# Staging environment
+[staging]
+[staging.deploy.parameters]
+stack_name = "memoru-backend-staging"
+capabilities = "CAPABILITY_IAM CAPABILITY_AUTO_EXPAND"
+confirm_changeset = true
+resolve_s3 = true
+region = "ap-northeast-1"
+parameter_overrides = "Environment=staging KeycloakIssuer=https://keycloak.example.com/realms/memoru"
+
+# Production environment
+[prod]
+[prod.deploy.parameters]
+stack_name = "memoru-backend-prod"
+capabilities = "CAPABILITY_IAM CAPABILITY_AUTO_EXPAND"
+confirm_changeset = true
+resolve_s3 = true
+region = "ap-northeast-1"
+parameter_overrides = "Environment=prod KeycloakIssuer=https://keycloak.your-domain.com/realms/memoru"

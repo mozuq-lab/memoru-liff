@@ -1,0 +1,58 @@
+{
+  "users": [
+    {
+      "id": "test-user-001",
+      "createdTimestamp": 1704067200000,
+      "username": "test-user",
+      "enabled": true,
+      "totp": false,
+      "emailVerified": true,
+      "firstName": "Test",
+      "lastName": "User",
+      "email": "test@example.com",
+      "attributes": {
+        "line_user_id": ["U1234567890abcdef1234567890abcdef"],
+        "picture": ["https://profile.line-scdn.net/example.jpg"]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "test-password-123",
+          "temporary": false
+        }
+      ],
+      "disableableCredentialTypes": [],
+      "requiredActions": [],
+      "realmRoles": ["user"],
+      "notBefore": 0,
+      "groups": []
+    },
+    {
+      "id": "test-user-002",
+      "createdTimestamp": 1704067200000,
+      "username": "test-admin",
+      "enabled": true,
+      "totp": false,
+      "emailVerified": true,
+      "firstName": "Admin",
+      "lastName": "User",
+      "email": "admin@example.com",
+      "attributes": {
+        "line_user_id": ["U0987654321fedcba0987654321fedcba"],
+        "picture": ["https://profile.line-scdn.net/admin.jpg"]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "admin-password-123",
+          "temporary": false
+        }
+      ],
+      "disableableCredentialTypes": [],
+      "requiredActions": [],
+      "realmRoles": ["user", "admin"],
+      "notBefore": 0,
+      "groups": []
+    }
+  ]
+}

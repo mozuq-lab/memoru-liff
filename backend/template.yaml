@@ -1,0 +1,449 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Memoru LIFF - Backend API and DynamoDB Tables
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 256
+    Runtime: python3.12
+    Architectures:
+      - arm64
+    Environment:
+      Variables:
+        ENVIRONMENT: !Ref Environment
+        USERS_TABLE: !Ref UsersTable
+        CARDS_TABLE: !Ref CardsTable
+        REVIEWS_TABLE: !Ref ReviewsTable
+        LOG_LEVEL: !If [IsProd, INFO, DEBUG]
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Environment name
+
+  KeycloakIssuer:
+    Type: String
+    Default: https://keycloak.example.com/realms/memoru
+    Description: Keycloak OIDC Issuer URL
+
+  LINEChannelAccessToken:
+    Type: String
+    Default: ''
+    NoEcho: true
+    Description: LINE Channel Access Token (stored in Secrets Manager)
+
+  BedrockModelId:
+    Type: String
+    Default: anthropic.claude-3-haiku-20240307-v1:0
+    Description: Amazon Bedrock model ID for AI card generation
+
+Conditions:
+  IsProd: !Equals [!Ref Environment, prod]
+
+Resources:
+  #============================================================
+  # DynamoDB Tables
+  #============================================================
+
+  # Users Table
+  UsersTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub memoru-users-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: line_user_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: line_user_id-index
+          KeySchema:
+            - AttributeName: line_user_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+      DeletionProtectionEnabled: !If [IsProd, true, false]
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: memoru
+
+  # Cards Table
+  CardsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub memoru-cards-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: card_id
+          AttributeType: S
+        - AttributeName: next_review_at
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_id
+          KeyType: HASH
+        - AttributeName: card_id
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: user_id-due-index
+          KeySchema:
+            - AttributeName: user_id
+              KeyType: HASH
+            - AttributeName: next_review_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+      DeletionProtectionEnabled: !If [IsProd, true, false]
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: memoru
+
+  # Reviews Table
+  ReviewsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub memoru-reviews-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: card_id
+          AttributeType: S
+        - AttributeName: reviewed_at
+          AttributeType: S
+        - AttributeName: user_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: card_id
+          KeyType: HASH
+        - AttributeName: reviewed_at
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: user_id-reviewed_at-index
+          KeySchema:
+            - AttributeName: user_id
+              KeyType: HASH
+            - AttributeName: reviewed_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: expires_at
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+      DeletionProtectionEnabled: !If [IsProd, true, false]
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: memoru
+
+  #============================================================
+  # API Gateway (HTTP API)
+  #============================================================
+
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref Environment
+      CorsConfiguration:
+        AllowOrigins:
+          - https://liff.line.me
+          - https://liff.example.com
+          - http://localhost:5173
+          - http://localhost:3000
+        AllowHeaders:
+          - Content-Type
+          - Authorization
+          - X-Amz-Date
+          - X-Api-Key
+          - X-Amz-Security-Token
+        AllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - OPTIONS
+        AllowCredentials: true
+        MaxAge: 3600
+      Auth:
+        DefaultAuthorizer: JwtAuthorizer
+        Authorizers:
+          JwtAuthorizer:
+            AuthorizationScopes:
+              - openid
+              - profile
+            IdentitySource: $request.header.Authorization
+            JwtConfiguration:
+              issuer: !Ref KeycloakIssuer
+              audience:
+                - liff-client
+      Tags:
+        Environment: !Ref Environment
+        Application: memoru
+
+  #============================================================
+  # Lambda Functions
+  #============================================================
+
+  # Main API Function
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub memoru-api-${Environment}
+      CodeUri: src/
+      Handler: api.handler.handler
+      Description: Main API handler for Memoru LIFF application
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UsersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CardsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ReviewsTable
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource: !Sub arn:aws:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}
+      Environment:
+        Variables:
+          KEYCLOAK_ISSUER: !Ref KeycloakIssuer
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+      Events:
+        # User endpoints
+        GetUser:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /users/me
+            Method: GET
+        UpdateUser:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /users/me
+            Method: PUT
+        # Card endpoints
+        ListCards:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /cards
+            Method: GET
+        CreateCard:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /cards
+            Method: POST
+        GetCard:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /cards/{cardId}
+            Method: GET
+        UpdateCard:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /cards/{cardId}
+            Method: PUT
+        DeleteCard:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /cards/{cardId}
+            Method: DELETE
+        # Review endpoints
+        GetDueCards:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /reviews/due
+            Method: GET
+        SubmitReview:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /reviews
+            Method: POST
+        GetReviewStats:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /reviews/stats
+            Method: GET
+        # AI Generation endpoint
+        GenerateCards:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /cards/generate
+            Method: POST
+      Tags:
+        Environment: !Ref Environment
+        Application: memoru
+
+  # LINE Webhook Function
+  LineWebhookFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub memoru-line-webhook-${Environment}
+      CodeUri: src/
+      Handler: webhook.line_handler.handler
+      Description: LINE Messaging API webhook handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UsersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CardsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ReviewsTable
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:memoru-${Environment}-line-*
+      Environment:
+        Variables:
+          LINE_CHANNEL_SECRET_ARN: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:memoru-${Environment}-line-credentials
+      Events:
+        LineWebhook:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /webhook/line
+            Method: POST
+            Auth:
+              Authorizer: NONE
+      Tags:
+        Environment: !Ref Environment
+        Application: memoru
+
+  # Due Push Job Function (Scheduled)
+  DuePushJobFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub memoru-due-push-${Environment}
+      CodeUri: src/
+      Handler: jobs.due_push_handler.handler
+      Description: Scheduled job to send review reminders via LINE
+      Timeout: 300
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref UsersTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref CardsTable
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:memoru-${Environment}-line-*
+      Environment:
+        Variables:
+          LINE_CHANNEL_SECRET_ARN: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:memoru-${Environment}-line-credentials
+      Events:
+        ScheduleRule:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 9 * * ? *)
+            Description: Daily review reminder at 9:00 AM JST (0:00 UTC)
+            Enabled: !If [IsProd, true, false]
+      Tags:
+        Environment: !Ref Environment
+        Application: memoru
+
+Outputs:
+  # DynamoDB Tables
+  UsersTableName:
+    Description: Users table name
+    Value: !Ref UsersTable
+    Export:
+      Name: !Sub memoru-${Environment}-users-table
+
+  UsersTableArn:
+    Description: Users table ARN
+    Value: !GetAtt UsersTable.Arn
+    Export:
+      Name: !Sub memoru-${Environment}-users-table-arn
+
+  CardsTableName:
+    Description: Cards table name
+    Value: !Ref CardsTable
+    Export:
+      Name: !Sub memoru-${Environment}-cards-table
+
+  CardsTableArn:
+    Description: Cards table ARN
+    Value: !GetAtt CardsTable.Arn
+    Export:
+      Name: !Sub memoru-${Environment}-cards-table-arn
+
+  ReviewsTableName:
+    Description: Reviews table name
+    Value: !Ref ReviewsTable
+    Export:
+      Name: !Sub memoru-${Environment}-reviews-table
+
+  ReviewsTableArn:
+    Description: Reviews table ARN
+    Value: !GetAtt ReviewsTable.Arn
+    Export:
+      Name: !Sub memoru-${Environment}-reviews-table-arn
+
+  # API Gateway
+  ApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}
+    Export:
+      Name: !Sub memoru-${Environment}-api-endpoint
+
+  # Lambda Functions
+  ApiFunctionArn:
+    Description: API Lambda function ARN
+    Value: !GetAtt ApiFunction.Arn
+    Export:
+      Name: !Sub memoru-${Environment}-api-function-arn
+
+  LineWebhookFunctionArn:
+    Description: LINE Webhook Lambda function ARN
+    Value: !GetAtt LineWebhookFunction.Arn
+    Export:
+      Name: !Sub memoru-${Environment}-line-webhook-function-arn
