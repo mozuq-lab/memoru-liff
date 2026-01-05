@@ -24,6 +24,11 @@ from ..services.card_service import (
     CardNotFoundError,
     CardLimitExceededError,
 )
+from ..services.review_service import (
+    ReviewService,
+    InvalidGradeError,
+)
+from ..models.review import ReviewRequest
 
 logger = Logger()
 tracer = Tracer()
@@ -32,6 +37,7 @@ app = APIGatewayHttpResolver()
 # Initialize services
 user_service = UserService()
 card_service = CardService()
+review_service = ReviewService()
 
 
 def get_user_id_from_context() -> str:
@@ -333,6 +339,79 @@ def delete_card(card_id: str):
         raise NotFoundError(f"Card not found: {card_id}")
     except Exception as e:
         logger.error(f"Error deleting card: {e}")
+        raise
+
+
+# =============================================================================
+# Review Endpoints
+# =============================================================================
+
+
+@app.get("/cards/due")
+@tracer.capture_method
+def get_due_cards():
+    """Get cards due for review."""
+    user_id = get_user_id_from_context()
+    logger.info(f"Getting due cards for user_id: {user_id}")
+
+    # Get query parameters
+    params = app.current_event.query_string_parameters or {}
+    limit = min(int(params.get("limit", 20)), 100)
+    include_future = params.get("include_future", "false").lower() == "true"
+
+    try:
+        response = review_service.get_due_cards(
+            user_id=user_id,
+            limit=limit,
+            include_future=include_future,
+        )
+        return response.model_dump(mode="json")
+    except Exception as e:
+        logger.error(f"Error getting due cards: {e}")
+        raise
+
+
+@app.post("/reviews/<card_id>")
+@tracer.capture_method
+def submit_review(card_id: str):
+    """Submit a review for a card."""
+    user_id = get_user_id_from_context()
+    logger.info(f"Submitting review for card {card_id} by user_id: {user_id}")
+
+    try:
+        body = app.current_event.json_body
+        request = ReviewRequest(**body)
+    except ValidationError as e:
+        logger.warning(f"Validation error: {e}")
+        return Response(
+            status_code=400,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": "Invalid request", "details": e.errors()}),
+        )
+    except json.JSONDecodeError:
+        return Response(
+            status_code=400,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": "Invalid JSON body"}),
+        )
+
+    try:
+        response = review_service.submit_review(
+            user_id=user_id,
+            card_id=card_id,
+            grade=request.grade,
+        )
+        return response.model_dump(mode="json")
+    except CardNotFoundError:
+        raise NotFoundError(f"Card not found: {card_id}")
+    except InvalidGradeError as e:
+        return Response(
+            status_code=400,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": str(e)}),
+        )
+    except Exception as e:
+        logger.error(f"Error submitting review: {e}")
         raise
 
 
