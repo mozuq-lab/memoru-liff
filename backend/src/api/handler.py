@@ -12,11 +12,17 @@ from aws_lambda_powertools.utilities.typing import LambdaContext
 from pydantic import ValidationError
 
 from ..models.user import LinkLineRequest, LinkLineResponse, UserSettingsRequest, UserSettingsResponse
+from ..models.card import CreateCardRequest, UpdateCardRequest, CardListResponse
 from ..services.user_service import (
     UserService,
     UserNotFoundError,
     UserAlreadyLinkedError,
     LineUserIdAlreadyUsedError,
+)
+from ..services.card_service import (
+    CardService,
+    CardNotFoundError,
+    CardLimitExceededError,
 )
 
 logger = Logger()
@@ -25,6 +31,7 @@ app = APIGatewayHttpResolver()
 
 # Initialize services
 user_service = UserService()
+card_service = CardService()
 
 
 def get_user_id_from_context() -> str:
@@ -164,6 +171,168 @@ def update_user_settings():
         raise NotFoundError("User not found")
     except Exception as e:
         logger.error(f"Error updating settings: {e}")
+        raise
+
+
+# =============================================================================
+# Card Endpoints
+# =============================================================================
+
+
+@app.get("/cards")
+@tracer.capture_method
+def list_cards():
+    """List cards for the current user."""
+    user_id = get_user_id_from_context()
+    logger.info(f"Listing cards for user_id: {user_id}")
+
+    # Get query parameters
+    params = app.current_event.query_string_parameters or {}
+    limit = min(int(params.get("limit", 50)), 100)
+    cursor = params.get("cursor")
+    deck_id = params.get("deck_id")
+
+    try:
+        cards, next_cursor = card_service.list_cards(
+            user_id=user_id,
+            limit=limit,
+            cursor=cursor,
+            deck_id=deck_id,
+        )
+        return CardListResponse(
+            cards=[card.to_response() for card in cards],
+            total=len(cards),
+            next_cursor=next_cursor,
+        ).model_dump(mode="json")
+    except Exception as e:
+        logger.error(f"Error listing cards: {e}")
+        raise
+
+
+@app.post("/cards")
+@tracer.capture_method
+def create_card():
+    """Create a new card."""
+    user_id = get_user_id_from_context()
+    logger.info(f"Creating card for user_id: {user_id}")
+
+    try:
+        body = app.current_event.json_body
+        request = CreateCardRequest(**body)
+    except ValidationError as e:
+        logger.warning(f"Validation error: {e}")
+        return Response(
+            status_code=400,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": "Invalid request", "details": e.errors()}),
+        )
+    except json.JSONDecodeError:
+        return Response(
+            status_code=400,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": "Invalid JSON body"}),
+        )
+
+    try:
+        card = card_service.create_card(
+            user_id=user_id,
+            front=request.front,
+            back=request.back,
+            deck_id=request.deck_id,
+            tags=request.tags,
+        )
+        return Response(
+            status_code=201,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps(card.to_response().model_dump(mode="json")),
+        )
+    except CardLimitExceededError:
+        return Response(
+            status_code=400,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": "Card limit exceeded. Maximum 2000 cards per user."}),
+        )
+    except Exception as e:
+        logger.error(f"Error creating card: {e}")
+        raise
+
+
+@app.get("/cards/<card_id>")
+@tracer.capture_method
+def get_card(card_id: str):
+    """Get a specific card."""
+    user_id = get_user_id_from_context()
+    logger.info(f"Getting card {card_id} for user_id: {user_id}")
+
+    try:
+        card = card_service.get_card(user_id, card_id)
+        return card.to_response().model_dump(mode="json")
+    except CardNotFoundError:
+        raise NotFoundError(f"Card not found: {card_id}")
+    except Exception as e:
+        logger.error(f"Error getting card: {e}")
+        raise
+
+
+@app.put("/cards/<card_id>")
+@tracer.capture_method
+def update_card(card_id: str):
+    """Update a card."""
+    user_id = get_user_id_from_context()
+    logger.info(f"Updating card {card_id} for user_id: {user_id}")
+
+    try:
+        body = app.current_event.json_body
+        request = UpdateCardRequest(**body)
+    except ValidationError as e:
+        logger.warning(f"Validation error: {e}")
+        return Response(
+            status_code=400,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": "Invalid request", "details": e.errors()}),
+        )
+    except json.JSONDecodeError:
+        return Response(
+            status_code=400,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": "Invalid JSON body"}),
+        )
+
+    try:
+        card = card_service.update_card(
+            user_id=user_id,
+            card_id=card_id,
+            front=request.front,
+            back=request.back,
+            deck_id=request.deck_id,
+            tags=request.tags,
+        )
+        return card.to_response().model_dump(mode="json")
+    except CardNotFoundError:
+        raise NotFoundError(f"Card not found: {card_id}")
+    except Exception as e:
+        logger.error(f"Error updating card: {e}")
+        raise
+
+
+@app.delete("/cards/<card_id>")
+@tracer.capture_method
+def delete_card(card_id: str):
+    """Delete a card."""
+    user_id = get_user_id_from_context()
+    logger.info(f"Deleting card {card_id} for user_id: {user_id}")
+
+    try:
+        card_service.delete_card(user_id, card_id)
+        return Response(
+            status_code=204,
+            content_type=content_types.APPLICATION_JSON,
+            body="",
+        )
+    except CardNotFoundError:
+        raise NotFoundError(f"Card not found: {card_id}")
+    except Exception as e:
+        logger.error(f"Error deleting card: {e}")
         raise
 
 
