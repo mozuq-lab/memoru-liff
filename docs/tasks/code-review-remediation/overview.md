@@ -90,7 +90,7 @@ TASK-0029 (C-07) — 独立
 | [x] | [TASK-0030: H-01 datetime統一](TASK-0030.md) | 4h | TDD | 🔵 |
 | [x] | [TASK-0031: H-02 CSP強化](TASK-0031.md) | 4h | DIRECT | 🔵 |
 | [x] | [TASK-0032: H-03 Keycloak HTTPS強制](TASK-0032.md) | 4h | DIRECT | 🔵 |
-| [ ] | [TASK-0033: H-04 LINE連携解除API](TASK-0033.md) | 4h | TDD | 🔵 |
+| [x] | [TASK-0033: H-04 LINE連携解除API](TASK-0033.md) | 4h | TDD | 🔵 |
 | [ ] | [TASK-0034: H-05 通知cron修正](TASK-0034.md) | 4h | DIRECT | 🔵 |
 | [ ] | [TASK-0035: H-06 Race Condition対策](TASK-0035.md) | 4h | TDD | 🔵 |
 | [ ] | [TASK-0036: H-07 Bedrockリトライジッター](TASK-0036.md) | 4h | TDD | 🔵 |

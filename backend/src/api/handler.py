@@ -18,6 +18,7 @@ from ..services.user_service import (
     UserNotFoundError,
     UserAlreadyLinkedError,
     LineUserIdAlreadyUsedError,
+    LineNotLinkedError,
 )
 from ..services.card_service import (
     CardService,
@@ -191,6 +192,27 @@ def update_user_settings():
         raise NotFoundError("User not found")
     except Exception as e:
         logger.error(f"Error updating settings: {e}")
+        raise
+
+
+@app.post("/users/me/unlink-line")
+@tracer.capture_method
+def unlink_line():
+    """Unlink LINE account from current user."""
+    user_id = get_user_id_from_context()
+    logger.info(f"Unlinking LINE account for user_id: {user_id}")
+
+    try:
+        result = user_service.unlink_line(user_id)
+        return {"success": True, "data": result}
+    except LineNotLinkedError as e:
+        return Response(
+            status_code=400,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": "LINE account not linked"}),
+        )
+    except Exception as e:
+        logger.error(f"Error unlinking LINE account: {e}")
         raise
 
 

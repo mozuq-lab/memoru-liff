@@ -258,6 +258,12 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /users/me
             Method: PUT
+        UnlinkLine:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /users/me/unlink-line
+            Method: POST
         # Card endpoints
         ListCards:
           Type: HttpApi
