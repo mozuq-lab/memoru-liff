@@ -2,6 +2,7 @@
 
 import json
 import os
+import random
 import re
 import time
 from dataclasses import dataclass
@@ -154,6 +155,21 @@ class BedrockService:
             processing_time_ms=processing_time_ms,
         )
 
+    def _retry_with_jitter(self, attempt: int) -> float:
+        """Full Jitter Exponential Backoff.
+
+        Implements AWS recommended full jitter pattern:
+        sleep = random(0, min(cap, base * 2^attempt))
+
+        Args:
+            attempt: The attempt number (0-indexed).
+
+        Returns:
+            Delay in seconds with full jitter applied.
+        """
+        max_delay = min(2 ** attempt, 30)  # Cap at 30 seconds
+        return random.uniform(0, max_delay)
+
     def _invoke_with_retry(self, prompt: str) -> str:
         """Invoke Bedrock API with retry logic.
 
@@ -179,14 +195,16 @@ class BedrockService:
             except BedrockRateLimitError as e:
                 last_error = e
                 if attempt < self.MAX_RETRIES:
-                    # Exponential backoff
-                    time.sleep(2 ** attempt)
+                    # Full jitter exponential backoff
+                    delay = self._retry_with_jitter(attempt)
+                    time.sleep(delay)
                     continue
                 raise
             except BedrockInternalError as e:
                 last_error = e
                 if attempt < self.MAX_RETRIES:
-                    time.sleep(1)
+                    delay = self._retry_with_jitter(attempt)
+                    time.sleep(delay)
                     continue
                 raise
 

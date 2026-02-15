@@ -246,6 +246,52 @@ class TestBedrockServiceRetry:
         assert mock_client.invoke_model.call_count == 2
 
 
+class TestBedrockServiceJitter:
+    """Tests for full jitter exponential backoff."""
+
+    @pytest.fixture
+    def bedrock_service(self):
+        """Create BedrockService with mock client."""
+        mock_client = MagicMock()
+        return BedrockService(bedrock_client=mock_client)
+
+    def test_retry_with_jitter_returns_valid_range(self, bedrock_service):
+        """Test that jitter returns value between 0 and max_delay."""
+        # Test multiple attempts to verify randomness
+        for attempt in range(5):
+            delay = bedrock_service._retry_with_jitter(attempt)
+            max_delay = min(2 ** attempt, 30)
+            assert 0 <= delay <= max_delay, f"Attempt {attempt}: {delay} not in [0, {max_delay}]"
+
+    def test_retry_with_jitter_exponential_growth(self, bedrock_service):
+        """Test that max_delay grows exponentially (EDGE-CR-103)."""
+        # Verify exponential growth pattern
+        delay_0 = bedrock_service._retry_with_jitter(0)
+        delay_1 = bedrock_service._retry_with_jitter(1)
+        delay_2 = bedrock_service._retry_with_jitter(2)
+
+        # Max delays should be 1, 2, 4
+        assert delay_0 <= 1
+        assert delay_1 <= 2
+        assert delay_2 <= 4
+
+    def test_retry_with_jitter_max_cap(self, bedrock_service):
+        """Test that max delay is capped at 30 seconds."""
+        # Test large attempt numbers
+        for attempt in [10, 20, 100]:
+            delay = bedrock_service._retry_with_jitter(attempt)
+            assert delay <= 30, f"Attempt {attempt}: {delay} exceeds max cap of 30"
+
+    def test_retry_with_jitter_randomness(self, bedrock_service):
+        """Test that jitter produces different values (statistical test)."""
+        # Run multiple times and verify we get different values
+        delays = [bedrock_service._retry_with_jitter(3) for _ in range(100)]
+        unique_delays = set(delays)
+
+        # Should have at least some variation (not all the same)
+        assert len(unique_delays) > 1, "Jitter should produce varying delays"
+
+
 class TestGenerateCardsValidation:
     """Tests for generate cards input validation."""
 
