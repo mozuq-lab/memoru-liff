@@ -294,7 +294,7 @@ Resources:
           Type: HttpApi
           Properties:
             ApiId: !Ref HttpApi
-            Path: /reviews/due
+            Path: /cards/due
             Method: GET
         SubmitReview:
           Type: HttpApi

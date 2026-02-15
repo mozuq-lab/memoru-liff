@@ -230,7 +230,7 @@ API エンドポイント一覧：
 | GET | `/cards/{cardId}` | カード詳細取得 |
 | PUT | `/cards/{cardId}` | カード更新 |
 | DELETE | `/cards/{cardId}` | カード削除 |
-| GET | `/reviews/due` | 復習期限カード取得 |
+| GET | `/cards/due` | 復習期限カード取得 |
 | POST | `/reviews` | 復習結果送信 |
 | GET | `/reviews/stats` | 復習統計取得 |
 | POST | `/cards/generate` | AI カード生成 |

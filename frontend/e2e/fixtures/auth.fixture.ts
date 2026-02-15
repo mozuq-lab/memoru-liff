@@ -90,7 +90,7 @@ async function setupApiMocks(page: Page) {
   });
 
   // 復習カード取得API
-  await page.route('**/api/reviews/due', (route) => {
+  await page.route('**/api/cards/due', (route) => {
     route.fulfill({
       status: 200,
       contentType: 'application/json',
