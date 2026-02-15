@@ -61,6 +61,7 @@ Conditions:
   HasCertificate: !Not [!Equals [!Ref CertificateArn, '']]
   HasHostedZone: !Not [!Equals [!Ref HostedZoneId, '']]
   IsProd: !Equals [!Ref Environment, prod]
+  CreateNatGateway: !Equals [!Ref Environment, prod]
 
 Resources:
   #============================================================
@@ -135,9 +136,10 @@ Resources:
         - Key: Name
           Value: !Sub memoru-${Environment}-private-subnet-2
 
-  # NAT Gateway (for ECS outbound)
+  # NAT Gateway (for ECS outbound in prod only)
   NatGatewayEIP:
     Type: AWS::EC2::EIP
+    Condition: CreateNatGateway
     DependsOn: InternetGatewayAttachment
     Properties:
       Domain: vpc
@@ -147,6 +149,7 @@ Resources:
 
   NatGateway:
     Type: AWS::EC2::NatGateway
+    Condition: CreateNatGateway
     Properties:
       AllocationId: !GetAtt NatGatewayEIP.AllocationId
       SubnetId: !Ref PublicSubnet1
@@ -193,6 +196,7 @@ Resources:
 
   PrivateRoute:
     Type: AWS::EC2::Route
+    Condition: CreateNatGateway
     Properties:
       RouteTableId: !Ref PrivateRouteTable
       DestinationCidrBlock: 0.0.0.0/0
@@ -545,10 +549,13 @@ Resources:
       DesiredCount: 1
       NetworkConfiguration:
         AwsvpcConfiguration:
-          AssignPublicIp: DISABLED
-          Subnets:
-            - !Ref PrivateSubnet1
-            - !Ref PrivateSubnet2
+          AssignPublicIp: !If [CreateNatGateway, DISABLED, ENABLED]
+          Subnets: !If
+            - CreateNatGateway
+            - - !Ref PrivateSubnet1
+              - !Ref PrivateSubnet2
+            - - !Ref PublicSubnet1
+              - !Ref PublicSubnet2
           SecurityGroups:
             - !Ref ECSSecurityGroup
       LoadBalancers:
