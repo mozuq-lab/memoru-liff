@@ -395,8 +395,8 @@ Resources:
         ScheduleRule:
           Type: Schedule
           Properties:
-            Schedule: cron(0 9 * * ? *)
-            Description: Daily review reminder at 9:00 AM JST (0:00 UTC)
+            Schedule: rate(5 minutes)
+            Description: Check for users with due cards every 5 minutes (notification time check is done in Lambda)
             Enabled: !If [IsProd, true, false]
       Tags:
         Environment: !Ref Environment
