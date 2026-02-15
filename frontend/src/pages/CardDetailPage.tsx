@@ -136,7 +136,7 @@ export const CardDetailPage = () => {
     );
   }
 
-  const dueStatus = getDueStatus(card.due_date);
+  const dueStatus = card.next_review_at ? getDueStatus(card.next_review_at) : null;
 
   return (
     <div className="flex flex-col min-h-screen pb-20">
@@ -222,15 +222,15 @@ export const CardDetailPage = () => {
                 <span className="text-sm text-gray-600">次回復習日</span>
                 <span
                   className={`text-sm font-medium ${
-                    dueStatus.status === 'overdue'
+                    dueStatus?.status === 'overdue'
                       ? 'text-red-600'
-                      : dueStatus.status === 'today'
+                      : dueStatus?.status === 'today'
                       ? 'text-orange-600'
                       : 'text-gray-800'
                   }`}
                   data-testid="due-date"
                 >
-                  {formatDueDate(card.due_date)}
+                  {card.next_review_at ? formatDueDate(card.next_review_at) : '-'}
                 </span>
               </div>
               <div className="flex justify-between items-center mt-2">

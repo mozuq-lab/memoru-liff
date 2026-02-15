@@ -8,8 +8,8 @@ interface CardsContextType {
   error: Error | null;
   fetchCards: () => Promise<void>;
   addCard: (card: Card) => void;
-  updateCard: (id: string, updates: Partial<Card>) => void;
-  deleteCard: (id: string) => void;
+  updateCard: (cardId: string, updates: Partial<Card>) => void;
+  deleteCard: (cardId: string) => void;
   dueCount: number;
   fetchDueCount: () => Promise<void>;
 }
@@ -43,14 +43,14 @@ export const CardsProvider = ({ children }: CardsProviderProps) => {
     setCards(prev => [...prev, card]);
   }, []);
 
-  const updateCard = useCallback((id: string, updates: Partial<Card>) => {
+  const updateCard = useCallback((cardId: string, updates: Partial<Card>) => {
     setCards(prev => prev.map(card =>
-      card.id === id ? { ...card, ...updates } : card
+      card.card_id === cardId ? { ...card, ...updates } : card
     ));
   }, []);
 
-  const deleteCard = useCallback((id: string) => {
-    setCards(prev => prev.filter(card => card.id !== id));
+  const deleteCard = useCallback((cardId: string) => {
+    setCards(prev => prev.filter(card => card.card_id !== cardId));
   }, []);
 
   const fetchDueCount = useCallback(async () => {

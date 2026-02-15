@@ -94,9 +94,8 @@ export const LinkLinePage = () => {
       const updatedUser = await usersApi.updateUser({
         notification_time: user?.notification_time,
       });
-      // LINE連携解除はupdateUserでline_user_idをnullにすることで実現
-      // ここでは単にフロントエンドの状態を更新
-      setUser({ ...updatedUser, line_user_id: undefined });
+      // LINE連携解除後のフロントエンド状態を更新
+      setUser({ ...updatedUser, line_linked: false });
       setSuccessMessage('LINE連携を解除しました');
     } catch (err) {
       setError('LINE連携の解除に失敗しました');
@@ -110,7 +109,7 @@ export const LinkLinePage = () => {
     navigate(-1);
   };
 
-  const isLinked = !!user?.line_user_id;
+  const isLinked = user?.line_linked ?? false;
 
   // 【ローディング表示】
   if (isLoading) {
@@ -210,8 +209,8 @@ export const LinkLinePage = () => {
                   </svg>
                 </div>
                 <div>
-                  <p className="font-medium text-gray-800" data-testid="line-user-id">
-                    LINE ID: {user?.line_user_id}
+                  <p className="font-medium text-gray-800" data-testid="line-status-text">
+                    LINE連携中
                   </p>
                 </div>
               </div>

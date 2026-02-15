@@ -39,7 +39,7 @@ vi.mock('react-router-dom', async () => {
 });
 
 const mockCard: Card = {
-  id: 'card-1',
+  card_id: 'card-1',
   user_id: 'user-1',
   front: 'テスト質問',
   back: 'テスト回答',
@@ -47,7 +47,7 @@ const mockCard: Card = {
   ease_factor: 2.5,
   interval: 7,
   repetitions: 3,
-  due_date: '2024-01-20',
+  next_review_at: '2024-01-20',
   created_at: '2024-01-01T00:00:00Z',
   updated_at: '2024-01-15T00:00:00Z',
 };

@@ -1,11 +1,12 @@
 export interface User {
   user_id: string;
-  email: string;
-  display_name: string;
-  line_user_id?: string;
-  notification_time?: string;
+  display_name?: string | null;
+  picture_url?: string | null;
+  line_linked: boolean;
+  notification_time?: string | null;
+  timezone: string;
   created_at: string;
-  updated_at: string;
+  updated_at?: string | null;
 }
 
 export interface UpdateUserRequest {

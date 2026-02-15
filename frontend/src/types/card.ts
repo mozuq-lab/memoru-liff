@@ -1,26 +1,29 @@
 export interface Card {
-  id: string;
+  card_id: string;
   user_id: string;
   front: string;
   back: string;
+  deck_id?: string | null;
   tags: string[];
-  ease_factor: number;
+  next_review_at?: string | null;
   interval: number;
+  ease_factor: number;
   repetitions: number;
-  due_date: string;
   created_at: string;
-  updated_at: string;
+  updated_at?: string | null;
 }
 
 export interface CreateCardRequest {
   front: string;
   back: string;
+  deck_id?: string;
   tags?: string[];
 }
 
 export interface UpdateCardRequest {
   front?: string;
   back?: string;
+  deck_id?: string;
   tags?: string[];
 }
 
@@ -54,7 +57,9 @@ export interface GenerateCardsResponse {
 export interface DueCard {
   card_id: string;
   front: string;
-  due_date: string;
+  back: string;
+  deck_id?: string | null;
+  due_date?: string | null;
   overdue_days: number;
 }
 

@@ -31,6 +31,15 @@ const mockLogout = vi.fn();
 vi.mock('@/hooks/useAuth', () => ({
   useAuth: () => ({
     logout: mockLogout,
+    user: {
+      access_token: 'test-token',
+      expired: false,
+      profile: {
+        sub: 'user-1',
+        email: 'test@example.com',
+        name: 'テストユーザー',
+      },
+    },
     isAuthenticated: true,
     isLoading: false,
   }),
@@ -48,10 +57,11 @@ vi.mock('react-router-dom', async () => {
 
 const mockUser: User = {
   user_id: 'user-1',
-  email: 'test@example.com',
   display_name: 'テストユーザー',
-  line_user_id: undefined,
+  picture_url: null,
+  line_linked: false,
   notification_time: '09:00',
+  timezone: 'Asia/Tokyo',
   created_at: '2024-01-01T00:00:00Z',
   updated_at: '2024-01-01T00:00:00Z',
 };
@@ -267,7 +277,7 @@ describe('SettingsPage', () => {
 
   describe('LINE連携表示', () => {
     it('LINE連携済みの場合は連携済みと表示される', async () => {
-      const linkedUser = { ...mockUser, line_user_id: 'line-user-123' };
+      const linkedUser = { ...mockUser, line_linked: true };
       mockGetCurrentUser.mockResolvedValue(linkedUser);
 
       renderSettingsPage();

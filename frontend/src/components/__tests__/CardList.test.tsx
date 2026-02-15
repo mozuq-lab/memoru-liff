@@ -11,7 +11,7 @@ import type { Card } from '@/types';
 
 const mockCards: Card[] = [
   {
-    id: 'card-1',
+    card_id: 'card-1',
     user_id: 'user-1',
     front: '質問1',
     back: '回答1',
@@ -19,12 +19,12 @@ const mockCards: Card[] = [
     ease_factor: 2.5,
     interval: 1,
     repetitions: 0,
-    due_date: '2024-01-15',
+    next_review_at: '2024-01-15',
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
   },
   {
-    id: 'card-2',
+    card_id: 'card-2',
     user_id: 'user-1',
     front: '質問2',
     back: '回答2',
@@ -32,7 +32,7 @@ const mockCards: Card[] = [
     ease_factor: 2.5,
     interval: 3,
     repetitions: 1,
-    due_date: '2024-01-20',
+    next_review_at: '2024-01-20',
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
   },
@@ -88,7 +88,7 @@ describe('CardList', () => {
     it('今日のカードは「今日」と表示される', () => {
       const todayCard: Card = {
         ...mockCards[0],
-        due_date: '2024-01-15',
+        next_review_at: '2024-01-15',
       };
       renderCardList([todayCard]);
 
@@ -98,7 +98,7 @@ describe('CardList', () => {
     it('期限切れのカードは「期限切れ」と表示される', () => {
       const overdueCard: Card = {
         ...mockCards[0],
-        due_date: '2024-01-14',
+        next_review_at: '2024-01-14',
       };
       renderCardList([overdueCard]);
 
@@ -108,7 +108,7 @@ describe('CardList', () => {
     it('もうすぐのカードは「もうすぐ」と表示される', () => {
       const upcomingCard: Card = {
         ...mockCards[0],
-        due_date: '2024-01-16',
+        next_review_at: '2024-01-16',
       };
       renderCardList([upcomingCard]);
 

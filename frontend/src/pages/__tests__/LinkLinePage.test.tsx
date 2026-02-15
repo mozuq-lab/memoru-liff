@@ -51,20 +51,22 @@ vi.mock('react-router-dom', async () => {
 
 const mockUnlinkedUser: User = {
   user_id: 'user-1',
-  email: 'test@example.com',
   display_name: 'テストユーザー',
-  line_user_id: undefined,
+  picture_url: null,
+  line_linked: false,
   notification_time: '09:00',
+  timezone: 'Asia/Tokyo',
   created_at: '2024-01-01T00:00:00Z',
   updated_at: '2024-01-01T00:00:00Z',
 };
 
 const mockLinkedUser: User = {
   user_id: 'user-1',
-  email: 'test@example.com',
   display_name: 'テストユーザー',
-  line_user_id: 'line-user-123',
+  picture_url: null,
+  line_linked: true,
   notification_time: '09:00',
+  timezone: 'Asia/Tokyo',
   created_at: '2024-01-01T00:00:00Z',
   updated_at: '2024-01-01T00:00:00Z',
 };
@@ -102,12 +104,12 @@ describe('LinkLinePage', () => {
       });
     });
 
-    it('連携済みの場合はLINE IDが表示される', async () => {
+    it('連携済みの場合は連携中テキストが表示される', async () => {
       mockGetCurrentUser.mockResolvedValue(mockLinkedUser);
       renderLinkLinePage();
 
       await waitFor(() => {
-        expect(screen.getByTestId('line-user-id')).toHaveTextContent('line-user-123');
+        expect(screen.getByTestId('line-status-text')).toHaveTextContent('LINE連携中');
       });
     });
 
@@ -180,7 +182,7 @@ describe('LinkLinePage', () => {
     it('解除ボタンクリックで連携解除が実行される', async () => {
       const user = userEvent.setup();
       mockGetCurrentUser.mockResolvedValue(mockLinkedUser);
-      mockUpdateUser.mockResolvedValue({ ...mockLinkedUser, line_user_id: undefined });
+      mockUpdateUser.mockResolvedValue({ ...mockLinkedUser, line_linked: false });
 
       renderLinkLinePage();
 

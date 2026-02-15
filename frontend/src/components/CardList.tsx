@@ -20,7 +20,7 @@ export const CardList = ({ cards }: CardListProps) => {
   return (
     <div className="space-y-3" role="list" aria-label="カード一覧">
       {cards.map((card) => (
-        <CardListItem key={card.id} card={card} />
+        <CardListItem key={card.card_id} card={card} />
       ))}
     </div>
   );
@@ -35,7 +35,7 @@ interface CardListItemProps {
  * 【実装方針】: 個別カードの表示とリンク
  */
 const CardListItem = ({ card }: CardListItemProps) => {
-  const dueStatus = getDueStatus(card.due_date);
+  const dueStatus = card.next_review_at ? getDueStatus(card.next_review_at) : null;
 
   // ステータスに応じた色設定
   const statusColors: Record<string, string> = {
@@ -47,10 +47,10 @@ const CardListItem = ({ card }: CardListItemProps) => {
 
   return (
     <Link
-      to={`/cards/${card.id}`}
+      to={`/cards/${card.card_id}`}
       className="block bg-white rounded-lg shadow p-4 hover:bg-gray-50 active:bg-gray-100 transition-colors"
       role="listitem"
-      data-testid={`card-item-${card.id}`}
+      data-testid={`card-item-${card.card_id}`}
     >
       <div className="flex justify-between items-start">
         <div className="flex-1 min-w-0">
@@ -61,18 +61,22 @@ const CardListItem = ({ card }: CardListItemProps) => {
             {card.back}
           </p>
         </div>
-        <div className="ml-4 flex-shrink-0">
-          <span
-            className={`text-xs px-2 py-1 rounded ${statusColors[dueStatus.status]}`}
-            data-testid="due-status"
-          >
-            {dueStatus.label}
-          </span>
+        {dueStatus && (
+          <div className="ml-4 flex-shrink-0">
+            <span
+              className={`text-xs px-2 py-1 rounded ${statusColors[dueStatus.status]}`}
+              data-testid="due-status"
+            >
+              {dueStatus.label}
+            </span>
+          </div>
+        )}
+      </div>
+      {card.next_review_at && (
+        <div className="mt-2 text-xs text-gray-400" data-testid="due-date">
+          次回復習: {formatDueDate(card.next_review_at)}
         </div>
-      </div>
-      <div className="mt-2 text-xs text-gray-400" data-testid="due-date">
-        次回復習: {formatDueDate(card.due_date)}
-      </div>
+      )}
     </Link>
   );
 };

@@ -26,7 +26,7 @@ const NOTIFICATION_TIMES = [
  */
 export const SettingsPage = () => {
   const navigate = useNavigate();
-  const { logout } = useAuth();
+  const { logout, user: authUser } = useAuth();
   const [user, setUser] = useState<User | null>(null);
   const [selectedTime, setSelectedTime] = useState<string>('09:00');
   const [isLoading, setIsLoading] = useState(true);
@@ -222,7 +222,7 @@ export const SettingsPage = () => {
           <div className="py-3 border-b border-gray-200">
             <span className="text-sm text-gray-600">メールアドレス</span>
             <p className="text-gray-800 mt-1" data-testid="user-email">
-              {user?.email || '-'}
+              {authUser?.profile?.email || '-'}
             </p>
           </div>
 
@@ -251,7 +251,7 @@ export const SettingsPage = () => {
             </svg>
           </Link>
 
-          {user?.line_user_id && (
+          {user?.line_linked && (
             <p className="text-sm text-green-600 mt-2" data-testid="line-connected">
               連携済み
             </p>
