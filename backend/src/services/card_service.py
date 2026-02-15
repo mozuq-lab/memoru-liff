@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
 import boto3
+from boto3.dynamodb.types import TypeSerializer
 from botocore.exceptions import ClientError
 
 from ..models.card import Card
@@ -33,14 +34,16 @@ class CardService:
 
     MAX_CARDS_PER_USER = 2000
 
-    def __init__(self, table_name: Optional[str] = None, dynamodb_resource=None):
+    def __init__(self, table_name: Optional[str] = None, dynamodb_resource=None, users_table_name: Optional[str] = None):
         """Initialize CardService.
 
         Args:
             table_name: DynamoDB table name. Defaults to CARDS_TABLE env var.
             dynamodb_resource: Optional boto3 DynamoDB resource for testing.
+            users_table_name: DynamoDB users table name. Defaults to USERS_TABLE env var.
         """
         self.table_name = table_name or os.environ.get("CARDS_TABLE", "memoru-cards-dev")
+        self.users_table_name = users_table_name or os.environ.get("USERS_TABLE", "memoru-users-dev")
 
         if dynamodb_resource:
             self.dynamodb = dynamodb_resource
@@ -52,6 +55,7 @@ class CardService:
                 self.dynamodb = boto3.resource("dynamodb")
 
         self.table = self.dynamodb.Table(self.table_name)
+        self.users_table = self.dynamodb.Table(self.users_table_name)
 
     def create_card(
         self,
@@ -76,11 +80,6 @@ class CardService:
         Raises:
             CardLimitExceededError: If user exceeds card limit.
         """
-        # Check card count limit
-        current_count = self.get_card_count(user_id)
-        if current_count >= self.MAX_CARDS_PER_USER:
-            raise CardLimitExceededError(f"Card limit of {self.MAX_CARDS_PER_USER} exceeded")
-
         now = datetime.now(timezone.utc)
         card = Card(
             user_id=user_id,
@@ -93,9 +92,44 @@ class CardService:
         )
 
         try:
-            self.table.put_item(Item=card.to_dynamodb_item())
+            # Use TransactWriteItems to atomically:
+            # 1. Increment card_count in users table with condition check
+            # 2. Create the card in cards table
+            client = self.dynamodb.meta.client
+            serializer = TypeSerializer()
+
+            # Serialize the card item
+            card_item = card.to_dynamodb_item()
+            serialized_card = {k: serializer.serialize(v) for k, v in card_item.items()}
+
+            # Perform the transactional write
+            client.transact_write_items(
+                TransactItems=[
+                    {
+                        'Update': {
+                            'TableName': self.users_table_name,
+                            'Key': {'user_id': {'S': user_id}},
+                            'UpdateExpression': 'SET card_count = card_count + :inc',
+                            'ConditionExpression': 'card_count < :limit',
+                            'ExpressionAttributeValues': {
+                                ':inc': {'N': '1'},
+                                ':limit': {'N': str(self.MAX_CARDS_PER_USER)}
+                            }
+                        }
+                    },
+                    {
+                        'Put': {
+                            'TableName': self.table_name,
+                            'Item': serialized_card
+                        }
+                    }
+                ]
+            )
             return card
         except ClientError as e:
+            if e.response["Error"]["Code"] == "TransactionCanceledException":
+                # Transaction failed due to condition check
+                raise CardLimitExceededError(f"Card limit of {self.MAX_CARDS_PER_USER} exceeded")
             raise CardServiceError(f"Failed to create card: {e}")
 
     def get_card(self, user_id: str, card_id: str) -> Card:
