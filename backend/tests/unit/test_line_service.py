@@ -63,6 +63,182 @@ class TestSignatureVerification:
 
         assert verify_signature(body, None, channel_secret) is False
 
+    # TASK-0028: Timing attack prevention tests
+
+    def test_verify_signature_with_none_signature_timing_safe(self):
+        """Test that None signature still performs timing-safe comparison.
+
+        This test verifies that hmac.compare_digest is called even for None signatures,
+        preventing timing attacks by ensuring constant-time comparison.
+
+        Requirements:
+            - REQ-TASK-0028-001: hmac.compare_digest must be called for None signature
+            - REQ-TASK-0028-101: None is normalized to empty string
+            - NFR-TASK-0028-101: Constant processing time (timing-safe)
+            - EDGE-TASK-0028-001: None signature returns False with timing-safe comparison
+
+        Test Steps:
+            1. Prepare request body as JSON string
+            2. Call verify_signature with signature=None
+            3. Verify function returns False
+            4. Ensure hmac.compare_digest was called (timing-safe)
+        """
+        # Arrange
+        body = '{"events": []}'
+        channel_secret = "test-secret"
+
+        # Act & Assert
+        # Use patch to verify hmac.compare_digest is called
+        with patch("hmac.compare_digest") as mock_compare:
+            mock_compare.return_value = False
+            result = verify_signature(body, None, channel_secret)
+
+            # Should return False (verification failed)
+            assert result is False
+
+            # Critical: hmac.compare_digest must be called for timing-safe comparison
+            # If early return happens, this assertion will fail
+            mock_compare.assert_called_once()
+            # Verify it was called with expected signature (empty string after normalization)
+            args = mock_compare.call_args[0]
+            assert args[1] == "" or args[1] is None  # signature arg should be empty or None
+
+    def test_verify_signature_with_empty_signature_timing_safe(self):
+        """Test that empty signature still performs timing-safe comparison.
+
+        This test ensures that empty string signature ("") does not trigger
+        an early return, but goes through hmac.compare_digest for timing safety.
+
+        Requirements:
+            - REQ-TASK-0028-002: hmac.compare_digest must be called for empty signature
+            - REQ-TASK-0028-102: Empty string is used as-is (no normalization)
+            - NFR-TASK-0028-101: Constant processing time (timing-safe)
+            - EDGE-TASK-0028-002: Empty signature returns False with timing-safe comparison
+
+        Test Steps:
+            1. Prepare request body as JSON string
+            2. Call verify_signature with signature=""
+            3. Verify function returns False
+            4. Ensure hmac.compare_digest was called (timing-safe)
+        """
+        # Arrange
+        body = '{"events": []}'
+        channel_secret = "test-secret"
+
+        # Act & Assert
+        # Use patch to verify hmac.compare_digest is called
+        with patch("hmac.compare_digest") as mock_compare:
+            mock_compare.return_value = False
+            result = verify_signature(body, "", channel_secret)
+
+            # Should return False (verification failed)
+            assert result is False
+
+            # Critical: hmac.compare_digest must be called for timing-safe comparison
+            # If early return happens (if not signature: return False), this will fail
+            mock_compare.assert_called_once()
+            # Verify it was called with empty string signature
+            args = mock_compare.call_args[0]
+            assert args[1] == ""  # signature arg should be empty string
+
+    def test_verify_signature_success_with_valid_signature(self):
+        """Test successful signature verification with valid signature.
+
+        This test ensures that valid signatures (calculated correctly using
+        HMAC-SHA256) are still verified successfully after the timing-safe fix.
+
+        Requirements:
+            - REQ-TASK-0028-003: Valid signature returns True
+            - NFR-TASK-0028-201: Existing valid signature verification flow must succeed
+
+        Test Steps:
+            1. Prepare request body as JSON string
+            2. Calculate valid signature using HMAC-SHA256 + Base64
+            3. Call verify_signature with valid signature
+            4. Verify function returns True (verification success)
+        """
+        # Arrange
+        body = '{"events": []}'
+        channel_secret = "test-secret"
+
+        # Calculate expected signature (same as LINE server does)
+        hash_value = hmac.new(
+            channel_secret.encode("utf-8"),
+            body.encode("utf-8"),
+            hashlib.sha256,
+        ).digest()
+        signature = base64.b64encode(hash_value).decode("utf-8")
+
+        # Act
+        result = verify_signature(body, signature, channel_secret)
+
+        # Assert
+        assert result is True
+
+    def test_verify_signature_fails_with_invalid_signature(self):
+        """Test failed signature verification with invalid signature.
+
+        This test ensures that invalid signatures (incorrect HMAC values)
+        are correctly rejected by the timing-safe verification.
+
+        Requirements:
+            - REQ-TASK-0028-004: Invalid signature returns False
+            - NFR-TASK-0028-202: Existing invalid signature rejection flow must succeed
+
+        Test Steps:
+            1. Prepare request body as JSON string
+            2. Provide wrong signature string
+            3. Call verify_signature with wrong signature
+            4. Verify function returns False (verification failed)
+        """
+        # Arrange
+        body = '{"events": []}'
+        channel_secret = "test-secret"
+        wrong_signature = "wrong-signature-value"
+
+        # Act
+        result = verify_signature(body, wrong_signature, channel_secret)
+
+        # Assert
+        assert result is False
+
+    def test_verify_signature_fails_with_modified_body(self):
+        """Test signature verification fails when body is modified.
+
+        This test ensures that body tampering is detected by signature verification,
+        even with the timing-safe implementation.
+
+        Requirements:
+            - REQ-TASK-0028-103: Modified body fails signature verification
+
+        Test Steps:
+            1. Prepare original request body
+            2. Calculate valid signature for original body
+            3. Modify the request body (simulate tampering)
+            4. Call verify_signature with modified body + original signature
+            5. Verify function returns False (tampering detected)
+        """
+        # Arrange
+        original_body = '{"events": []}'
+        channel_secret = "test-secret"
+        modified_body = '{"events": [{"type": "message"}]}'
+
+        # Calculate signature for original body
+        hash_value = hmac.new(
+            channel_secret.encode("utf-8"),
+            original_body.encode("utf-8"),
+            hashlib.sha256,
+        ).digest()
+        signature = base64.b64encode(hash_value).decode("utf-8")
+
+        # Act: Verify signature with modified body
+        result = verify_signature(modified_body, signature, channel_secret)
+
+        # Assert
+        # Signature was calculated for original_body, but verifying modified_body
+        # This should fail (tampering detected)
+        assert result is False
+
 
 class TestLineServiceParsing:
     """Tests for LINE event parsing."""

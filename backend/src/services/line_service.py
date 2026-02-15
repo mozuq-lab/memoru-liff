@@ -50,27 +50,35 @@ class LineEvent:
     timestamp: int
 
 
-def verify_signature(body: str, signature: str, channel_secret: str) -> bool:
-    """Verify LINE webhook signature.
+def verify_signature(body: str, signature: str | None, channel_secret: str) -> bool:
+    """Verify LINE webhook signature using timing-safe comparison.
+
+    Implements timing-safe signature verification to prevent timing attacks.
+    The hmac.compare_digest function is always called, regardless of whether
+    the signature is present, to ensure constant-time comparison.
 
     Args:
         body: Request body as string.
-        signature: X-Line-Signature header value.
+        signature: X-Line-Signature header value (None or str).
         channel_secret: LINE Channel Secret.
 
     Returns:
         True if signature is valid, False otherwise.
     """
-    if not signature:
-        return False
+    # Normalize None to empty string for timing-safe comparison
+    if signature is None:
+        signature = ""
 
+    # Calculate expected signature
     hash_value = hmac.new(
         channel_secret.encode("utf-8"),
         body.encode("utf-8"),
         hashlib.sha256,
     ).digest()
     expected = base64.b64encode(hash_value).decode("utf-8")
-    return hmac.compare_digest(signature, expected)
+
+    # Timing-safe comparison (constant-time)
+    return hmac.compare_digest(expected, signature)
 
 
 class LineService:

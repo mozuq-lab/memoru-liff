@@ -53,7 +53,7 @@
 | [x] | [TASK-0025: C-03 OIDCコールバック実装](TASK-0025.md) | 4h | TDD | 🔵 |
 | [x] | [TASK-0026: C-04 DuePush IAM権限修正](TASK-0026.md) | 4h | DIRECT | 🔵 |
 | [x] | [TASK-0027: C-05 204レスポンス処理修正](TASK-0027.md) | 4h | TDD | 🔵 |
-| [ ] | [TASK-0028: C-06 LINE署名タイミング攻撃対策](TASK-0028.md) | 4h | TDD | 🔵 |
+| [x] | [TASK-0028: C-06 LINE署名タイミング攻撃対策](TASK-0028.md) | 4h | TDD | 🔵 |
 | [ ] | [TASK-0029: C-07 環境変数バリデーション有効化](TASK-0029.md) | 4h | TDD | 🔵 |
 
 ### Phase 1 完了条件
