@@ -3,7 +3,7 @@
 import pytest
 from moto import mock_aws
 import boto3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from src.services.card_service import (
     CardService,
@@ -280,7 +280,7 @@ class TestCardServiceDueCards:
     def test_get_due_cards(self, card_service, dynamodb_table):
         """Test getting cards due for review."""
         # Create a card that's due now
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         table = dynamodb_table.Table("memoru-cards-test")
         table.put_item(
             Item={
@@ -329,7 +329,7 @@ class TestCardServiceUpdateReviewData:
             back="Answer",
         )
 
-        next_review = datetime.utcnow() + timedelta(days=3)
+        next_review = datetime.now(timezone.utc) + timedelta(days=3)
         updated = card_service.update_review_data(
             user_id="test-user-id",
             card_id=created.card_id,

@@ -1,7 +1,7 @@
 """Card service for DynamoDB operations."""
 
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
 import boto3
@@ -81,7 +81,7 @@ class CardService:
         if current_count >= self.MAX_CARDS_PER_USER:
             raise CardLimitExceededError(f"Card limit of {self.MAX_CARDS_PER_USER} exceeded")
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         card = Card(
             user_id=user_id,
             front=front,
@@ -177,7 +177,7 @@ class CardService:
         if not update_parts:
             return card
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         update_parts.append("updated_at = :updated_at")
         expression_values[":updated_at"] = now.isoformat()
         card.updated_at = now
@@ -295,7 +295,7 @@ class CardService:
             List of cards due for review.
         """
         if before is None:
-            before = datetime.utcnow()
+            before = datetime.now(timezone.utc)
 
         try:
             response = self.table.query(
@@ -327,7 +327,7 @@ class CardService:
             Number of cards due for review.
         """
         if before is None:
-            before = datetime.utcnow()
+            before = datetime.now(timezone.utc)
 
         try:
             response = self.table.query(
@@ -366,7 +366,7 @@ class CardService:
             Updated Card object.
         """
         try:
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             self.table.update_item(
                 Key={"user_id": user_id, "card_id": card_id},
                 UpdateExpression="SET next_review_at = :next_review, #interval = :interval, "

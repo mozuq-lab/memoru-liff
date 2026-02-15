@@ -65,7 +65,7 @@ class TestNotificationService:
             user_id=user_id,
             line_user_id=line_user_id,
             last_notified_date=last_notified_date,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
         )
 
     def test_process_notifications_success(self, notification_service, mock_services):

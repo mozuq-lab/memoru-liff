@@ -2,6 +2,7 @@
 
 import os
 from datetime import datetime
+from datetime import timezone as dt_timezone
 from typing import List, Optional
 
 import boto3
@@ -92,7 +93,7 @@ class UserService:
             user_id=user_id,
             display_name=display_name,
             picture_url=picture_url,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(dt_timezone.utc),
         )
         try:
             self.table.put_item(
@@ -153,7 +154,7 @@ class UserService:
 
         # Update user with LINE user ID
         try:
-            now = datetime.utcnow()
+            now = datetime.now(dt_timezone.utc)
             self.table.update_item(
                 Key={"user_id": user_id},
                 UpdateExpression="SET line_user_id = :line_id, updated_at = :updated_at",
@@ -234,7 +235,7 @@ class UserService:
                 UpdateExpression="SET last_notified_date = :date, updated_at = :updated_at",
                 ExpressionAttributeValues={
                     ":date": date_str,
-                    ":updated_at": datetime.utcnow().isoformat(),
+                    ":updated_at": datetime.now(dt_timezone.utc).isoformat(),
                 },
             )
         except ClientError as e:
@@ -275,7 +276,7 @@ class UserService:
         if not update_parts:
             return user
 
-        now = datetime.utcnow()
+        now = datetime.now(dt_timezone.utc)
         update_parts.append("updated_at = :updated_at")
         expression_values[":updated_at"] = now.isoformat()
 
