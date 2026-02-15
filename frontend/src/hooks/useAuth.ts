@@ -4,7 +4,7 @@
  * 【テスト対応】: TC-011, TC-012, TC-020
  * 🔵 青信号: 要件定義・TASK-0012.mdに基づく
  */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { authService } from '@/services/auth';
 
 /**
@@ -186,14 +186,18 @@ export const useAuth = (): UseAuthReturn => {
 
   // 【フック戻り値】: 認証状態と操作関数を返却
   // 🔵 青信号: useAuthフックの戻り値仕様
-  return {
-    user,
-    isLoading,
-    isAuthenticated: !!user && !user.expired,
-    error,
-    login,
-    logout,
-    refreshToken,
-    getAccessToken,
-  };
+  // 【メモ化】: useMemoで不要な再レンダリングを削減
+  return useMemo(
+    () => ({
+      user,
+      isLoading,
+      isAuthenticated: !!user && !user.expired,
+      error,
+      login,
+      logout,
+      refreshToken,
+      getAccessToken,
+    }),
+    [user, isLoading, error, login, logout, refreshToken, getAccessToken]
+  );
 };

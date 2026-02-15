@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useMemo, type ReactNode } from 'react';
 import type { Card } from '@/types';
 import { cardsApi } from '@/services/api';
 
@@ -62,8 +62,8 @@ export const CardsProvider = ({ children }: CardsProviderProps) => {
     }
   }, []);
 
-  return (
-    <CardsContext.Provider value={{
+  const value = useMemo(
+    () => ({
       cards,
       isLoading,
       error,
@@ -73,7 +73,12 @@ export const CardsProvider = ({ children }: CardsProviderProps) => {
       deleteCard,
       dueCount,
       fetchDueCount,
-    }}>
+    }),
+    [cards, isLoading, error, fetchCards, addCard, updateCard, deleteCard, dueCount, fetchDueCount]
+  );
+
+  return (
+    <CardsContext.Provider value={value}>
       {children}
     </CardsContext.Provider>
   );
