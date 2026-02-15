@@ -29,7 +29,7 @@
 ## 全体進捗
 
 - [x] Phase 1: Critical 修正（7 タスク）
-- [ ] Phase 2: High 修正（12 タスク）
+- [x] Phase 2: High 修正（12 タスク）
 
 ## マイルストーン
 
@@ -98,13 +98,13 @@ TASK-0029 (C-07) — 独立
 | [x] | [TASK-0038: H-09 ProtectedRoute修正](TASK-0038.md) | 4h | TDD | 🔵 |
 | [x] | [TASK-0039: H-10 Contextメモ化](TASK-0039.md) | 4h | TDD | 🔵 |
 | [x] | [TASK-0040: H-11 NAT Gateway最適化](TASK-0040.md) | 4h | DIRECT | 🟡 |
-| [ ] | [TASK-0041: H-12 CloudWatch Logs保存期間設定](TASK-0041.md) | 4h | DIRECT | 🟡 |
+| [x] | [TASK-0041: H-12 CloudWatch Logs保存期間設定](TASK-0041.md) | 4h | DIRECT | 🟡 |
 
 ### Phase 2 完了条件
 
-- [ ] 全 12 タスクが完了
-- [ ] 全テストがパス（カバレッジ 80% 以上）
-- [ ] 回帰テストに問題なし
+- [x] 全 12 タスクが完了
+- [x] 全テストがパス（カバレッジ 80% 以上）
+- [x] 回帰テストに問題なし
 
 ### 依存関係
 

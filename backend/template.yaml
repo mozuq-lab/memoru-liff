@@ -403,6 +403,31 @@ Resources:
         Application: memoru
 
   #============================================================
+  # CloudWatch Logs - LogGroups with Retention
+  #============================================================
+
+  # API Function LogGroup
+  ApiFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ApiFunction}"
+      RetentionInDays: !If [IsProd, 90, 14]
+
+  # LINE Webhook Function LogGroup
+  LineWebhookFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${LineWebhookFunction}"
+      RetentionInDays: !If [IsProd, 90, 14]
+
+  # Due Push Job Function LogGroup
+  DuePushJobFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${DuePushJobFunction}"
+      RetentionInDays: !If [IsProd, 90, 14]
+
+  #============================================================
   # CloudWatch Monitoring (Production Only)
   #============================================================
 
