@@ -50,7 +50,7 @@
 |------|--------|------|--------|--------|
 | [x] | [TASK-0023: C-01 APIルート統一](TASK-0023.md) | 4h | DIRECT | 🔵 |
 | [x] | [TASK-0024: C-02 APIレスポンス契約統一](TASK-0024.md) | 8h | TDD | 🔵 |
-| [ ] | [TASK-0025: C-03 OIDCコールバック実装](TASK-0025.md) | 4h | TDD | 🔵 |
+| [x] | [TASK-0025: C-03 OIDCコールバック実装](TASK-0025.md) | 4h | TDD | 🔵 |
 | [ ] | [TASK-0026: C-04 DuePush IAM権限修正](TASK-0026.md) | 4h | DIRECT | 🔵 |
 | [ ] | [TASK-0027: C-05 204レスポンス処理修正](TASK-0027.md) | 4h | TDD | 🔵 |
 | [ ] | [TASK-0028: C-06 LINE署名タイミング攻撃対策](TASK-0028.md) | 4h | TDD | 🔵 |
