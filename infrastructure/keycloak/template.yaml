@@ -428,10 +428,12 @@ Resources:
               Value: !Ref DomainName
             - Name: KC_HOSTNAME_STRICT
               Value: 'false'
+            - Name: KC_HOSTNAME_STRICT_HTTPS
+              Value: !If [IsProd, 'true', 'false']
             - Name: KC_PROXY
               Value: edge
             - Name: KC_HTTP_ENABLED
-              Value: 'true'
+              Value: !If [IsProd, 'false', 'true']
             - Name: KC_HEALTH_ENABLED
               Value: 'true'
             - Name: KC_METRICS_ENABLED
