@@ -325,4 +325,168 @@ describe('ApiClient', () => {
       );
     });
   });
+
+  describe('request() - 401 Unauthorized トークンリフレッシュ', () => {
+    it('TC-037-01: 401レスポンスでトークンリフレッシュが呼ばれる', async () => {
+      // 【テストデータ準備】: アクセストークンが期限切れの場合、401 Unauthorized が返される
+      // 【初期条件設定】: 1回目のリクエストで 401、リフレッシュ後の2回目で 200 を返す
+      // 【テスト目的】: REQ-CR-007「401エラー時にトークンリフレッシュを試行」を確認
+      const mockData = { card_id: 'card-123', front: 'test' };
+      mockFetch
+        .mockResolvedValueOnce(new Response(null, { status: 401 }))
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(mockData), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        );
+
+      // authService.refreshToken のモック
+      const mockRefreshToken = vi.fn().mockResolvedValue(undefined);
+      const { authService } = await import('@/services/auth');
+      vi.spyOn(authService, 'refreshToken').mockImplementation(mockRefreshToken);
+
+      const { apiClient } = await import('@/services/api');
+      apiClient.setAccessToken('expired-token');
+
+      // 【実際の処理実行】: 401 レスポンスが返される request を実行
+      const result = await apiClient['request']<typeof mockData>('/cards/card-123', {
+        method: 'GET',
+      });
+
+      // 【結果検証】: refreshToken が1回呼ばれ、リトライで成功すること
+      // 🟡 黄信号: TASK-0037 に基づく
+      expect(mockRefreshToken).toHaveBeenCalledTimes(1);
+      expect(result).toEqual(mockData);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('TC-037-02: リフレッシュ成功後にリトライが行われる', async () => {
+      // 【テストデータ準備】: トークンリフレッシュ後に元のリクエストが再実行される
+      // 【初期条件設定】: 1回目 401、2回目 200 で成功
+      // 【テスト目的】: REQ-CR-102「リフレッシュ成功後に元のリクエストを再実行」を確認
+      const mockData = { cards: [{ card_id: 'card-1', front: 'Q1' }] };
+      mockFetch
+        .mockResolvedValueOnce(new Response(null, { status: 401 }))
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(mockData), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        );
+
+      const mockRefreshToken = vi.fn().mockResolvedValue(undefined);
+      const { authService } = await import('@/services/auth');
+      vi.spyOn(authService, 'refreshToken').mockImplementation(mockRefreshToken);
+
+      const { apiClient } = await import('@/services/api');
+      apiClient.setAccessToken('expired-token');
+
+      // 【実際の処理実行】: getCards() を呼び出し
+      const result = await apiClient.getCards();
+
+      // 【結果検証】: リトライ後に正常なレスポンスが返される
+      // 🟡 黄信号: TASK-0037 に基づく
+      expect(result).toEqual(mockData.cards);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(mockRefreshToken).toHaveBeenCalledTimes(1);
+    });
+
+    it('TC-037-03: 並行リクエストでリフレッシュが1回のみ実行される', async () => {
+      // 【テストデータ準備】: 複数の並行リクエストが同時に 401 を受け取る
+      // 【初期条件設定】: 両リクエストとも 1回目 401、2回目 200
+      // 【テスト目的】: EDGE-CR-003「並行リクエスト時にリフレッシュを1回に制限」を確認
+      const mockData1 = { card_id: 'card-1', front: 'Q1' };
+      const mockData2 = { card_id: 'card-2', front: 'Q2' };
+
+      mockFetch
+        .mockResolvedValueOnce(new Response(null, { status: 401 }))
+        .mockResolvedValueOnce(new Response(null, { status: 401 }))
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(mockData1), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(mockData2), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        );
+
+      const mockRefreshToken = vi.fn().mockResolvedValue(undefined);
+      const { authService } = await import('@/services/auth');
+      vi.spyOn(authService, 'refreshToken').mockImplementation(mockRefreshToken);
+
+      const { apiClient } = await import('@/services/api');
+      apiClient.setAccessToken('expired-token');
+
+      // 【実際の処理実行】: 並行して2つのリクエストを実行
+      const [result1, result2] = await Promise.all([
+        apiClient['request']<typeof mockData1>('/cards/card-1', { method: 'GET' }),
+        apiClient['request']<typeof mockData2>('/cards/card-2', { method: 'GET' }),
+      ]);
+
+      // 【結果検証】: refreshToken が1回のみ呼ばれ、両リクエストが成功すること
+      // 🟡 黄信号: EDGE-CR-003 に基づく
+      expect(mockRefreshToken).toHaveBeenCalledTimes(1);
+      expect(result1).toEqual(mockData1);
+      expect(result2).toEqual(mockData2);
+      expect(mockFetch).toHaveBeenCalledTimes(4); // 401 x2 + 200 x2
+    });
+
+    it('TC-037-04: リフレッシュ失敗時にlogin()が呼ばれる', async () => {
+      // 【テストデータ準備】: トークンリフレッシュが失敗する（リフレッシュトークンも期限切れ）
+      // 【初期条件設定】: 401 レスポンス、refreshToken() が失敗
+      // 【テスト目的】: REQ-CR-103「リフレッシュ失敗時にログイン画面にリダイレクト」を確認
+      mockFetch.mockResolvedValue(new Response(null, { status: 401 }));
+
+      const mockRefreshToken = vi.fn().mockRejectedValue(new Error('Refresh token expired'));
+      const mockLogin = vi.fn().mockResolvedValue(undefined);
+      const { authService } = await import('@/services/auth');
+      vi.spyOn(authService, 'refreshToken').mockImplementation(mockRefreshToken);
+      vi.spyOn(authService, 'login').mockImplementation(mockLogin);
+
+      const { apiClient } = await import('@/services/api');
+      apiClient.setAccessToken('expired-token');
+
+      // 【実際の処理実行】: 401 レスポンスが返されリフレッシュが失敗
+      await expect(
+        apiClient['request']<void>('/cards/card-123', { method: 'GET' })
+      ).rejects.toThrow();
+
+      // 【結果検証】: login() が呼ばれること
+      // 🟡 黄信号: TASK-0037 に基づく
+      expect(mockRefreshToken).toHaveBeenCalledTimes(1);
+      expect(mockLogin).toHaveBeenCalledTimes(1);
+    });
+
+    it('TC-037-05: 401以外のエラーではリフレッシュが呼ばれない', async () => {
+      // 【テストデータ準備】: 404 Not Found など、401以外のエラーレスポンス
+      // 【初期条件設定】: 404 エラーレスポンスを返す
+      // 【テスト目的】: 401以外のエラーでは通常のエラーハンドリングが行われることを確認
+      mockFetch.mockResolvedValue(
+        new Response(JSON.stringify({ message: 'Not found' }), {
+          status: 404,
+        })
+      );
+
+      const mockRefreshToken = vi.fn();
+      const { authService } = await import('@/services/auth');
+      vi.spyOn(authService, 'refreshToken').mockImplementation(mockRefreshToken);
+
+      const { apiClient } = await import('@/services/api');
+      apiClient.setAccessToken('valid-token');
+
+      // 【実際の処理実行】: 404 エラーが返される
+      await expect(
+        apiClient['request']<void>('/cards/nonexistent', { method: 'GET' })
+      ).rejects.toThrow('Not found');
+
+      // 【結果検証】: refreshToken が呼ばれないこと
+      // 🟡 黄信号: 既存のエラーハンドリングとの互換性確認
+      expect(mockRefreshToken).not.toHaveBeenCalled();
+    });
+  });
 });

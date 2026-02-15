@@ -9,11 +9,14 @@ import type {
   UpdateUserRequest,
   LinkLineRequest,
 } from '@/types';
+import { authService } from './auth';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
 class ApiClient {
   private accessToken: string | null = null;
+  private isRefreshing = false;
+  private refreshPromise: Promise<void> | null = null;
 
   setAccessToken(token: string | null) {
     this.accessToken = token;
@@ -37,6 +40,26 @@ class ApiClient {
       headers,
     });
 
+    // Handle 401 Unauthorized - Token Refresh
+    if (response.status === 401) {
+      if (!this.isRefreshing) {
+        this.isRefreshing = true;
+        this.refreshPromise = this.refreshToken();
+      }
+      try {
+        await this.refreshPromise;
+        // Retry the original request after successful refresh
+        return this.request<T>(endpoint, options);
+      } catch {
+        // Refresh failed - redirect to login
+        authService.login();
+        throw new Error('Session expired');
+      } finally {
+        this.isRefreshing = false;
+        this.refreshPromise = null;
+      }
+    }
+
     if (!response.ok) {
       const error = await response.json().catch(() => ({ message: 'Unknown error' }));
       throw new Error(error.message || `HTTP ${response.status}`);
@@ -46,6 +69,13 @@ class ApiClient {
       return undefined as T;
     }
     return response.json();
+  }
+
+  private async refreshToken(): Promise<void> {
+    await authService.refreshToken();
+    // Update access token after refresh
+    const newToken = await authService.getAccessToken();
+    this.setAccessToken(newToken);
   }
 
   // Cards API
