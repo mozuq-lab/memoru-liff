@@ -326,6 +326,227 @@ describe('ApiClient', () => {
     });
   });
 
+  // ---------------------------------------------------------------------------
+  // TASK-0042: API ルート統一 - パス検証
+  // 対応要件: REQ-V2-001, REQ-V2-002, REQ-V2-003, REQ-V2-004
+  // TDD Red フェーズ: 現在の不正なパスに対してテストが FAIL することを確認する
+  // ---------------------------------------------------------------------------
+
+  describe('TASK-0042: API ルート統一 - パス検証', () => {
+    // TC-042-11: REQ-V2-004 - linkLine() パス検証
+    it('TC-042-11: linkLine()が/users/link-lineにPOSTリクエストを送信する', async () => {
+      // 【テスト目的】: REQ-V2-004 - linkLine() が正しいパス /users/link-line に送信することを確認
+      // 【期待動作】: 修正前は /users/me/link-line を使用するため FAIL。修正後に PASS。
+      // Given
+      const mockUser = { user_id: 'test-user', line_user_id: 'U123' };
+      mockFetch.mockResolvedValue(
+        new Response(JSON.stringify(mockUser), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
+
+      // When
+      const { apiClient } = await import('@/services/api');
+      await apiClient.linkLine({ line_user_id: 'U123' });
+
+      // Then: fetch が正しいパスに POST で呼ばれること
+      // 🔵 青信号: REQ-V2-004 に基づく
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://api.example.com/users/link-line',
+        expect.objectContaining({
+          method: 'POST',
+        })
+      );
+    });
+
+    // TC-042-12: REQ-V2-004 - linkLine() リクエストボディ検証
+    it('TC-042-12: linkLine()のリクエストボディが正しくシリアライズされる', async () => {
+      // 【テスト目的】: linkLine() のリクエストボディが JSON.stringify されて送信されること
+      // 【期待動作】: パスの正否に関わらず body は正しくシリアライズされる（既存実装で PASS）
+      // Given
+      const mockUser = { user_id: 'test-user', line_user_id: 'U1234567890abcdef' };
+      mockFetch.mockResolvedValue(
+        new Response(JSON.stringify(mockUser), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
+
+      // When
+      const { apiClient } = await import('@/services/api');
+      await apiClient.linkLine({ line_user_id: 'U1234567890abcdef' });
+
+      // Then: fetch の body が正しくシリアライズされていること
+      // 🔵 青信号: REQ-V2-004 に基づく
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          body: JSON.stringify({ line_user_id: 'U1234567890abcdef' }),
+        })
+      );
+    });
+
+    // TC-042-13: REQ-V2-001 - updateUser() パス検証
+    it('TC-042-13: updateUser()が/users/me/settingsにPUTリクエストを送信する', async () => {
+      // 【テスト目的】: REQ-V2-001 - updateUser() が正しいパス /users/me/settings に送信することを確認
+      // 【期待動作】: 修正前は /users/me を使用するため FAIL。修正後に PASS。
+      // Given
+      const mockUser = { user_id: 'test-user', settings: { notification_time: '21:00' } };
+      mockFetch.mockResolvedValue(
+        new Response(JSON.stringify(mockUser), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
+
+      // When
+      const { apiClient } = await import('@/services/api');
+      await apiClient.updateUser({ notification_time: '21:00' });
+
+      // Then: fetch が /users/me/settings に PUT で呼ばれること
+      // 🔵 青信号: REQ-V2-001 に基づく
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://api.example.com/users/me/settings',
+        expect.objectContaining({
+          method: 'PUT',
+        })
+      );
+    });
+
+    // TC-042-14: REQ-V2-002 - submitReview() パス検証
+    it('TC-042-14: submitReview()が/reviews/{cardId}にPOSTリクエストを送信する', async () => {
+      // 【テスト目的】: REQ-V2-002 - submitReview() が正しいパス /reviews/{cardId} に送信することを確認
+      // 【期待動作】: 現在のフロントエンド実装は既に /reviews/${cardId} を使用しているため PASS（回帰テスト）
+      // Given
+      const mockResponse = { success: true };
+      mockFetch.mockResolvedValue(
+        new Response(JSON.stringify(mockResponse), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
+
+      // When
+      const { apiClient } = await import('@/services/api');
+      await apiClient.submitReview('card-abc-123', 4);
+
+      // Then: fetch が /reviews/card-abc-123 に POST で呼ばれ、body が正しいこと
+      // 🔵 青信号: REQ-V2-002 に基づく
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://api.example.com/reviews/card-abc-123',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ grade: 4 }),
+        })
+      );
+    });
+
+    // TC-042-15: REQ-V2-001 - updateUser() リクエストボディ検証
+    it('TC-042-15: updateUser()のリクエストボディが正しくシリアライズされる', async () => {
+      // 【テスト目的】: updateUser() のリクエストボディが正しく JSON シリアライズされること
+      // 【期待動作】: パスの正否に関わらず body は正しくシリアライズされる（既存実装で PASS）
+      // Given
+      const mockUser = { user_id: 'test-user' };
+      mockFetch.mockResolvedValue(
+        new Response(JSON.stringify(mockUser), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
+
+      // When
+      const requestData = { notification_time: '18:00', timezone: 'America/New_York' };
+      const { apiClient } = await import('@/services/api');
+      await apiClient.updateUser(requestData);
+
+      // Then: fetch の body が正しくシリアライズされていること
+      // 🔵 青信号: REQ-V2-001 に基づく
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          body: JSON.stringify(requestData),
+        })
+      );
+    });
+
+    // TC-042-16: REQ-V2-004 - linkLine() レスポンス型検証
+    it('TC-042-16: linkLine()のレスポンスがUser型として返却される', async () => {
+      // 【テスト目的】: linkLine() のレスポンスが User 型として正しく返却されること
+      // 【期待動作】: パスが正しければレスポンスが User 型で返る（修正後に PASS）
+      // Given
+      const mockUser = {
+        user_id: 'test-user',
+        line_user_id: 'U123',
+        settings: { notification_time: '09:00', timezone: 'Asia/Tokyo' },
+        created_at: '2026-01-01T00:00:00Z',
+      };
+      mockFetch.mockResolvedValue(
+        new Response(JSON.stringify(mockUser), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
+
+      // When
+      const { apiClient } = await import('@/services/api');
+      const result = await apiClient.linkLine({ line_user_id: 'U123' });
+
+      // Then: 戻り値が User 型のオブジェクトであること
+      // 🔵 青信号: REQ-V2-004 に基づく
+      expect(result).toEqual(mockUser);
+      expect(result.user_id).toBe('test-user');
+    });
+
+    // TC-042-35: REQ-V2-004 - 旧パス /users/me/link-line が使用されていないこと
+    it('TC-042-35: linkLine()が旧パス/users/me/link-lineを使用していないこと', async () => {
+      // 【テスト目的】: REQ-V2-004 - linkLine() が旧パス /users/me/link-line を使用していないことを確認
+      // 【期待動作】: 修正前は /users/me/link-line を使用するため FAIL。修正後に PASS。
+      // Given
+      const mockUser = { user_id: 'test-user', line_user_id: 'U123' };
+      mockFetch.mockResolvedValue(
+        new Response(JSON.stringify(mockUser), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
+
+      // When
+      const { apiClient } = await import('@/services/api');
+      await apiClient.linkLine({ line_user_id: 'U123' });
+
+      // Then: 旧パスが使用されておらず、新パスが使用されていること
+      // 🔵 青信号: REQ-V2-004 に基づく
+      const fetchUrl = mockFetch.mock.calls[0][0] as string;
+      expect(fetchUrl).not.toContain('/users/me/link-line');
+      expect(fetchUrl).toContain('/users/link-line');
+    });
+
+    // TC-042-36: REQ-V2-001 - 旧パス PUT /users/me が使用されていないこと
+    it('TC-042-36: updateUser()が/users/me/settingsを使用し旧パス/users/meのみでないこと', async () => {
+      // 【テスト目的】: REQ-V2-001 - updateUser() が旧パス /users/me のみでなく
+      //   /users/me/settings を使用することを確認
+      // 【期待動作】: 修正前は /users/me で FAIL。修正後に PASS。
+      // Given
+      const mockUser = { user_id: 'test-user' };
+      mockFetch.mockResolvedValue(
+        new Response(JSON.stringify(mockUser), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
+
+      // When
+      const { apiClient } = await import('@/services/api');
+      await apiClient.updateUser({ notification_time: '10:00' });
+
+      // Then: URL が /users/me/settings であること（/users/me のみではない）
+      // 🔵 青信号: REQ-V2-001 に基づく
+      const fetchUrl = mockFetch.mock.calls[0][0] as string;
+      expect(fetchUrl).toBe('https://api.example.com/users/me/settings');
+    });
+  });
+
   describe('request() - 401 Unauthorized トークンリフレッシュ', () => {
     it('TC-037-01: 401レスポンスでトークンリフレッシュが呼ばれる', async () => {
       // 【テストデータ準備】: アクセストークンが期限切れの場合、401 Unauthorized が返される

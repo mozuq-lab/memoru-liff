@@ -40,7 +40,7 @@ class ApiClient {
       headers,
     });
 
-    // Handle 401 Unauthorized - Token Refresh
+    // 401 Unauthorized - トークンリフレッシュ処理
     if (response.status === 401) {
       if (!this.isRefreshing) {
         this.isRefreshing = true;
@@ -48,10 +48,10 @@ class ApiClient {
       }
       try {
         await this.refreshPromise;
-        // Retry the original request after successful refresh
+        // リフレッシュ成功後に元のリクエストを再実行
         return this.request<T>(endpoint, options);
       } catch {
-        // Refresh failed - redirect to login
+        // リフレッシュ失敗 - ログイン画面にリダイレクト
         authService.login();
         throw new Error('Session expired');
       } finally {
@@ -73,12 +73,12 @@ class ApiClient {
 
   private async refreshToken(): Promise<void> {
     await authService.refreshToken();
-    // Update access token after refresh
+    // リフレッシュ後に新しいアクセストークンを取得してセット
     const newToken = await authService.getAccessToken();
     this.setAccessToken(newToken);
   }
 
-  // Cards API
+  // カード API
   async getCards(): Promise<Card[]> {
     const response = await this.request<{ cards: Card[] }>('/cards');
     return response.cards;
@@ -125,28 +125,28 @@ class ApiClient {
     return response.total_due_count;
   }
 
-  // Reviews API
+  // レビュー API
   async submitReview(cardId: string, grade: number): Promise<void> {
-    await this.request(`/reviews/${cardId}`, {
+    await this.request<void>(`/reviews/${cardId}`, {
       method: 'POST',
       body: JSON.stringify({ grade }),
     });
   }
 
-  // Users API
+  // ユーザー API
   async getCurrentUser(): Promise<User> {
     return this.request<User>('/users/me');
   }
 
   async updateUser(data: UpdateUserRequest): Promise<User> {
-    return this.request<User>('/users/me', {
+    return this.request<User>('/users/me/settings', {
       method: 'PUT',
       body: JSON.stringify(data),
     });
   }
 
   async linkLine(data: LinkLineRequest): Promise<User> {
-    return this.request<User>('/users/me/link-line', {
+    return this.request<User>('/users/link-line', {
       method: 'POST',
       body: JSON.stringify(data),
     });

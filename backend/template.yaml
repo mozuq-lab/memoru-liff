@@ -256,8 +256,14 @@ Resources:
           Type: HttpApi
           Properties:
             ApiId: !Ref HttpApi
-            Path: /users/me
+            Path: /users/me/settings
             Method: PUT
+        LinkLine:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /users/link-line
+            Method: POST
         UnlinkLine:
           Type: HttpApi
           Properties:
@@ -306,7 +312,7 @@ Resources:
           Type: HttpApi
           Properties:
             ApiId: !Ref HttpApi
-            Path: /reviews
+            Path: /reviews/{cardId}
             Method: POST
         GetReviewStats:
           Type: HttpApi
