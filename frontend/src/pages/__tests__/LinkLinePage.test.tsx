@@ -32,11 +32,13 @@ vi.mock('@/services/api', () => ({
 const mockInitializeLiff = vi.fn();
 const mockGetLiffProfile = vi.fn();
 const mockIsInLiffClient = vi.fn();
+const mockGetLiffIdToken = vi.fn();
 
 vi.mock('@/services/liff', () => ({
   initializeLiff: () => mockInitializeLiff(),
   getLiffProfile: () => mockGetLiffProfile(),
   isInLiffClient: () => mockIsInLiffClient(),
+  getLiffIdToken: () => mockGetLiffIdToken(),
 }));
 
 // useNavigate モック
@@ -92,6 +94,7 @@ describe('LinkLinePage', () => {
       pictureUrl: 'https://example.com/picture.jpg',
     });
     mockIsInLiffClient.mockReturnValue(true);
+    mockGetLiffIdToken.mockReturnValue('test-liff-id-token');
   });
 
   describe('テストケース1: 連携状態の表示（連携済み）', () => {
@@ -155,8 +158,8 @@ describe('LinkLinePage', () => {
       await waitFor(() => {
         expect(mockIsInLiffClient).toHaveBeenCalled();
         expect(mockInitializeLiff).toHaveBeenCalled();
-        expect(mockGetLiffProfile).toHaveBeenCalled();
-        expect(mockLinkLine).toHaveBeenCalledWith({ line_user_id: 'line-user-123' });
+        expect(mockGetLiffIdToken).toHaveBeenCalled();
+        expect(mockLinkLine).toHaveBeenCalledWith({ id_token: 'test-liff-id-token' });
       });
     });
   });

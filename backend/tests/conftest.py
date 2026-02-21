@@ -60,7 +60,7 @@ def api_gateway_event():
                 },
                 "requestId": "request-id",
                 "routeKey": f"{method} {path}",
-                "stage": "test",
+                "stage": "$default",
                 "time": "01/Jan/2024:00:00:00 +0000",
                 "timeEpoch": 1704067200000,
             },

@@ -10,15 +10,7 @@ from pydantic import BaseModel, Field, field_validator
 class LinkLineRequest(BaseModel):
     """Request model for linking LINE account."""
 
-    line_user_id: str = Field(..., description="LINE User ID (U + 32 alphanumeric characters)")
-
-    @field_validator("line_user_id")
-    @classmethod
-    def validate_line_user_id(cls, v: str) -> str:
-        """Validate LINE User ID format."""
-        if not re.match(r"^U[a-f0-9]{32}$", v):
-            raise ValueError("Invalid LINE User ID format. Must be U followed by 32 hex characters.")
-        return v
+    id_token: str = Field(..., min_length=1, description="LIFF ID Token for server-side verification")
 
 
 class LinkLineResponse(BaseModel):

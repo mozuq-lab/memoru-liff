@@ -9,10 +9,15 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import boto3
-import requests
+import httpx
 from botocore.exceptions import ClientError
 
+from aws_lambda_powertools import Logger
+from aws_lambda_powertools.event_handler.exceptions import UnauthorizedError
+
 from .user_service import UserService
+
+logger = Logger()
 
 
 class LineServiceError(Exception):
@@ -102,6 +107,7 @@ class LineService:
         self.channel_access_token = channel_access_token
         self.channel_secret = channel_secret
         self.user_service = user_service or UserService()
+        self.channel_id = os.environ.get("LINE_CHANNEL_ID")
 
         # Load from Secrets Manager if not provided
         if not self.channel_access_token or not self.channel_secret:
@@ -189,6 +195,51 @@ class LineService:
         user = self.user_service.get_user_by_line_id(line_user_id)
         return user.user_id if user else None
 
+    def verify_id_token(self, id_token: str) -> str:
+        """Verify LIFF ID token via LINE API and return line_user_id.
+
+        Calls https://api.line.me/oauth2/v2.1/verify with the LIFF ID token
+        and LINE_CHANNEL_ID, then extracts the 'sub' claim as line_user_id.
+
+        Args:
+            id_token: LIFF SDK getIDToken() result.
+
+        Returns:
+            Verified line_user_id (the 'sub' claim from LINE API response).
+
+        Raises:
+            LineApiError: If LINE_CHANNEL_ID is not configured or network error occurs.
+            UnauthorizedError: If ID token verification fails or 'sub' claim is missing.
+        """
+        if not self.channel_id:
+            raise LineApiError("LINE_CHANNEL_ID not configured")
+
+        try:
+            response = httpx.post(
+                "https://api.line.me/oauth2/v2.1/verify",
+                data={
+                    "id_token": id_token,
+                    "client_id": self.channel_id,
+                },
+                timeout=10,
+            )
+        except httpx.RequestError as e:
+            logger.error(f"ID token verification request failed: {e}")
+            raise LineApiError(f"Failed to verify ID token: {e}") from e
+
+        if response.status_code != 200:
+            logger.warning(f"LINE ID token verification failed: status={response.status_code}")
+            raise UnauthorizedError("LINE ID token verification failed")
+
+        data = response.json()
+        line_user_id = data.get("sub")
+        if not line_user_id:
+            logger.warning("LINE API response missing 'sub' claim")
+            raise UnauthorizedError("Invalid ID token format")
+
+        logger.info("LINE ID token verified successfully")
+        return line_user_id
+
     def reply_message(
         self,
         reply_token: str,
@@ -220,10 +271,10 @@ class LineService:
         }
 
         try:
-            response = requests.post(url, headers=headers, json=payload, timeout=10)
+            response = httpx.post(url, headers=headers, json=payload, timeout=10)
             response.raise_for_status()
             return True
-        except requests.RequestException as e:
+        except httpx.RequestError as e:
             raise LineApiError(f"Failed to send reply: {e}") from e
 
     def push_message(
@@ -257,8 +308,8 @@ class LineService:
         }
 
         try:
-            response = requests.post(url, headers=headers, json=payload, timeout=10)
+            response = httpx.post(url, headers=headers, json=payload, timeout=10)
             response.raise_for_status()
             return True
-        except requests.RequestException as e:
+        except httpx.RequestError as e:
             raise LineApiError(f"Failed to send push: {e}") from e

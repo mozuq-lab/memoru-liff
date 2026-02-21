@@ -15,5 +15,5 @@ export interface UpdateUserRequest {
 }
 
 export interface LinkLineRequest {
-  line_user_id: string;
+  id_token: string;
 }

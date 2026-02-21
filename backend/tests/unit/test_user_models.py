@@ -7,30 +7,27 @@ from src.models.user import LinkLineRequest, UserSettingsRequest, User
 
 
 class TestLinkLineRequest:
-    """Tests for LinkLineRequest model."""
+    """Tests for LinkLineRequest model (TASK-0044: id_token based)."""
 
-    def test_valid_line_user_id(self):
-        """Test valid LINE user ID format."""
-        request = LinkLineRequest(line_user_id="U1234567890abcdef1234567890abcdef")
-        assert request.line_user_id == "U1234567890abcdef1234567890abcdef"
+    def test_valid_id_token(self):
+        """Test valid LIFF ID token."""
+        request = LinkLineRequest(id_token="eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.test")
+        assert request.id_token == "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.test"
 
-    def test_invalid_line_user_id_no_prefix(self):
-        """Test invalid LINE user ID without U prefix."""
-        with pytest.raises(ValidationError) as exc_info:
-            LinkLineRequest(line_user_id="1234567890abcdef1234567890abcdef1")
-        assert "Invalid LINE User ID format" in str(exc_info.value)
+    def test_empty_id_token_raises_validation_error(self):
+        """Test that empty id_token raises ValidationError."""
+        with pytest.raises(ValidationError):
+            LinkLineRequest(id_token="")
 
-    def test_invalid_line_user_id_wrong_length(self):
-        """Test invalid LINE user ID with wrong length."""
-        with pytest.raises(ValidationError) as exc_info:
-            LinkLineRequest(line_user_id="U12345")
-        assert "Invalid LINE User ID format" in str(exc_info.value)
+    def test_missing_id_token_raises_validation_error(self):
+        """Test that missing id_token raises ValidationError."""
+        with pytest.raises(ValidationError):
+            LinkLineRequest()
 
-    def test_invalid_line_user_id_uppercase_hex(self):
-        """Test invalid LINE user ID with uppercase hex."""
-        with pytest.raises(ValidationError) as exc_info:
-            LinkLineRequest(line_user_id="U1234567890ABCDEF1234567890ABCDEF")
-        assert "Invalid LINE User ID format" in str(exc_info.value)
+    def test_id_token_any_non_empty_string(self):
+        """Test that any non-empty string is accepted as id_token."""
+        request = LinkLineRequest(id_token="any-non-empty-string")
+        assert request.id_token == "any-non-empty-string"
 
 
 class TestUserSettingsRequest:

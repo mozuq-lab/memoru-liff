@@ -358,7 +358,7 @@ class TestLineServiceApi:
             channel_secret="test-secret",
         )
 
-    @patch("src.services.line_service.requests.post")
+    @patch("src.services.line_service.httpx.post")
     def test_reply_message_success(self, mock_post, line_service):
         """Test successful reply message."""
         mock_post.return_value.raise_for_status = MagicMock()
@@ -371,7 +371,7 @@ class TestLineServiceApi:
         assert result is True
         mock_post.assert_called_once()
 
-    @patch("src.services.line_service.requests.post")
+    @patch("src.services.line_service.httpx.post")
     def test_push_message_success(self, mock_post, line_service):
         """Test successful push message."""
         mock_post.return_value.raise_for_status = MagicMock()

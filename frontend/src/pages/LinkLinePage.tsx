@@ -1,8 +1,10 @@
 /**
  * 【機能概要】: LINE連携画面
  * 【実装方針】: LINE連携の状態表示と連携/解除処理を提供
- * 【テスト対応】: TASK-0019 テストケース1〜7
- * 🔵 青信号: user-stories.md 1.2より
+ * 【セキュリティ】: liff.getIDToken() で取得したIDトークンをサーバーに送信し、
+ *                  サーバー側で LINE API を通じて検証する (TASK-0044)
+ * 【テスト対応】: TASK-0019 テストケース1〜7, TASK-0044 TC-14〜16
+ * 🔵 青信号: user-stories.md 1.2, REQ-V2-021〜023より
  */
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -10,7 +12,7 @@ import { Navigation } from '@/components/Navigation';
 import { Loading } from '@/components/common/Loading';
 import { Error } from '@/components/common/Error';
 import { usersApi } from '@/services/api';
-import { getLiffProfile, initializeLiff, isInLiffClient } from '@/services/liff';
+import { getLiffIdToken, initializeLiff, isInLiffClient } from '@/services/liff';
 import type { User } from '@/types';
 
 /**
@@ -68,12 +70,17 @@ export const LinkLinePage = () => {
       // LIFF SDKを初期化
       await initializeLiff();
 
-      // LINEプロフィールを取得
-      const profile = await getLiffProfile();
+      // LIFF ID トークンを取得
+      const idToken = getLiffIdToken();
+      if (!idToken) {
+        setError('LINEの認証情報を取得できませんでした');
+        setIsLinking(false);
+        return;
+      }
 
       // サーバーに連携リクエスト
       const updatedUser = await usersApi.linkLine({
-        line_user_id: profile.userId,
+        id_token: idToken,
       });
 
       setUser(updatedUser);

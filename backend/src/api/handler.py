@@ -11,7 +11,7 @@ from aws_lambda_powertools.logging import correlation_paths
 from aws_lambda_powertools.utilities.typing import LambdaContext
 from pydantic import ValidationError
 
-from ..models.user import LinkLineRequest, LinkLineResponse, UserSettingsRequest, UserSettingsResponse
+from ..models.user import LinkLineResponse, UserSettingsRequest, UserSettingsResponse
 from ..models.card import CreateCardRequest, UpdateCardRequest, CardListResponse
 from ..services.user_service import (
     UserService,
@@ -29,6 +29,7 @@ from ..services.review_service import (
     ReviewService,
     InvalidGradeError,
 )
+from ..services.line_service import LineService, LineApiError
 from ..models.review import ReviewRequest
 from ..models.generate import (
     GenerateCardsRequest,
@@ -53,6 +54,7 @@ user_service = UserService()
 card_service = CardService()
 review_service = ReviewService()
 bedrock_service = BedrockService()
+line_service = LineService()
 
 
 def get_user_id_from_context() -> str:
@@ -110,14 +112,6 @@ def link_line_account():
 
     try:
         body = app.current_event.json_body
-        request = LinkLineRequest(**body)
-    except ValidationError as e:
-        logger.warning(f"Validation error: {e}")
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid request", "details": e.errors()}),
-        )
     except json.JSONDecodeError:
         return Response(
             status_code=400,
@@ -125,12 +119,25 @@ def link_line_account():
             body=json.dumps({"error": "Invalid JSON body"}),
         )
 
+    # Validate id_token presence and non-empty
+    id_token = body.get("id_token") if body else None
+    if not id_token:
+        return Response(
+            status_code=400,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": "id_token is required"}),
+        )
+
     try:
         # Ensure user exists
         user_service.get_or_create_user(user_id)
-        # Link LINE account
-        user_service.link_line(user_id, request.line_user_id)
+        # Verify LINE ID token and get line_user_id
+        line_user_id = line_service.verify_id_token(id_token)
+        # Link LINE account with verified line_user_id
+        user_service.link_line(user_id, line_user_id)
         return LinkLineResponse(success=True, message="LINE account linked successfully").model_dump()
+    except UnauthorizedError:
+        raise
     except UserAlreadyLinkedError:
         return Response(
             status_code=409,
@@ -205,7 +212,7 @@ def unlink_line():
     try:
         result = user_service.unlink_line(user_id)
         return {"success": True, "data": result}
-    except LineNotLinkedError as e:
+    except LineNotLinkedError:
         return Response(
             status_code=400,
             content_type=content_types.APPLICATION_JSON,

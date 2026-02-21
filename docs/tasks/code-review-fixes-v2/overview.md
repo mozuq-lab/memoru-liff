@@ -65,7 +65,7 @@ TASK-0042 → TASK-0044（Phase 2）
 
 ### タスク一覧
 
-- [ ] [TASK-0044: LINE連携本人性検証 + httpx統一](TASK-0044.md) - 8h (TDD) 🔵
+- [x] [TASK-0044: LINE連携本人性検証 + httpx統一](TASK-0044.md) - 8h (TDD) 🔵
 - [ ] [TASK-0045: レスポンスDTO統一 + unlinkLine API使用](TASK-0045.md) - 8h (TDD) 🔵
 - [ ] [TASK-0046: 通知時刻/タイムゾーン判定](TASK-0046.md) - 8h (TDD) 🔵
 - [ ] [TASK-0047: 設定整合性統一（環境変数名・OIDCクライアントID）](TASK-0047.md) - 4h (DIRECT) 🔵

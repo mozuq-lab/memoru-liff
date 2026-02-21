@@ -43,6 +43,11 @@ Parameters:
     Default: anthropic.claude-3-haiku-20240307-v1:0
     Description: Amazon Bedrock model ID for AI card generation
 
+  LineChannelId:
+    Type: String
+    Default: ''
+    Description: LINE Login Channel ID for ID token verification
+
 Conditions:
   IsProd: !Equals [!Ref Environment, prod]
 
@@ -244,6 +249,7 @@ Resources:
         Variables:
           KEYCLOAK_ISSUER: !Ref KeycloakIssuer
           BEDROCK_MODEL_ID: !Ref BedrockModelId
+          LINE_CHANNEL_ID: !Ref LineChannelId
       Events:
         # User endpoints
         GetUser:
