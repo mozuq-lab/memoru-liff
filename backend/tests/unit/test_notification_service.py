@@ -79,7 +79,8 @@ class TestNotificationService:
         line_service.push_message.return_value = True
 
         # Process
-        current_time = datetime(2024, 1, 5, 9, 0, 0, tzinfo=timezone.utc)
+        # UTC 00:00 = JST 09:00 → デフォルト notification_time='09:00', timezone='Asia/Tokyo' に一致
+        current_time = datetime(2024, 1, 5, 0, 0, 0, tzinfo=timezone.utc)
         result = notification_service.process_notifications(current_time)
 
         # Verify
@@ -105,7 +106,8 @@ class TestNotificationService:
         user_service.get_linked_users.return_value = [user]
 
         # Process
-        current_time = datetime(2024, 1, 5, 9, 0, 0, tzinfo=timezone.utc)
+        # UTC 00:00 = JST 09:00 → notification_time 一致だが last_notified_date でスキップ
+        current_time = datetime(2024, 1, 5, 0, 0, 0, tzinfo=timezone.utc)
         result = notification_service.process_notifications(current_time)
 
         # Verify
@@ -125,7 +127,8 @@ class TestNotificationService:
         card_service.get_due_card_count.return_value = 0
 
         # Process
-        current_time = datetime(2024, 1, 5, 9, 0, 0, tzinfo=timezone.utc)
+        # UTC 00:00 = JST 09:00 → notification_time 一致だがカードなしでスキップ
+        current_time = datetime(2024, 1, 5, 0, 0, 0, tzinfo=timezone.utc)
         result = notification_service.process_notifications(current_time)
 
         # Verify
@@ -150,7 +153,8 @@ class TestNotificationService:
         line_service.push_message.return_value = True
 
         # Process
-        current_time = datetime(2024, 1, 5, 9, 0, 0, tzinfo=timezone.utc)
+        # UTC 00:00 = JST 09:00 → デフォルト notification_time='09:00', timezone='Asia/Tokyo' に一致
+        current_time = datetime(2024, 1, 5, 0, 0, 0, tzinfo=timezone.utc)
         result = notification_service.process_notifications(current_time)
 
         # Verify
@@ -171,7 +175,8 @@ class TestNotificationService:
         line_service.push_message.side_effect = LineApiError("User blocked the bot")
 
         # Process
-        current_time = datetime(2024, 1, 5, 9, 0, 0, tzinfo=timezone.utc)
+        # UTC 00:00 = JST 09:00 → notification_time 一致、LINE API エラーをテスト
+        current_time = datetime(2024, 1, 5, 0, 0, 0, tzinfo=timezone.utc)
         result = notification_service.process_notifications(current_time)
 
         # Verify - error is logged but processing continues
@@ -204,7 +209,8 @@ class TestNotificationService:
         line_service.push_message.side_effect = push_side_effect
 
         # Process
-        current_time = datetime(2024, 1, 5, 9, 0, 0, tzinfo=timezone.utc)
+        # UTC 00:00 = JST 09:00 → デフォルト notification_time='09:00', timezone='Asia/Tokyo' に一致
+        current_time = datetime(2024, 1, 5, 0, 0, 0, tzinfo=timezone.utc)
         result = notification_service.process_notifications(current_time)
 
         # Verify
@@ -222,7 +228,7 @@ class TestNotificationService:
         user_service.get_linked_users.side_effect = Exception("DynamoDB error")
 
         # Process
-        current_time = datetime(2024, 1, 5, 9, 0, 0, tzinfo=timezone.utc)
+        current_time = datetime(2024, 1, 5, 0, 0, 0, tzinfo=timezone.utc)
         result = notification_service.process_notifications(current_time)
 
         # Verify

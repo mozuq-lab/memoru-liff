@@ -1,8 +1,10 @@
 """Notification service for sending review reminders."""
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
+# 【インポート追加】: タイムゾーン変換に Python 3.9+ 標準ライブラリの zoneinfo を使用 🔵
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from aws_lambda_powertools import Logger
 
@@ -44,6 +46,54 @@ class NotificationService:
         self.card_service = card_service or CardService()
         self.line_service = line_service or LineService()
 
+    def should_notify(self, user, current_utc: datetime) -> bool:
+        """
+        【機能概要】: ユーザーのローカル時刻が notification_time と一致するかを判定する
+        【実装方針】: settings 辞書から timezone と notification_time を取得し、UTC→ローカル変換後に ±5分精度で比較する
+        【テスト対応】: TC-001〜TC-008, TC-011〜TC-018 を通すための最小実装
+        🔵 REQ-V2-041, REQ-V2-042, NFR-V2-301: タイムゾーン考慮 + 時刻一致判定 + ±5分精度
+        Args:
+            user: User オブジェクト（settings に timezone と notification_time を持つ）
+            current_utc: 現在の UTC 日時（timezone-aware）
+        Returns:
+            bool: ローカル時刻が notification_time の ±5分以内なら True
+        """
+        # 【タイムゾーン取得】: settings 辞書から timezone を取得。なければ Asia/Tokyo をデフォルトとして使用 🔵
+        tz_name = user.settings.get("timezone", "Asia/Tokyo") if user.settings else "Asia/Tokyo"
+
+        # 【タイムゾーン変換準備】: ZoneInfo でタイムゾーンオブジェクトを生成。無効な名前は Asia/Tokyo にフォールバック 🟡
+        try:
+            user_tz = ZoneInfo(tz_name)
+        except (ZoneInfoNotFoundError, Exception):
+            # 【エラーハンドリング】: 無効なタイムゾーン名の場合は Asia/Tokyo にフォールバックして処理を継続 🟡
+            logger.warning(f"Invalid timezone '{tz_name}', falling back to Asia/Tokyo")
+            user_tz = ZoneInfo("Asia/Tokyo")
+
+        # 【UTC→ローカル変換】: ユーザーのローカル時刻を計算する 🔵
+        local_time = current_utc.astimezone(user_tz)
+
+        # 【notification_time 取得】: settings 辞書から通知時刻を取得。なければ '09:00' をデフォルトとして使用 🟡
+        notification_time = user.settings.get("notification_time", "09:00") if user.settings else "09:00"
+
+        # 【時刻パース】: HH:MM 形式の文字列を時・分に変換する 🔵
+        notif_hour, notif_min = map(int, notification_time.split(":"))
+        local_hour, local_min = local_time.hour, local_time.minute
+
+        # 【分単位変換】: 比較のために時・分を合計分数に変換する 🔵
+        notif_total_min = notif_hour * 60 + notif_min
+        local_total_min = local_hour * 60 + local_min
+
+        # 【差分計算】: 絶対値差分を計算する 🔵
+        diff = abs(local_total_min - notif_total_min)
+
+        # 【日付境界補正】: 23:58 と 00:02 のように日付をまたぐ場合の差分を補正する 🟡
+        # 差分が 12時間（720分）を超える場合、24時間から引くことで正しい差分を得る
+        if diff > 720:
+            diff = 1440 - diff
+
+        # 【判定】: EventBridge の 5分実行間隔に合わせて ±5分以内なら通知対象とする 🔵
+        return diff <= 5
+
     def process_notifications(self, current_time: datetime) -> NotificationResult:
         """Process and send notifications to all eligible users.
 
@@ -78,6 +128,17 @@ class NotificationService:
                 # Check if already notified today
                 if user.last_notified_date == today_str:
                     logger.debug(f"User {user.user_id} already notified today")
+                    result.skipped += 1
+                    continue
+
+                # 【タイムゾーン考慮の時刻一致チェック】: ユーザーのローカル時刻が notification_time と一致するか判定 🔵
+                # REQ-V2-041: タイムゾーンを考慮して通知時刻が一致するユーザーにのみ通知を送信する
+                if not self.should_notify(user, current_time):
+                    logger.debug(
+                        f"User {user.user_id} notification time does not match "
+                        f"(tz={user.settings.get('timezone', 'Asia/Tokyo') if user.settings else 'Asia/Tokyo'}, "
+                        f"notification_time={user.settings.get('notification_time', '09:00') if user.settings else '09:00'})"
+                    )
                     result.skipped += 1
                     continue
 
