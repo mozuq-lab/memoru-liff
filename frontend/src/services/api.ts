@@ -151,6 +151,12 @@ class ApiClient {
       body: JSON.stringify(data),
     });
   }
+
+  async unlinkLine(): Promise<User> {
+    return this.request<User>('/users/me/unlink-line', {
+      method: 'POST',
+    });
+  }
 }
 
 export const apiClient = new ApiClient();
@@ -174,4 +180,5 @@ export const usersApi = {
   getCurrentUser: () => apiClient.getCurrentUser(),
   updateUser: (data: UpdateUserRequest) => apiClient.updateUser(data),
   linkLine: (data: LinkLineRequest) => apiClient.linkLine(data),
+  unlinkLine: () => apiClient.unlinkLine(),
 };

@@ -19,12 +19,14 @@ vi.mock('@/components/Navigation', () => ({
 const mockGetCurrentUser = vi.fn();
 const mockUpdateUser = vi.fn();
 const mockLinkLine = vi.fn();
+const mockUnlinkLine = vi.fn();
 
 vi.mock('@/services/api', () => ({
   usersApi: {
     getCurrentUser: () => mockGetCurrentUser(),
     updateUser: (...args: unknown[]) => mockUpdateUser(...args),
     linkLine: (...args: unknown[]) => mockLinkLine(...args),
+    unlinkLine: () => mockUnlinkLine(),
   },
 }));
 
@@ -241,7 +243,7 @@ describe('LinkLinePage', () => {
     it('解除API失敗時にエラーメッセージが表示される', async () => {
       const user = userEvent.setup();
       mockGetCurrentUser.mockResolvedValue(mockLinkedUser);
-      mockUpdateUser.mockRejectedValue(new Error('解除エラー'));
+      mockUnlinkLine.mockRejectedValue(new Error('解除エラー'));
 
       renderLinkLinePage();
 
@@ -301,6 +303,120 @@ describe('LinkLinePage', () => {
       await user.click(screen.getByTestId('back-button'));
 
       expect(mockNavigate).toHaveBeenCalledWith(-1);
+    });
+  });
+
+  /**
+   * TASK-0045: TC-08 - LinkLinePage が unlinkLine を使用
+   * 対応要件: EARS-045-015, EARS-045-016
+   *
+   * RED フェーズ失敗理由:
+   *   LinkLinePage.tsx L101 の handleUnlinkLine が usersApi.updateUser() を呼んでいる。
+   *   unlinkLine ではなく updateUser が呼ばれるため:
+   *   - mockUnlinkLine.toHaveBeenCalledTimes(1) → FAIL (0回呼ばれる)
+   *   - mockUpdateUser.not.toHaveBeenCalled() → FAIL (呼ばれている)
+   */
+  describe('TC-08: LinkLinePage が unlinkLine を使用', () => {
+    beforeEach(() => {
+      mockUnlinkLine.mockResolvedValue({
+        user_id: 'user-1',
+        display_name: 'テストユーザー',
+        picture_url: null,
+        line_linked: false,
+        notification_time: '09:00',
+        timezone: 'Asia/Tokyo',
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-02T00:00:00Z',
+      });
+    });
+
+    it('TC-08-01: LINE連携解除ボタンクリックで unlinkLine が呼ばれ updateUser が呼ばれないこと', async () => {
+      /**
+       * 【テスト目的】: handleUnlinkLine が updateUser ではなく unlinkLine を呼ぶことを検証
+       * 【期待される動作】: unlinkLine が1回呼ばれ、updateUser は呼ばれない
+       * 青 信頼性レベル: EARS-045-015
+       */
+      const linkedUser: User = {
+        user_id: 'user-1',
+        display_name: 'テストユーザー',
+        picture_url: null,
+        line_linked: true,
+        notification_time: '09:00',
+        timezone: 'Asia/Tokyo',
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+      };
+
+      mockGetCurrentUser.mockResolvedValue(linkedUser);
+
+      renderLinkLinePage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('unlink-button')).toBeInTheDocument();
+      });
+
+      const user = userEvent.setup();
+      await user.click(screen.getByTestId('unlink-button'));
+
+      await waitFor(() => {
+        // unlinkLine が呼ばれること
+        expect(mockUnlinkLine).toHaveBeenCalledTimes(1);
+        // updateUser が呼ばれないこと
+        expect(mockUpdateUser).not.toHaveBeenCalled();
+      });
+    });
+
+    it('TC-08-02: LINE連携解除成功後にサーバーレスポンスで状態更新されること', async () => {
+      /**
+       * 【テスト目的】: setUser がサーバーレスポンスをそのまま使用することを検証
+       *                 手動で line_linked: false を上書きしていないことを確認
+       * 青 信頼性レベル: EARS-045-016
+       */
+      const linkedUser: User = {
+        user_id: 'user-1',
+        display_name: 'テストユーザー',
+        picture_url: null,
+        line_linked: true,
+        notification_time: '09:00',
+        timezone: 'Asia/Tokyo',
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+      };
+
+      const serverResponse: User = {
+        user_id: 'user-1',
+        display_name: 'テストユーザー',
+        picture_url: null,
+        line_linked: false,
+        notification_time: '09:00',
+        timezone: 'Asia/Tokyo',
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-02T00:00:00Z',
+      };
+
+      mockGetCurrentUser.mockResolvedValue(linkedUser);
+      mockUnlinkLine.mockResolvedValue(serverResponse);
+
+      renderLinkLinePage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('unlink-button')).toBeInTheDocument();
+      });
+
+      const user = userEvent.setup();
+      await user.click(screen.getByTestId('unlink-button'));
+
+      // 成功メッセージが表示されること
+      await waitFor(() => {
+        expect(screen.getByTestId('success-message')).toHaveTextContent(
+          'LINE連携を解除しました'
+        );
+      });
+
+      // 状態が「未連携」に更新されること
+      await waitFor(() => {
+        expect(screen.getByTestId('link-status')).toHaveTextContent('未連携');
+      });
     });
   });
 });

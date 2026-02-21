@@ -98,11 +98,8 @@ export const LinkLinePage = () => {
     setError(null);
 
     try {
-      const updatedUser = await usersApi.updateUser({
-        notification_time: user?.notification_time,
-      });
-      // LINE連携解除後のフロントエンド状態を更新
-      setUser({ ...updatedUser, line_linked: false });
+      const updatedUser = await usersApi.unlinkLine();
+      setUser(updatedUser);
       setSuccessMessage('LINE連携を解除しました');
     } catch (err) {
       setError('LINE連携の解除に失敗しました');

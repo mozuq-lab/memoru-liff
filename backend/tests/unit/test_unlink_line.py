@@ -53,6 +53,8 @@ class TestUserServiceUnlinkLine:
 
     def test_unlink_line_success(self, user_service, dynamodb_table):
         """Test unlinking LINE account successfully."""
+        from src.models.user import User
+
         # Setup: create a user with LINE linked
         table = dynamodb_table.Table("memoru-users-test")
         line_user_id = "U1234567890abcdef1234567890abcdef"
@@ -69,9 +71,10 @@ class TestUserServiceUnlinkLine:
         # Execute
         result = user_service.unlink_line("test-user-id")
 
-        # Assert
-        assert result["user_id"] == "test-user-id"
-        assert "unlinked_at" in result
+        # Assert: result is User type with line_user_id cleared
+        assert isinstance(result, User)
+        assert result.user_id == "test-user-id"
+        assert result.line_user_id is None
 
         # Verify line_user_id was removed from DynamoDB
         response = table.get_item(Key={"user_id": "test-user-id"})
@@ -109,6 +112,8 @@ class TestUserServiceUnlinkLine:
 
     def test_unlink_line_datetime_timezone_aware(self, user_service, dynamodb_table):
         """Test that unlink_line uses timezone-aware datetime (UTC)."""
+        from src.models.user import User
+
         # Setup: create a user with LINE linked
         table = dynamodb_table.Table("memoru-users-test")
         line_user_id = "U1234567890abcdef1234567890abcdef"
@@ -124,9 +129,11 @@ class TestUserServiceUnlinkLine:
         # Execute
         result = user_service.unlink_line("test-user-id")
 
-        # Assert: check that unlinked_at is timezone-aware (has +00:00 or Z suffix)
-        unlinked_at = result["unlinked_at"]
-        assert "+00:00" in unlinked_at or unlinked_at.endswith("Z")
+        # Assert: result is User type with updated_at set
+        assert isinstance(result, User)
+        assert result.updated_at is not None
+        updated_at_str = result.updated_at.isoformat() if hasattr(result.updated_at, 'isoformat') else str(result.updated_at)
+        assert "+00:00" in updated_at_str or updated_at_str.endswith("Z")
 
 
 class TestUnlinkLineAPIHandler:
@@ -150,10 +157,20 @@ class TestUnlinkLineAPIHandler:
              patch("src.api.handler.get_user_id_from_context") as mock_get_user_id:
 
             mock_get_user_id.return_value = "test-user-id"
-            mock_user_service.unlink_line.return_value = {
+            mock_user = MagicMock()
+            mock_response = MagicMock()
+            mock_response.model_dump.return_value = {
                 "user_id": "test-user-id",
-                "unlinked_at": "2024-01-15T10:00:00+00:00",
+                "display_name": None,
+                "picture_url": None,
+                "line_linked": False,
+                "notification_time": "09:00",
+                "timezone": "Asia/Tokyo",
+                "created_at": "2024-01-01T00:00:00+00:00",
+                "updated_at": "2024-01-15T10:00:00+00:00",
             }
+            mock_user.to_response.return_value = mock_response
+            mock_user_service.unlink_line.return_value = mock_user
 
             # Execute
             result = unlink_line()
@@ -163,6 +180,7 @@ class TestUnlinkLineAPIHandler:
             mock_user_service.unlink_line.assert_called_once_with("test-user-id")
             assert result["success"] is True
             assert result["data"]["user_id"] == "test-user-id"
+            assert result["data"]["line_linked"] is False
 
     def test_unlink_line_function_handles_not_linked_error(self):
         """Test that unlink_line function handles LineNotLinkedError with 400 response."""

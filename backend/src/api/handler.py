@@ -188,13 +188,7 @@ def update_user_settings():
             notification_time=request.notification_time,
             timezone=request.timezone,
         )
-        return UserSettingsResponse(
-            success=True,
-            settings={
-                "notification_time": user.settings.get("notification_time"),
-                "timezone": user.settings.get("timezone"),
-            },
-        ).model_dump()
+        return {"success": True, "data": user.to_response().model_dump(mode="json")}
     except UserNotFoundError:
         raise NotFoundError("User not found")
     except Exception as e:
@@ -210,8 +204,8 @@ def unlink_line():
     logger.info(f"Unlinking LINE account for user_id: {user_id}")
 
     try:
-        result = user_service.unlink_line(user_id)
-        return {"success": True, "data": result}
+        user = user_service.unlink_line(user_id)
+        return {"success": True, "data": user.to_response().model_dump(mode="json")}
     except LineNotLinkedError:
         return Response(
             status_code=400,

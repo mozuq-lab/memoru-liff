@@ -308,14 +308,14 @@ class UserService:
         except ClientError as e:
             raise UserServiceError(f"Failed to update settings: {e}")
 
-    def unlink_line(self, user_id: str) -> dict:
+    def unlink_line(self, user_id: str) -> User:
         """Unlink LINE account from user.
 
         Args:
             user_id: The user's unique identifier.
 
         Returns:
-            Dictionary with user_id and unlinked_at timestamp.
+            Updated User object with line_user_id cleared.
 
         Raises:
             LineNotLinkedError: If user has no LINE account linked.
@@ -329,7 +329,7 @@ class UserService:
                 ConditionExpression="attribute_exists(line_user_id)",
                 ExpressionAttributeValues={":now": now.isoformat()},
             )
-            return {"user_id": user_id, "unlinked_at": now.isoformat()}
+            return self.get_user(user_id)
         except ClientError as e:
             if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
                 raise LineNotLinkedError("LINE account not linked to this user")

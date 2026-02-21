@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { User } from '@/types';
 
 // 【テスト目的】: ApiClient の request() メソッドにおける 204 No Content レスポンスのハンドリング確認
 // 【テスト内容】: 204 レスポンスで undefined を返す、200 レスポンスで JSON パースが正常動作、エラーハンドリングの互換性
@@ -708,6 +709,136 @@ describe('ApiClient', () => {
       // 【結果検証】: refreshToken が呼ばれないこと
       // 🟡 黄信号: 既存のエラーハンドリングとの互換性確認
       expect(mockRefreshToken).not.toHaveBeenCalled();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // TASK-0045: レスポンスDTO統一 + unlinkLine API使用
+  // TC-07: unlinkLine API メソッドが POST /users/me/unlink-line を呼び出す
+  // TC-10: linkLine レスポンスが User 型として正しくパースされる
+  // 対応要件: EARS-045-011~014, EARS-045-010, EARS-045-026
+  // TDD RED フェーズ: unlinkLine メソッドが api.ts に存在しないため FAIL することを確認する
+  // ---------------------------------------------------------------------------
+
+  describe('TC-07: unlinkLine API メソッド', () => {
+    it('TC-07-01: unlinkLine が POST /users/me/unlink-line を呼び出すこと', async () => {
+      /**
+       * 【テスト目的】: unlinkLine メソッドが正しいエンドポイントと HTTP メソッドを使用することを検証
+       * 【期待される動作】: POST /users/me/unlink-line が呼ばれ、リクエストボディがない
+       * 青 信頼性レベル: EARS-045-011, EARS-045-013, EARS-045-014
+       *
+       * RED フェーズ失敗理由:
+       *   api.ts の ApiClient クラスに unlinkLine メソッドが存在しないため、
+       *   apiClient.unlinkLine() 呼び出し時に TypeError が発生する。
+       */
+      const mockResponse: User = {
+        user_id: 'test-user-id',
+        display_name: 'テストユーザー',
+        picture_url: null,
+        line_linked: false,
+        notification_time: '09:00',
+        timezone: 'Asia/Tokyo',
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-02T00:00:00Z',
+      };
+
+      mockFetch.mockResolvedValue(
+        new Response(JSON.stringify(mockResponse), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
+
+      const { apiClient } = await import('@/services/api');
+      apiClient.setAccessToken('test-token');
+
+      // unlinkLine メソッドが存在し呼び出せること (存在しない場合は TypeError)
+      const result = await (apiClient as unknown as { unlinkLine: () => Promise<User> }).unlinkLine();
+
+      // fetch が正しいエンドポイントで呼ばれたか
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('/users/me/unlink-line'),
+        expect.objectContaining({
+          method: 'POST',
+        })
+      );
+
+      // リクエストボディがないこと
+      const fetchCall = mockFetch.mock.calls[0][1] as RequestInit;
+      expect(fetchCall.body).toBeUndefined();
+
+      // Authorization ヘッダーが含まれること
+      expect(fetchCall.headers).toHaveProperty('Authorization', 'Bearer test-token');
+
+      // 戻り値が User 型であること
+      expect(result).toEqual(mockResponse);
+      expect(result.line_linked).toBe(false);
+    });
+
+    it('TC-07-02: usersApi.unlinkLine が apiClient.unlinkLine に委譲すること', async () => {
+      /**
+       * 【テスト目的】: usersApi エクスポートに unlinkLine が含まれることを検証
+       * 青 信頼性レベル: EARS-045-012
+       *
+       * RED フェーズ失敗理由:
+       *   usersApi オブジェクトに unlinkLine プロパティが存在しないため FAIL する。
+       */
+      const { usersApi } = await import('@/services/api');
+
+      expect(usersApi).toHaveProperty('unlinkLine');
+      expect(typeof (usersApi as unknown as Record<string, unknown>).unlinkLine).toBe('function');
+    });
+  });
+
+  describe('TC-10: linkLine レスポンスの User 型パース', () => {
+    it('TC-10-01: linkLine が User 型のレスポンスを返すこと', async () => {
+      /**
+       * 【テスト目的】: linkLine の戻り値が User 型として正しくパースされることを検証
+       * 【期待される動作】: レスポンスが User 型の全フィールドを持つ
+       * 青 信頼性レベル: EARS-045-010
+       *
+       * 注意: バックエンドのレスポンス形式変更 ({success, data} ラッパー) に応じて
+       *       フロントエンド側のパース処理を調整する必要がある (EARS-045-026 黄)
+       *
+       * RED フェーズ状態:
+       *   現在の linkLine は直接 User フィールドを含むオブジェクトを返す想定。
+       *   timezone フィールドが含まれていることを検証する。
+       *   バックエンドが {success, data: User} ラッパーで返す場合は GREEN フェーズで調整。
+       */
+      const mockServerResponse: User = {
+        user_id: 'test-user-id',
+        display_name: 'テストユーザー',
+        picture_url: null,
+        line_linked: true,
+        notification_time: '09:00',
+        timezone: 'Asia/Tokyo',
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-02T00:00:00Z',
+      };
+
+      mockFetch.mockResolvedValue(
+        new Response(JSON.stringify(mockServerResponse), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
+
+      const { apiClient } = await import('@/services/api');
+      apiClient.setAccessToken('test-token');
+      const result = await apiClient.linkLine({ id_token: 'valid-token' });
+
+      // User 型の全フィールドが存在すること
+      expect(result).toHaveProperty('user_id');
+      expect(result).toHaveProperty('line_linked');
+      expect(result).toHaveProperty('timezone');
+      expect(result).toHaveProperty('notification_time');
+      expect(result).toHaveProperty('created_at');
+      expect(result).toHaveProperty('updated_at');
+
+      // 値の検証
+      expect(result.line_linked).toBe(true);
+      expect(result.timezone).toBe('Asia/Tokyo');
+      expect(typeof result.user_id).toBe('string');
     });
   });
 });
