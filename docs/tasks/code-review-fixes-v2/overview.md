@@ -27,7 +27,7 @@
 
 ## 全体進捗
 
-- [ ] Phase 1: Critical修正（API契約整合性 + データ整合性）
+- [x] Phase 1: Critical修正（API契約整合性 + データ整合性）
 - [ ] Phase 2: High修正（セキュリティ + レスポンスDTO + 通知 + 設定統一）
 
 ## マイルストーン
@@ -46,7 +46,7 @@
 ### タスク一覧
 
 - [x] [TASK-0042: APIルート統一（3レイヤー整合性修正）](TASK-0042.md) - 8h (TDD) 🔵
-- [ ] [TASK-0043: card_countトランザクション修正](TASK-0043.md) - 8h (TDD) 🔵
+- [x] [TASK-0043: card_countトランザクション修正](TASK-0043.md) - 8h (TDD) 🔵
 
 ### 依存関係
 

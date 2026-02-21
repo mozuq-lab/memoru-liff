@@ -5,10 +5,14 @@ from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
 import boto3
+from aws_lambda_powertools import Logger
 from boto3.dynamodb.types import TypeSerializer
 from botocore.exceptions import ClientError
 
 from ..models.card import Card
+
+# 【ロガー設定】: TransactionCanceledException などの内部エラーをログ出力するために必要 (EARS-009)
+logger = Logger()
 
 
 class CardServiceError(Exception):
@@ -29,21 +33,46 @@ class CardLimitExceededError(CardServiceError):
     pass
 
 
+class InternalError(CardServiceError):
+    """Raised when an internal transaction error occurs.
+
+    【クラス目的】: CardLimitExceededError以外のTransactionCanceledException を
+    明確に区別するための例外クラス。
+    🔵 信頼性レベル: 青信号 - CR-02: 全TransactionCanceledExceptionをCardLimitExceededErrorとして
+    扱う問題を解決するために追加 (EARS-005)
+    """
+
+    pass
+
+
 class CardService:
     """Service for card-related DynamoDB operations."""
 
     MAX_CARDS_PER_USER = 2000
 
-    def __init__(self, table_name: Optional[str] = None, dynamodb_resource=None, users_table_name: Optional[str] = None):
+    def __init__(
+        self,
+        table_name: Optional[str] = None,
+        dynamodb_resource=None,
+        users_table_name: Optional[str] = None,
+        reviews_table_name: Optional[str] = None,
+    ):
         """Initialize CardService.
 
         Args:
             table_name: DynamoDB table name. Defaults to CARDS_TABLE env var.
             dynamodb_resource: Optional boto3 DynamoDB resource for testing.
             users_table_name: DynamoDB users table name. Defaults to USERS_TABLE env var.
+            reviews_table_name: DynamoDB reviews table name. Defaults to REVIEWS_TABLE env var.
+
+        【実装方針】: reviews_table_name パラメータを追加して、delete_card トランザクションで
+        Reviews テーブルをアトミックに削除できるようにする (EARS-011)
+        🔵 信頼性レベル: 青信号 - EARS-010 のトランザクション削除に必要
         """
         self.table_name = table_name or os.environ.get("CARDS_TABLE", "memoru-cards-dev")
         self.users_table_name = users_table_name or os.environ.get("USERS_TABLE", "memoru-users-dev")
+        # 【レビューテーブル設定】: delete_card トランザクションで Reviews テーブルを参照するために必要
+        self.reviews_table_name = reviews_table_name or os.environ.get("REVIEWS_TABLE", "memoru-reviews-dev")
 
         if dynamodb_resource:
             self.dynamodb = dynamodb_resource
@@ -109,11 +138,19 @@ class CardService:
                         'Update': {
                             'TableName': self.users_table_name,
                             'Key': {'user_id': {'S': user_id}},
-                            'UpdateExpression': 'SET card_count = card_count + :inc',
-                            'ConditionExpression': 'card_count < :limit',
+                            # 【UpdateExpression修正】: if_not_exists(card_count, :zero) を使用して
+                            # card_count属性が存在しない場合に安全に0として扱う (EARS-001)
+                            # 🔵 信頼性レベル: 青信号 - CR-02で特定されたバグの修正
+                            'UpdateExpression': 'SET card_count = if_not_exists(card_count, :zero) + :inc',
+                            # 【ConditionExpression修正】: if_not_exists(card_count, :zero) を使用して
+                            # card_count属性が存在しない場合のリミットチェックも安全に行う (EARS-002)
+                            # 🔵 信頼性レベル: 青信号 - CR-02で特定されたバグの修正
+                            'ConditionExpression': 'if_not_exists(card_count, :zero) < :limit',
                             'ExpressionAttributeValues': {
                                 ':inc': {'N': '1'},
-                                ':limit': {'N': str(self.MAX_CARDS_PER_USER)}
+                                ':limit': {'N': str(self.MAX_CARDS_PER_USER)},
+                                # 【:zero追加】: if_not_exists のフォールバック値として必要 (EARS-003)
+                                ':zero': {'N': '0'}
                             }
                         }
                     },
@@ -128,8 +165,19 @@ class CardService:
             return card
         except ClientError as e:
             if e.response["Error"]["Code"] == "TransactionCanceledException":
-                # Transaction failed due to condition check
-                raise CardLimitExceededError(f"Card limit of {self.MAX_CARDS_PER_USER} exceeded")
+                # 【エラー分類修正】: CancellationReasons を解析して正確なエラーを判別する (EARS-006, EARS-007, EARS-008)
+                # 以前は全TransactionCanceledExceptionをCardLimitExceededErrorとして扱っていたが、
+                # 他のエラー (ValidationError等) は InternalError として区別する必要がある
+                # 🔵 信頼性レベル: 青信号 - CR-02で特定された問題の修正
+                reasons = e.response.get("CancellationReasons", [])
+                # 【Index 0 確認】: TransactItems[0] は Users テーブルの Update (card_count チェック)
+                # ConditionalCheckFailed はカード上限超過を意味する
+                if reasons and reasons[0].get("Code") == "ConditionalCheckFailed":
+                    raise CardLimitExceededError(f"Card limit of {self.MAX_CARDS_PER_USER} exceeded")
+                # 【InternalError送出】: 上限超過以外のトランザクション失敗は InternalError
+                # reasons が空/欠如、または Index 0 が ConditionalCheckFailed 以外の場合
+                logger.error(f"Transaction cancelled with reasons: {reasons}")
+                raise InternalError("Card creation failed due to transaction conflict")
             raise CardServiceError(f"Failed to create card: {e}")
 
     def get_card(self, user_id: str, card_id: str) -> Card:
@@ -232,21 +280,83 @@ class CardService:
             raise CardServiceError(f"Failed to update card: {e}")
 
     def delete_card(self, user_id: str, card_id: str) -> None:
-        """Delete a card.
+        """Delete a card atomically with card_count decrement.
+
+        DynamoDB TransactWriteItems を使用して以下の3操作をアトミックに実行する:
+          - Index 0: Cards テーブルからカードを削除 (attribute_exists 条件チェック付き)
+          - Index 1: Reviews テーブルから関連レビューを削除 (条件なし: レビュー未作成でも成功)
+          - Index 2: Users テーブルの card_count を 1 デクリメント (card_count > 0 の下限チェック付き)
+
+        これにより card_count と実際のカード数の整合性を保証する。
+        事前に get_card() でカードの存在を確認してから TransactWriteItems を実行する。
 
         Args:
             user_id: The user's ID.
             card_id: The card's ID.
 
         Raises:
-            CardNotFoundError: If card does not exist.
+            CardNotFoundError: カードが存在しない場合。または、トランザクション実行中に別リクエストが
+                               先にカードを削除した場合（レースコンディション、EARS-012）。
+            CardServiceError: card_count が既に 0 の場合（データ整合性ドリフト、EARS-013）。
+                              その他の DynamoDB エラーが発生した場合。
+
+        【トランザクション設計】:
+          - TransactItems[0] の ConditionalCheckFailed: 並行削除によるレースコンディション → CardNotFoundError
+          - TransactItems[2] の ConditionalCheckFailed: card_count が既に 0 → CardServiceError
+        🔵 信頼性レベル: 青信号 - CR-02で特定された非トランザクション実装の修正 (EARS-010)
         """
-        # Verify card exists
+        # 【カード存在確認】: 削除前にカードが存在することを確認する
         self.get_card(user_id, card_id)
 
         try:
-            self.table.delete_item(Key={"user_id": user_id, "card_id": card_id})
+            client = self.dynamodb.meta.client
+            # 【トランザクション実行】: 3つの操作をアトミックに実行する
+            client.transact_write_items(
+                TransactItems=[
+                    {
+                        # 【Index 0】: Cards テーブルからカードを削除
+                        # attribute_exists(card_id) でカード存在を確認 (レースコンディション対策)
+                        'Delete': {
+                            'TableName': self.table_name,
+                            'Key': {'user_id': {'S': user_id}, 'card_id': {'S': card_id}},
+                            'ConditionExpression': 'attribute_exists(card_id)'
+                        }
+                    },
+                    {
+                        # 【Index 1】: Reviews テーブルから関連レビューを削除
+                        # 条件なし - レビューが存在しなくても成功する (EC-012対応)
+                        'Delete': {
+                            'TableName': self.reviews_table_name,
+                            'Key': {'user_id': {'S': user_id}, 'card_id': {'S': card_id}}
+                        }
+                    },
+                    {
+                        # 【Index 2】: Users テーブルの card_count を 1 デクリメント
+                        # card_count > :zero の条件でネガティブ値を防止 (EARS-014)
+                        'Update': {
+                            'TableName': self.users_table_name,
+                            'Key': {'user_id': {'S': user_id}},
+                            'UpdateExpression': 'SET card_count = card_count - :dec',
+                            'ConditionExpression': 'card_count > :zero',
+                            'ExpressionAttributeValues': {
+                                ':dec': {'N': '1'},
+                                ':zero': {'N': '0'}
+                            }
+                        }
+                    }
+                ]
+            )
         except ClientError as e:
+            if e.response["Error"]["Code"] == "TransactionCanceledException":
+                reasons = e.response.get("CancellationReasons", [])
+                # 【Index 0 確認】: Cards Delete の ConditionalCheckFailed はカードが既に削除された状態
+                # レースコンディションにより別リクエストがカードを削除した場合 (EARS-012)
+                if reasons and reasons[0].get("Code") == "ConditionalCheckFailed":
+                    raise CardNotFoundError(f"Card not found: {card_id}")
+                # 【Index 2 確認】: Users Update の ConditionalCheckFailed は card_count が既に 0
+                # データ整合性のドリフト状態 (EARS-013)
+                if len(reasons) > 2 and reasons[2].get("Code") == "ConditionalCheckFailed":
+                    raise CardServiceError("Cannot delete card: card_count already at 0")
             raise CardServiceError(f"Failed to delete card: {e}")
 
     def list_cards(
