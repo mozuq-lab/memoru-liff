@@ -29,7 +29,7 @@ export const test = base.extend<{
     // 認証済み状態をセットアップ
     await page.addInitScript((token) => {
       // OIDC用のストレージキーにトークンを設定
-      const oidcStorageKey = 'oidc.user:https://keycloak.example.com/realms/memoru:memoru-liff';
+      const oidcStorageKey = 'oidc.user:https://keycloak.example.com/realms/memoru:liff-client';
       const oidcUser = {
         access_token: token,
         token_type: 'Bearer',

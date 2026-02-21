@@ -31,5 +31,5 @@ Object.defineProperty(window, 'location', {
 // 環境変数モック
 vi.stubEnv('VITE_KEYCLOAK_URL', 'https://keycloak.example.com');
 vi.stubEnv('VITE_KEYCLOAK_REALM', 'memoru');
-vi.stubEnv('VITE_KEYCLOAK_CLIENT_ID', 'memoru-liff');
+vi.stubEnv('VITE_KEYCLOAK_CLIENT_ID', 'liff-client');
 vi.stubEnv('VITE_LIFF_ID', '1234567890-abcdefgh');

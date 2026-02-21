@@ -27,7 +27,7 @@ const mockOidcUser = {
 async function setupAuthenticatedState(page: Page) {
   await page.addInitScript((oidcUser) => {
     const storageKey =
-      'oidc.user:https://keycloak.example.com/realms/memoru:memoru-liff';
+      'oidc.user:https://keycloak.example.com/realms/memoru:liff-client';
     sessionStorage.setItem(storageKey, JSON.stringify(oidcUser));
   }, mockOidcUser);
 }

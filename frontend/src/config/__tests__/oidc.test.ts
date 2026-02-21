@@ -18,7 +18,7 @@ describe('oidcConfig', () => {
       // 【初期条件設定】: Keycloak接続に必要な環境変数が設定されている状態
       vi.stubEnv('VITE_KEYCLOAK_URL', 'https://keycloak.example.com');
       vi.stubEnv('VITE_KEYCLOAK_REALM', 'memoru');
-      vi.stubEnv('VITE_KEYCLOAK_CLIENT_ID', 'memoru-liff');
+      vi.stubEnv('VITE_KEYCLOAK_CLIENT_ID', 'liff-client');
 
       // 【実際の処理実行】: oidcConfigをインポートして設定を取得
       // 【処理内容】: 環境変数からOIDC設定オブジェクトを構築
@@ -33,7 +33,7 @@ describe('oidcConfig', () => {
 
       // 【検証項目】: client_idが環境変数から正しく設定されている
       // 🔵 青信号: 要件定義の入力パラメータ仕様
-      expect(oidcConfig.client_id).toBe('memoru-liff');
+      expect(oidcConfig.client_id).toBe('liff-client');
 
       // 【検証項目】: redirect_uriが正しく設定されている
       // 🔵 青信号: OIDC認証フローの標準パラメータ

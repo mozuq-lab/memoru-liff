@@ -23,7 +23,7 @@ describe('main.tsx', () => {
         validateOidcConfig: mockValidateOidcConfig,
         oidcConfig: {
           authority: 'https://keycloak.example.com/realms/memoru',
-          client_id: 'memoru-liff',
+          client_id: 'liff-client',
           redirect_uri: 'http://localhost:3000/callback',
           response_type: 'code',
           scope: 'openid profile email',

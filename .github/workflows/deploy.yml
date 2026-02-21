@@ -88,11 +88,11 @@ jobs:
       - name: Build
         run: npm run build
         env:
-          VITE_API_URL: https://api.example.com
+          VITE_API_BASE_URL: https://api.example.com
           VITE_LIFF_ID: 0000000000-xxxxxxxx
           VITE_KEYCLOAK_URL: https://keycloak.example.com
           VITE_KEYCLOAK_REALM: memoru
-          VITE_KEYCLOAK_CLIENT_ID: memoru-liff
+          VITE_KEYCLOAK_CLIENT_ID: liff-client
 
   deploy-backend:
     name: Deploy Backend
@@ -166,7 +166,7 @@ jobs:
       - name: Build
         run: npm run build
         env:
-          VITE_API_URL: ${{ vars.API_URL }}
+          VITE_API_BASE_URL: ${{ vars.API_URL }}
           VITE_LIFF_ID: ${{ vars.LIFF_ID }}
           VITE_KEYCLOAK_URL: ${{ vars.KEYCLOAK_URL }}
           VITE_KEYCLOAK_REALM: ${{ vars.KEYCLOAK_REALM }}
