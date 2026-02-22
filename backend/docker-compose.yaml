@@ -104,8 +104,8 @@ services:
     ports:
       - "8180:8080"
     environment:
-      KC_BOOTSTRAP_ADMIN_USERNAME: admin
-      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
       KC_HEALTH_ENABLED: "true"
     volumes:
       - ../infrastructure/keycloak/realm-local.json:/opt/keycloak/data/import/memoru-realm.json
