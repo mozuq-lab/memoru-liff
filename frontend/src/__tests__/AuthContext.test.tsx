@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, renderHook } from '@testing-library/react';
+import { render, screen, renderHook } from '@testing-library/react';
 import { AuthProvider, useAuthContext } from '@/contexts/AuthContext';
 import type { ReactNode } from 'react';
 
@@ -69,7 +69,7 @@ describe('AuthContext', () => {
       let renderCount = 0;
 
       const TestComponent = () => {
-        const context = useAuthContext();
+        useAuthContext();
         renderCount++;
         return <div data-testid="render-count">{renderCount}</div>;
       };

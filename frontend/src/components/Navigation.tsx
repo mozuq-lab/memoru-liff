@@ -4,6 +4,7 @@
  * 【テスト対応】: TASK-0014テストケース4, 5
  * 🟡 黄信号: 要件から妥当な推測
  */
+import { type ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 
 /**
@@ -12,7 +13,7 @@ import { Link, useLocation } from 'react-router-dom';
 interface NavItem {
   path: string;
   label: string;
-  icon: JSX.Element;
+  icon: ReactNode;
 }
 
 /**

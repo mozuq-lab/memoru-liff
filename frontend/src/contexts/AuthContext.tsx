@@ -5,7 +5,7 @@ import { apiClient } from '@/services/api';
 interface AuthUser {
   access_token: string;
   expired: boolean;
-  profile: {
+  profile?: {
     sub: string;
     email?: string;
     name?: string;

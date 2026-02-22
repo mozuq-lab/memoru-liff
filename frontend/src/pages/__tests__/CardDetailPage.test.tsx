@@ -4,7 +4,7 @@
  * 【テスト対応】: TASK-0017 テストケース1〜9
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { CardDetailPage } from '../CardDetailPage';

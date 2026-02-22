@@ -20,7 +20,7 @@ describe('ApiClient', () => {
 
     // fetch をモック
     mockFetch = vi.fn();
-    global.fetch = mockFetch;
+    (globalThis as Record<string, unknown>).fetch = mockFetch;
   });
 
   // 【テスト後処理】: vi.restoreAllMocks() でモックを復元し、他テストへの影響を防止
@@ -349,7 +349,7 @@ describe('ApiClient', () => {
 
       // When
       const { apiClient } = await import('@/services/api');
-      await apiClient.linkLine({ line_user_id: 'U123' });
+      await apiClient.linkLine({ id_token: 'U123' });
 
       // Then: fetch が正しいパスに POST で呼ばれること
       // 🔵 青信号: REQ-V2-004 に基づく
@@ -376,14 +376,14 @@ describe('ApiClient', () => {
 
       // When
       const { apiClient } = await import('@/services/api');
-      await apiClient.linkLine({ line_user_id: 'U1234567890abcdef' });
+      await apiClient.linkLine({ id_token: 'U1234567890abcdef' });
 
       // Then: fetch の body が正しくシリアライズされていること
       // 🔵 青信号: REQ-V2-004 に基づく
       expect(mockFetch).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({
-          body: JSON.stringify({ line_user_id: 'U1234567890abcdef' }),
+          body: JSON.stringify({ id_token: 'U1234567890abcdef' }),
         })
       );
     });
@@ -491,7 +491,7 @@ describe('ApiClient', () => {
 
       // When
       const { apiClient } = await import('@/services/api');
-      const result = await apiClient.linkLine({ line_user_id: 'U123' });
+      const result = await apiClient.linkLine({ id_token: 'U123' });
 
       // Then: 戻り値が User 型のオブジェクトであること
       // 🔵 青信号: REQ-V2-004 に基づく
@@ -514,7 +514,7 @@ describe('ApiClient', () => {
 
       // When
       const { apiClient } = await import('@/services/api');
-      await apiClient.linkLine({ line_user_id: 'U123' });
+      await apiClient.linkLine({ id_token: 'U123' });
 
       // Then: 旧パスが使用されておらず、新パスが使用されていること
       // 🔵 青信号: REQ-V2-004 に基づく

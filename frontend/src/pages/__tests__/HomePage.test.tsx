@@ -153,7 +153,7 @@ describe('HomePage', () => {
 
   describe('エラー状態', () => {
     beforeEach(() => {
-      mockCardsContext.error = new Error('API Error');
+      (mockCardsContext as { error: Error | null }).error = new Error('API Error');
     });
 
     it('エラー時はエラーメッセージが表示される', () => {
@@ -164,7 +164,7 @@ describe('HomePage', () => {
 
   describe('ユーザー名がない場合', () => {
     it('デフォルトの「ユーザー」が表示される', () => {
-      mockAuthContext.user = {
+      (mockAuthContext as Record<string, unknown>).user = {
         access_token: 'test-token',
         expired: false,
         profile: {

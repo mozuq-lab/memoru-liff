@@ -3,8 +3,8 @@
  * 【テスト対象】: CardsPage コンポーネント
  * 【テスト対応】: TASK-0016 テストケース1〜8
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { CardsPage } from '../CardsPage';
 import type { Card } from '@/types';

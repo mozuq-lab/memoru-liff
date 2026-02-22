@@ -15,7 +15,7 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
   useEffect(() => {
     if (!isLoading && !isAuthenticated && !loginAttempted) {
       setLoginAttempted(true);
-      login().catch((err) => {
+      login().catch(() => {
         setLoginError('ログインに失敗しました');
       });
     }

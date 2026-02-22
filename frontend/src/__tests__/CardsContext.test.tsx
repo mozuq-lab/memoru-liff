@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, renderHook } from '@testing-library/react';
 import { CardsProvider, useCardsContext } from '@/contexts/CardsContext';
 import { cardsApi } from '@/services/api';
+import type { Card } from '@/types';
 import type { ReactNode } from 'react';
 
 /**
@@ -141,7 +142,7 @@ describe('CardsContext', () => {
       let renderCount = 0;
 
       const TestComponent = () => {
-        const context = useCardsContext();
+        useCardsContext();
         renderCount++;
         return <div data-testid="render-count">{renderCount}</div>;
       };
@@ -169,13 +170,16 @@ describe('CardsContext', () => {
 
   describe('TC-CARDS-004: 既存機能の保証（回帰テスト）', () => {
     it('fetchCards が正しく動作すること', async () => {
-      const mockCards = [
+      const mockCards: Card[] = [
         {
           card_id: '1',
           user_id: 'user1',
           front: 'Question 1',
           back: 'Answer 1',
-          deck_name: 'Deck 1',
+          tags: [],
+          interval: 1,
+          ease_factor: 2.5,
+          repetitions: 0,
           created_at: '2024-01-01T00:00:00Z',
           updated_at: '2024-01-01T00:00:00Z',
         },
@@ -203,12 +207,15 @@ describe('CardsContext', () => {
 
       const { result } = renderHook(() => useCardsContext(), { wrapper });
 
-      const newCard = {
+      const newCard: Card = {
         card_id: '1',
         user_id: 'user1',
         front: 'Question 1',
         back: 'Answer 1',
-        deck_name: 'Deck 1',
+        tags: [],
+        interval: 1,
+        ease_factor: 2.5,
+        repetitions: 0,
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
       };
@@ -227,12 +234,15 @@ describe('CardsContext', () => {
 
       const { result } = renderHook(() => useCardsContext(), { wrapper });
 
-      const card = {
+      const card: Card = {
         card_id: '1',
         user_id: 'user1',
         front: 'Question 1',
         back: 'Answer 1',
-        deck_name: 'Deck 1',
+        tags: [],
+        interval: 1,
+        ease_factor: 2.5,
+        repetitions: 0,
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
       };
@@ -257,12 +267,15 @@ describe('CardsContext', () => {
 
       const { result } = renderHook(() => useCardsContext(), { wrapper });
 
-      const card = {
+      const card: Card = {
         card_id: '1',
         user_id: 'user1',
         front: 'Question 1',
         back: 'Answer 1',
-        deck_name: 'Deck 1',
+        tags: [],
+        interval: 1,
+        ease_factor: 2.5,
+        repetitions: 0,
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-01T00:00:00Z',
       };

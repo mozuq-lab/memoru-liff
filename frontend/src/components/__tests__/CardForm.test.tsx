@@ -4,7 +4,7 @@
  * 【テスト対応】: TASK-0017 テストケース2〜5
  */
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CardForm } from '../CardForm';
 

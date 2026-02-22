@@ -66,7 +66,7 @@ export const useAuth = (): UseAuthReturn => {
           // 🔵 青信号: User型からAuthUser型への変換
           setUser({
             access_token: currentUser.access_token,
-            expired: currentUser.expired,
+            expired: currentUser.expired ?? false,
             profile: currentUser.profile ? {
               sub: currentUser.profile.sub,
               email: currentUser.profile.email,
@@ -157,7 +157,7 @@ export const useAuth = (): UseAuthReturn => {
       if (refreshedUser) {
         setUser({
           access_token: refreshedUser.access_token,
-          expired: refreshedUser.expired,
+          expired: refreshedUser.expired ?? false,
           profile: refreshedUser.profile ? {
             sub: refreshedUser.profile.sub,
             email: refreshedUser.profile.email,
