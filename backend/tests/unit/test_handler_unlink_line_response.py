@@ -36,7 +36,7 @@ class TestUnlinkLineResponse:
             user_id="test-user-id",
         )
 
-        with patch("src.api.handler.user_service") as mock_user_service:
+        with patch("api.handler.user_service") as mock_user_service:
             # unlink_line が User オブジェクトを返すようにモック
             # (GREEN フェーズ後の期待される戻り値型)
             mock_user = MagicMock()
@@ -54,7 +54,7 @@ class TestUnlinkLineResponse:
             mock_user.to_response.return_value = mock_response
             mock_user_service.unlink_line.return_value = mock_user
 
-            from src.api.handler import handler
+            from api.handler import handler
             response = handler(event, lambda_context)
 
         assert response["statusCode"] == 200
@@ -94,7 +94,7 @@ class TestUnlinkLineResponse:
             user_id="test-user-id",
         )
 
-        with patch("src.api.handler.user_service") as mock_user_service:
+        with patch("api.handler.user_service") as mock_user_service:
             mock_user = MagicMock()
             mock_response = MagicMock()
             mock_response.model_dump.return_value = {
@@ -110,7 +110,7 @@ class TestUnlinkLineResponse:
             mock_user.to_response.return_value = mock_response
             mock_user_service.unlink_line.return_value = mock_user
 
-            from src.api.handler import handler
+            from api.handler import handler
             response = handler(event, lambda_context)
 
         body = json.loads(response["body"])

@@ -16,13 +16,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.services.line_service import (
+from services.line_service import (
     LineService,
     LineEvent,
     verify_signature,
     SignatureVerificationError,
 )
-from src.services.card_service import CardNotFoundError
+from services.card_service import CardNotFoundError
 
 
 @pytest.fixture

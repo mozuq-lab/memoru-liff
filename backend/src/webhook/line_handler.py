@@ -8,13 +8,13 @@ from urllib.parse import parse_qs
 from aws_lambda_powertools import Logger, Tracer
 from aws_lambda_powertools.utilities.typing import LambdaContext
 
-from ..services.line_service import (
+from services.line_service import (
     LineService,
     LineEvent,
     SignatureVerificationError,
     LineApiError,
 )
-from ..services.flex_messages import (
+from services.flex_messages import (
     create_question_message,
     create_answer_message,
     create_no_cards_message,
@@ -22,8 +22,8 @@ from ..services.flex_messages import (
     create_link_required_message,
     create_error_message,
 )
-from ..services.card_service import CardService, CardNotFoundError
-from ..services.review_service import ReviewService
+from services.card_service import CardService, CardNotFoundError
+from services.review_service import ReviewService
 
 logger = Logger()
 tracer = Tracer()

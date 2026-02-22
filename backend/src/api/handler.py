@@ -12,33 +12,33 @@ from aws_lambda_powertools.logging import correlation_paths
 from aws_lambda_powertools.utilities.typing import LambdaContext
 from pydantic import ValidationError
 
-from ..models.user import LinkLineResponse, UserSettingsRequest, UserSettingsResponse
-from ..models.card import CreateCardRequest, UpdateCardRequest, CardListResponse
-from ..services.user_service import (
+from models.user import LinkLineResponse, UserSettingsRequest, UserSettingsResponse
+from models.card import CreateCardRequest, UpdateCardRequest, CardListResponse
+from services.user_service import (
     UserService,
     UserNotFoundError,
     UserAlreadyLinkedError,
     LineUserIdAlreadyUsedError,
     LineNotLinkedError,
 )
-from ..services.card_service import (
+from services.card_service import (
     CardService,
     CardNotFoundError,
     CardLimitExceededError,
 )
-from ..services.review_service import (
+from services.review_service import (
     ReviewService,
     InvalidGradeError,
 )
-from ..services.line_service import LineService, LineApiError
-from ..models.review import ReviewRequest
-from ..models.generate import (
+from services.line_service import LineService, LineApiError
+from models.review import ReviewRequest
+from models.generate import (
     GenerateCardsRequest,
     GenerateCardsResponse,
     GeneratedCardResponse,
     GenerationInfoResponse,
 )
-from ..services.bedrock import (
+from services.bedrock import (
     BedrockService,
     BedrockTimeoutError,
     BedrockRateLimitError,
@@ -566,4 +566,11 @@ def submit_review(card_id: str):
 @tracer.capture_lambda_handler
 def handler(event: dict, context: LambdaContext) -> dict:
     """Lambda handler for API Gateway events."""
+    # SAM local sends stage="dev" but rawPath="/path" without "/dev" prefix.
+    # Powertools strips "/{stage}" from rawPath, breaking routing.
+    # Fix: prepend stage prefix so stripping produces the correct path.
+    stage = event.get("requestContext", {}).get("stage", "$default")
+    raw_path = event.get("rawPath", "/")
+    if stage != "$default" and not raw_path.startswith(f"/{stage}"):
+        event["rawPath"] = f"/{stage}{raw_path}"
     return app.resolve(event, context)

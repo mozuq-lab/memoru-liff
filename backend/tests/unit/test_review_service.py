@@ -5,11 +5,11 @@ from moto import mock_aws
 import boto3
 from datetime import datetime, timedelta, timezone
 
-from src.services.review_service import (
+from services.review_service import (
     ReviewService,
     InvalidGradeError,
 )
-from src.services.card_service import CardNotFoundError
+from services.card_service import CardNotFoundError
 
 
 @pytest.fixture

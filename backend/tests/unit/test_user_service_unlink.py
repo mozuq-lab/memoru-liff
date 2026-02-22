@@ -48,7 +48,7 @@ def dynamodb_resource_moto():
 @pytest.fixture
 def user_service_moto(dynamodb_resource_moto):
     """Create a UserService instance with mocked DynamoDB."""
-    from src.services.user_service import UserService
+    from services.user_service import UserService
     return UserService(table_name=USERS_TABLE, dynamodb_resource=dynamodb_resource_moto)
 
 
@@ -66,7 +66,7 @@ class TestUnlinkLineServiceReturn:
             user_service.py L332 が {"user_id": ..., "unlinked_at": ...} という dict を返却しており、
             User インスタンスではないため isinstance(result, User) が False になる。
         """
-        from src.models.user import User
+        from models.user import User
 
         # Given: LINE連携済みユーザーを作成
         user_service_moto.create_user(user_id="test-user-id")
@@ -91,7 +91,7 @@ class TestUnlinkLineServiceReturn:
         【期待される動作】: user_id, settings, created_at などが正しく設定されている
         青 信頼性レベル: EARS-045-006 (派生)
         """
-        from src.models.user import User
+        from models.user import User
 
         # Given: 通知設定付きのLINE連携済みユーザーを作成
         user_service_moto.create_user(user_id="test-user-id")

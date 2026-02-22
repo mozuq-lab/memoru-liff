@@ -28,11 +28,11 @@ class TestLinkLineHandler:
         )
 
         # 【実際の処理実行】: handler を呼び出す
-        with patch("src.api.handler.user_service") as mock_user_service, \
-             patch("src.api.handler.line_service") as mock_line_service:
+        with patch("api.handler.user_service") as mock_user_service, \
+             patch("api.handler.line_service") as mock_line_service:
             mock_user_service.get_or_create_user.return_value = MagicMock()
 
-            from src.api.handler import handler
+            from api.handler import handler
             response = handler(event, lambda_context)
 
         # 【結果検証】: 400 ステータスコードが返ることを確認
@@ -61,11 +61,11 @@ class TestLinkLineHandler:
         )
 
         # 【実際の処理実行】: handler を呼び出す
-        with patch("src.api.handler.user_service") as mock_user_service, \
-             patch("src.api.handler.line_service") as mock_line_service:
+        with patch("api.handler.user_service") as mock_user_service, \
+             patch("api.handler.line_service") as mock_line_service:
             mock_user_service.get_or_create_user.return_value = MagicMock()
 
-            from src.api.handler import handler
+            from api.handler import handler
             response = handler(event, lambda_context)
 
         # 【結果検証】: 400 ステータスコードが返ることを確認
@@ -91,13 +91,13 @@ class TestLinkLineHandler:
         )
 
         # 【実際の処理実行】: handler を呼び出す
-        with patch("src.api.handler.user_service") as mock_user_service, \
-             patch("src.api.handler.line_service") as mock_line_service:
+        with patch("api.handler.user_service") as mock_user_service, \
+             patch("api.handler.line_service") as mock_line_service:
             # verify_id_token が line_user_id を返すようにモック
             mock_line_service.verify_id_token.return_value = "U1234567890abcdef1234567890abcdef"
             mock_user_service.get_or_create_user.return_value = MagicMock()
 
-            from src.api.handler import handler
+            from api.handler import handler
             response = handler(event, lambda_context)
 
         # 【結果検証】: 200 ステータスコードが返ることを確認
@@ -132,15 +132,15 @@ class TestLinkLineHandler:
         )
 
         # 【実際の処理実行】: handler を呼び出す
-        with patch("src.api.handler.user_service") as mock_user_service, \
-             patch("src.api.handler.line_service") as mock_line_service:
+        with patch("api.handler.user_service") as mock_user_service, \
+             patch("api.handler.line_service") as mock_line_service:
             mock_user_service.get_or_create_user.return_value = MagicMock()
             # verify_id_token が UnauthorizedError を発生させるようにモック
             mock_line_service.verify_id_token.side_effect = UnauthorizedError(
                 "LINE ID token verification failed"
             )
 
-            from src.api.handler import handler
+            from api.handler import handler
             response = handler(event, lambda_context)
 
         # 【結果検証】: 401 ステータスコードが返ることを確認

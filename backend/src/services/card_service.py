@@ -9,7 +9,7 @@ from aws_lambda_powertools import Logger
 from boto3.dynamodb.types import TypeSerializer
 from botocore.exceptions import ClientError
 
-from ..models.card import Card
+from models.card import Card
 
 # 【ロガー設定】: TransactionCanceledException などの内部エラーをログ出力するために必要 (EARS-009)
 logger = Logger()
@@ -77,7 +77,7 @@ class CardService:
         if dynamodb_resource:
             self.dynamodb = dynamodb_resource
         else:
-            endpoint_url = os.environ.get("AWS_ENDPOINT_URL")
+            endpoint_url = os.environ.get("DYNAMODB_ENDPOINT_URL") or os.environ.get("AWS_ENDPOINT_URL")
             if endpoint_url:
                 self.dynamodb = boto3.resource("dynamodb", endpoint_url=endpoint_url)
             else:

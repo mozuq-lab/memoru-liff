@@ -17,9 +17,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.models.user import User
-from src.services.notification_service import NotificationService, NotificationResult
-from src.services.line_service import LineApiError
+from models.user import User
+from services.notification_service import NotificationService, NotificationResult
+from services.line_service import LineApiError
 
 
 # ---------------------------------------------------------------------------

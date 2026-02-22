@@ -8,7 +8,7 @@ import pytest
 from moto import mock_aws
 import boto3
 
-from src.services.user_service import (
+from services.user_service import (
     UserService,
     UserNotFoundError,
     UserAlreadyLinkedError,

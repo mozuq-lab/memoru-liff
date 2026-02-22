@@ -9,7 +9,7 @@ from moto import mock_aws
 import boto3
 from botocore.exceptions import ClientError
 
-from src.services.user_service import (
+from services.user_service import (
     UserService,
     UserNotFoundError,
     UserServiceError,
@@ -53,7 +53,7 @@ class TestUserServiceUnlinkLine:
 
     def test_unlink_line_success(self, user_service, dynamodb_table):
         """Test unlinking LINE account successfully."""
-        from src.models.user import User
+        from models.user import User
 
         # Setup: create a user with LINE linked
         table = dynamodb_table.Table("memoru-users-test")
@@ -112,7 +112,7 @@ class TestUserServiceUnlinkLine:
 
     def test_unlink_line_datetime_timezone_aware(self, user_service, dynamodb_table):
         """Test that unlink_line uses timezone-aware datetime (UTC)."""
-        from src.models.user import User
+        from models.user import User
 
         # Setup: create a user with LINE linked
         table = dynamodb_table.Table("memoru-users-test")
@@ -141,7 +141,7 @@ class TestUnlinkLineAPIHandler:
 
     def test_unlink_line_function_exists(self):
         """Test that unlink_line function is defined in handler module."""
-        from src.api import handler
+        from api import handler
 
         # Verify the function exists
         assert hasattr(handler, "unlink_line")
@@ -150,11 +150,11 @@ class TestUnlinkLineAPIHandler:
     def test_unlink_line_function_calls_service(self):
         """Test that unlink_line function calls user_service.unlink_line with correct user_id."""
         from unittest.mock import patch, MagicMock
-        from src.api.handler import unlink_line, app, get_user_id_from_context
+        from api.handler import unlink_line, app, get_user_id_from_context
 
         # Setup: mock dependencies
-        with patch("src.api.handler.user_service") as mock_user_service, \
-             patch("src.api.handler.get_user_id_from_context") as mock_get_user_id:
+        with patch("api.handler.user_service") as mock_user_service, \
+             patch("api.handler.get_user_id_from_context") as mock_get_user_id:
 
             mock_get_user_id.return_value = "test-user-id"
             mock_user = MagicMock()
@@ -185,13 +185,13 @@ class TestUnlinkLineAPIHandler:
     def test_unlink_line_function_handles_not_linked_error(self):
         """Test that unlink_line function handles LineNotLinkedError with 400 response."""
         from unittest.mock import patch
-        from src.api.handler import unlink_line
-        from src.services.user_service import LineNotLinkedError
+        from api.handler import unlink_line
+        from services.user_service import LineNotLinkedError
         import json
 
         # Setup: mock dependencies
-        with patch("src.api.handler.user_service") as mock_user_service, \
-             patch("src.api.handler.get_user_id_from_context") as mock_get_user_id:
+        with patch("api.handler.user_service") as mock_user_service, \
+             patch("api.handler.get_user_id_from_context") as mock_get_user_id:
 
             mock_get_user_id.return_value = "test-user-id"
             mock_user_service.unlink_line.side_effect = LineNotLinkedError("LINE account not linked")

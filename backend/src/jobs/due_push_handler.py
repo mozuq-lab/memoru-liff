@@ -7,7 +7,7 @@ from typing import Any, Dict
 from aws_lambda_powertools import Logger, Tracer
 from aws_lambda_powertools.utilities.typing import LambdaContext
 
-from ..services.notification_service import NotificationService
+from services.notification_service import NotificationService
 
 logger = Logger()
 tracer = Tracer()

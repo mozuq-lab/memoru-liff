@@ -16,6 +16,8 @@ Globals:
         CARDS_TABLE: !Ref CardsTable
         REVIEWS_TABLE: !Ref ReviewsTable
         LOG_LEVEL: !If [IsProd, INFO, DEBUG]
+        DYNAMODB_ENDPOINT_URL: ""
+        AWS_ENDPOINT_URL: ""
 
 Parameters:
   Environment:

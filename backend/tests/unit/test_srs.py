@@ -3,7 +3,7 @@
 import pytest
 from datetime import datetime, timezone, timedelta
 
-from src.services.srs import (
+from services.srs import (
     calculate_sm2,
     add_review_history,
     ReviewHistoryEntry,

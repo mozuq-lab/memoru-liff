@@ -5,8 +5,8 @@ from datetime import datetime, timezone
 from moto import mock_aws
 import boto3
 
-from src.services.card_service import CardService
-from src.services.user_service import UserService
+from services.card_service import CardService
+from services.user_service import UserService
 
 
 @pytest.fixture

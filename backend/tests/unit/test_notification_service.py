@@ -5,10 +5,10 @@ import pytest
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
-from src.models.user import User
-from src.services.notification_service import NotificationService, NotificationResult
-from src.services.line_service import LineApiError
-from src.services.flex_messages import create_reminder_message
+from models.user import User
+from services.notification_service import NotificationService, NotificationResult
+from services.line_service import LineApiError
+from services.flex_messages import create_reminder_message
 
 
 class TestCreateReminderMessage:
@@ -244,7 +244,7 @@ class TestDuePushHandler:
     def test_handler_success(self):
         """Test handler returns success response."""
         # Mock the notification_service before importing handler
-        with patch("src.services.notification_service.NotificationService") as MockService:
+        with patch("services.notification_service.NotificationService") as MockService:
             mock_service = MagicMock()
             mock_result = NotificationResult(
                 processed=10,
@@ -276,7 +276,7 @@ class TestDuePushHandler:
     def test_handler_with_errors(self):
         """Test handler includes error count in response."""
         # Mock the notification_service before importing handler
-        with patch("src.services.notification_service.NotificationService") as MockService:
+        with patch("services.notification_service.NotificationService") as MockService:
             mock_service = MagicMock()
             mock_result = NotificationResult(
                 processed=10,

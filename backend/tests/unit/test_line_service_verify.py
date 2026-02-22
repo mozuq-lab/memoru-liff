@@ -9,7 +9,7 @@ import os
 import pytest
 from unittest.mock import patch, MagicMock
 
-from src.services.line_service import LineService, LineApiError
+from services.line_service import LineService, LineApiError
 
 
 class TestVerifyIdToken:
@@ -47,7 +47,7 @@ class TestVerifyIdToken:
         }
 
         # 【実際の処理実行】: verify_id_token を呼び出し、結果と呼び出し引数を検証
-        with patch("src.services.line_service.httpx.post", return_value=mock_response) as mock_post:
+        with patch("services.line_service.httpx.post", return_value=mock_response) as mock_post:
             # 【結果検証】: verify_id_token が実装されていないので AttributeError または NotImplementedError
             result = service.verify_id_token("valid-id-token")
 
@@ -88,7 +88,7 @@ class TestVerifyIdToken:
         }
 
         # 【実際の処理実行】: verify_id_token を呼び出す
-        with patch("src.services.line_service.httpx.post", return_value=mock_response):
+        with patch("services.line_service.httpx.post", return_value=mock_response):
             # 【結果検証】: 例外が発生することを確認
             with pytest.raises(Exception) as exc_info:
                 service.verify_id_token("invalid-id-token")
@@ -126,7 +126,7 @@ class TestVerifyIdToken:
         }
 
         # 【実際の処理実行】: verify_id_token を呼び出す
-        with patch("src.services.line_service.httpx.post", return_value=mock_response):
+        with patch("services.line_service.httpx.post", return_value=mock_response):
             # 【結果検証】: 例外が発生することを確認
             with pytest.raises(Exception) as exc_info:
                 service.verify_id_token("expired-id-token")
@@ -167,7 +167,7 @@ class TestVerifyIdToken:
         }
 
         # 【実際の処理実行】: verify_id_token を呼び出す
-        with patch("src.services.line_service.httpx.post", return_value=mock_response):
+        with patch("services.line_service.httpx.post", return_value=mock_response):
             # 【結果検証】: sub 欠落で例外が発生することを確認
             with pytest.raises(Exception) as exc_info:
                 service.verify_id_token("token-without-sub")
@@ -275,7 +275,7 @@ class TestHttpxMigration:
         mock_response.raise_for_status = MagicMock()
 
         # 【実際の処理実行】: httpx.post をモックして reply_message を呼び出す
-        with patch("src.services.line_service.httpx.post", return_value=mock_response) as mock_post:
+        with patch("services.line_service.httpx.post", return_value=mock_response) as mock_post:
             result = service.reply_message(
                 "reply-token",
                 [{"type": "text", "text": "Hello"}],
@@ -306,7 +306,7 @@ class TestHttpxMigration:
         mock_response.raise_for_status = MagicMock()
 
         # 【実際の処理実行】: httpx.post をモックして push_message を呼び出す
-        with patch("src.services.line_service.httpx.post", return_value=mock_response) as mock_post:
+        with patch("services.line_service.httpx.post", return_value=mock_response) as mock_post:
             result = service.push_message(
                 "U1234567890",
                 [{"type": "text", "text": "Hello"}],

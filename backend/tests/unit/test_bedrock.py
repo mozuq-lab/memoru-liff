@@ -5,7 +5,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 from botocore.exceptions import ClientError
 
-from src.services.bedrock import (
+from services.bedrock import (
     BedrockService,
     BedrockTimeoutError,
     BedrockRateLimitError,
@@ -13,7 +13,7 @@ from src.services.bedrock import (
     BedrockParseError,
     GeneratedCard,
 )
-from src.services.prompts import get_card_generation_prompt
+from services.prompts import get_card_generation_prompt
 
 
 class TestPrompts:

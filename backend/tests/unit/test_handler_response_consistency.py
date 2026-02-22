@@ -44,7 +44,7 @@ class TestResponseConsistency:
             user_id="test-user-id",
         )
 
-        with patch("src.api.handler.user_service") as mock_user_service:
+        with patch("api.handler.user_service") as mock_user_service:
             mock_user = MagicMock()
             mock_response = MagicMock()
             mock_response.model_dump.return_value = {
@@ -62,7 +62,7 @@ class TestResponseConsistency:
             mock_user_service.get_or_create_user.return_value = mock_user
             mock_user_service.update_settings.return_value = mock_user
 
-            from src.api.handler import handler
+            from api.handler import handler
             settings_response = handler(settings_event, lambda_context)
 
         settings_body = json.loads(settings_response["body"])
@@ -79,7 +79,7 @@ class TestResponseConsistency:
             user_id="test-user-id",
         )
 
-        with patch("src.api.handler.user_service") as mock_user_service:
+        with patch("api.handler.user_service") as mock_user_service:
             mock_user2 = MagicMock()
             mock_response2 = MagicMock()
             mock_response2.model_dump.return_value = {

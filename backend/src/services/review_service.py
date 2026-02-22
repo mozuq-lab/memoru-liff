@@ -7,8 +7,8 @@ from typing import List, Optional
 import boto3
 from botocore.exceptions import ClientError
 
-from ..models.card import Card
-from ..models.review import (
+from models.card import Card
+from models.review import (
     DueCardInfo,
     DueCardsResponse,
     ReviewPreviousState,
@@ -57,7 +57,7 @@ class ReviewService:
         if dynamodb_resource:
             self.dynamodb = dynamodb_resource
         else:
-            endpoint_url = os.environ.get("AWS_ENDPOINT_URL")
+            endpoint_url = os.environ.get("DYNAMODB_ENDPOINT_URL") or os.environ.get("AWS_ENDPOINT_URL")
             if endpoint_url:
                 self.dynamodb = boto3.resource("dynamodb", endpoint_url=endpoint_url)
             else:

@@ -5,7 +5,7 @@ from moto import mock_aws
 import boto3
 from datetime import datetime, timedelta, timezone
 
-from src.services.card_service import (
+from services.card_service import (
     CardService,
     CardNotFoundError,
     CardLimitExceededError,
@@ -825,7 +825,7 @@ class TestTransactionErrorClassification:
 
         # NOTE: InternalError クラスは現在の card_service.py に存在しない
         # このテストは InternalError が追加されるまで ImportError で失敗する
-        from src.services.card_service import InternalError  # noqa: F401
+        from services.card_service import InternalError  # noqa: F401
 
         original_client = card_service.dynamodb.meta.client
 
@@ -870,7 +870,7 @@ class TestTransactionErrorClassification:
         Maps to: AC-008, EARS-008
         """
         from botocore.exceptions import ClientError
-        from src.services.card_service import InternalError  # noqa: F401
+        from services.card_service import InternalError  # noqa: F401
 
         original_client = card_service.dynamodb.meta.client
 
@@ -913,7 +913,7 @@ class TestTransactionErrorClassification:
         Maps to: AC-008, EARS-008
         """
         from botocore.exceptions import ClientError
-        from src.services.card_service import InternalError  # noqa: F401
+        from services.card_service import InternalError  # noqa: F401
 
         original_client = card_service.dynamodb.meta.client
 
@@ -1012,7 +1012,7 @@ class TestDeleteCardTransaction:
         Maps to: AC-016, EARS-012
         """
         from botocore.exceptions import ClientError
-        from src.models.card import Card
+        from models.card import Card
 
         # 【テストデータ準備】: カードが存在することを模擬する (get_card成功)
         mock_card = Card(
@@ -1066,7 +1066,7 @@ class TestDeleteCardTransaction:
         Maps to: AC-013, EARS-013, EARS-014
         """
         from botocore.exceptions import ClientError
-        from src.models.card import Card
+        from models.card import Card
 
         # 【テストデータ準備】: カードが存在することを模擬する
         mock_card = Card(

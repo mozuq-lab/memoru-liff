@@ -7,14 +7,14 @@ import json
 import pytest
 from unittest.mock import MagicMock, patch
 
-from src.services.line_service import (
+from services.line_service import (
     LineService,
     LineEvent,
     verify_signature,
     SignatureVerificationError,
     LineApiError,
 )
-from src.services.flex_messages import (
+from services.flex_messages import (
     create_question_message,
     create_answer_message,
     create_no_cards_message,
@@ -358,7 +358,7 @@ class TestLineServiceApi:
             channel_secret="test-secret",
         )
 
-    @patch("src.services.line_service.httpx.post")
+    @patch("services.line_service.httpx.post")
     def test_reply_message_success(self, mock_post, line_service):
         """Test successful reply message."""
         mock_post.return_value.raise_for_status = MagicMock()
@@ -371,7 +371,7 @@ class TestLineServiceApi:
         assert result is True
         mock_post.assert_called_once()
 
-    @patch("src.services.line_service.httpx.post")
+    @patch("services.line_service.httpx.post")
     def test_push_message_success(self, mock_post, line_service):
         """Test successful push message."""
         mock_post.return_value.raise_for_status = MagicMock()

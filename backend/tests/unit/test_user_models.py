@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from src.models.user import LinkLineRequest, UserSettingsRequest, User
+from models.user import LinkLineRequest, UserSettingsRequest, User
 
 
 class TestLinkLineRequest:

@@ -35,7 +35,7 @@ class TestUpdateSettingsResponse:
             user_id="test-user-id",
         )
 
-        with patch("src.api.handler.user_service") as mock_user_service:
+        with patch("api.handler.user_service") as mock_user_service:
             mock_user = MagicMock()
             mock_user.settings = {"notification_time": "21:00", "timezone": "UTC"}
             mock_user_service.get_or_create_user.return_value = mock_user
@@ -54,7 +54,7 @@ class TestUpdateSettingsResponse:
             }
             mock_user.to_response.return_value = mock_response
 
-            from src.api.handler import handler
+            from api.handler import handler
             response = handler(event, lambda_context)
 
         assert response["statusCode"] == 200
@@ -95,7 +95,7 @@ class TestUpdateSettingsResponse:
             user_id="test-user-id",
         )
 
-        with patch("src.api.handler.user_service") as mock_user_service:
+        with patch("api.handler.user_service") as mock_user_service:
             mock_user = MagicMock()
             mock_user.settings = {"notification_time": "21:00", "timezone": "Asia/Tokyo"}
             mock_user_service.get_or_create_user.return_value = mock_user
@@ -114,7 +114,7 @@ class TestUpdateSettingsResponse:
             }
             mock_user.to_response.return_value = mock_response
 
-            from src.api.handler import handler
+            from api.handler import handler
             response = handler(event, lambda_context)
 
         assert response["statusCode"] == 200
@@ -166,7 +166,7 @@ class TestUpdateSettingsResponse:
             user_id="test-user-id",
         )
 
-        with patch("src.api.handler.user_service") as mock_user_service:
+        with patch("api.handler.user_service") as mock_user_service:
             mock_user = MagicMock()
             mock_user.settings = {"notification_time": "21:00", "timezone": "UTC"}
             mock_user_service.get_or_create_user.return_value = mock_user
@@ -185,7 +185,7 @@ class TestUpdateSettingsResponse:
             }
             mock_user.to_response.return_value = mock_response
 
-            from src.api.handler import handler
+            from api.handler import handler
             response = handler(event, lambda_context)
 
         body = json.loads(response["body"])
