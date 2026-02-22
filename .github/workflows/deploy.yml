@@ -98,7 +98,7 @@ jobs:
     name: Deploy Backend
     needs: [test-backend, test-frontend]
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    if: github.event_name == 'workflow_dispatch'
     environment: ${{ github.event.inputs.environment || 'dev' }}
     defaults:
       run:
@@ -139,7 +139,7 @@ jobs:
     name: Deploy Frontend
     needs: [test-backend, test-frontend]
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    if: github.event_name == 'workflow_dispatch'
     environment: ${{ github.event.inputs.environment || 'dev' }}
     defaults:
       run:
