@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 # Set environment variables for testing
 os.environ["ENVIRONMENT"] = "test"
+os.environ["AWS_DEFAULT_REGION"] = "ap-northeast-1"
 os.environ["USERS_TABLE"] = "memoru-users-test"
 os.environ["CARDS_TABLE"] = "memoru-cards-test"
 os.environ["REVIEWS_TABLE"] = "memoru-reviews-test"
