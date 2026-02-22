@@ -67,45 +67,77 @@ memoru-liff/
 - AWS SAM CLI
 - Docker (ローカル開発用)
 
-### バックエンド
+### 初回セットアップ
 
 ```bash
+# バックエンド依存関係
 cd backend
-
-# Python 仮想環境のセットアップ
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
-
-# 依存関係インストール
 pip install -r requirements.txt
 pip install -r requirements-dev.txt
 
-# テスト実行
-make test
-
-# ローカル API 起動
-make local-api
+# フロントエンド依存関係
+cd ../frontend
+npm install
 ```
 
-### フロントエンド
+### ローカル開発環境の起動
+
+LINE 環境なしでも動作確認できるよう、Keycloak を Docker で起動してユーザー名/パスワード認証が可能です。
 
 ```bash
-cd frontend
+# 1. 全ローカルサービス起動（DynamoDB + Keycloak）
+cd backend && make local-all
 
-# 依存関係インストール
-npm install
+# 2. Keycloak の起動を待つ（初回は約20秒）
 
-# 開発サーバー起動
-npm run dev
+# 3. バックエンド API 起動（別ターミナル）
+cd backend && make local-api
 
-# テスト実行
-npm run test
+# 4. フロントエンド起動（別ターミナル）
+cd frontend && npm run dev
 
-# 型チェック
-npm run type-check
+# 5. ブラウザで http://localhost:3000 にアクセス
+#    → Keycloak ログイン画面にリダイレクト
+#    → test-user / test-password-123 でログイン
+```
+
+#### ローカルサービス一覧
+
+| サービス | URL | 用途 |
+|---------|-----|------|
+| フロントエンド | http://localhost:3000 | React アプリ |
+| バックエンド API | http://localhost:8080 | SAM Local API |
+| Keycloak | http://localhost:8180 | 認証サーバー |
+| Keycloak 管理コンソール | http://localhost:8180/admin | admin / admin |
+| DynamoDB Local | http://localhost:8000 | データベース |
+| DynamoDB Admin | http://localhost:8001 | DB 管理 UI |
+
+#### テストユーザー
+
+| ユーザー名 | パスワード | ロール |
+|-----------|-----------|--------|
+| test-user | test-password-123 | user |
+| test-admin | admin-password-123 | user, admin |
+
+#### サービス停止
+
+```bash
+cd backend && make local-all-stop
+```
+
+### テスト実行
+
+```bash
+# バックエンド
+cd backend && make test
+
+# フロントエンド
+cd frontend && npm run test
 
 # E2E テスト
-npm run test:e2e
+cd frontend && npm run test:e2e
 ```
 
 ## デプロイ

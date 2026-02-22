@@ -1,5 +1,6 @@
 """Main API handler for Memoru LIFF application."""
 
+import base64
 import json
 import os
 from typing import Any
@@ -77,10 +78,25 @@ def get_user_id_from_context() -> str:
         # Direct claims access
         if claims and "sub" in claims:
             return claims["sub"]
-        raise UnauthorizedError("Unable to extract user ID from token")
     except (KeyError, TypeError, AttributeError) as e:
-        logger.error(f"Failed to extract user_id: {e}")
-        raise UnauthorizedError("Unable to extract user ID from token")
+        logger.warning(f"Failed to extract user_id from authorizer context: {e}")
+
+    # Dev environment fallback: decode JWT from Authorization header directly.
+    # In production, API Gateway JWT Authorizer validates tokens before Lambda is invoked.
+    # SAM local does not apply JWT Authorizer, so we decode the payload here.
+    if os.environ.get("ENVIRONMENT") == "dev":
+        try:
+            auth_header = app.current_event.get_header_value("Authorization")
+            if auth_header and auth_header.startswith("Bearer "):
+                token = auth_header.split(" ", 1)[1]
+                payload = token.split(".")[1]
+                payload += "=" * (4 - len(payload) % 4)
+                decoded = json.loads(base64.urlsafe_b64decode(payload))
+                return decoded["sub"]
+        except (KeyError, IndexError, ValueError, Exception) as e:
+            logger.error(f"Failed to decode JWT from Authorization header: {e}")
+
+    raise UnauthorizedError("Unable to extract user ID from token")
 
 
 # =============================================================================

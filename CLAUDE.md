@@ -12,7 +12,7 @@ LINE ベースの暗記カードアプリケーション。SRS (Spaced Repetitio
 
 #### タスク実装の流れ
 
-1. **タスクファイルの確認**: `docs/tasks/memoru-liff/TASK-XXXX.md` を読む
+1. **タスクファイルの確認**: `docs/tasks/{要件名}/TASK-XXXX.md` を読む
 2. **タスクタイプに応じた実装**:
    - **TDD タスク**: `/tsumiki:tdd-red` → `/tsumiki:tdd-green` → `/tsumiki:tdd-refactor`
    - **DIRECT タスク**: `/tsumiki:direct-setup` → `/tsumiki:direct-verify`
@@ -47,10 +47,19 @@ LINE ベースの暗記カードアプリケーション。SRS (Spaced Repetitio
 
 ### 現在の進捗
 
+#### memoru-liff（初期実装）
 - [~] Phase 1: 基盤インフラ構築 (TASK-0001 ~ TASK-0005) - IaCテンプレート作成完了、デプロイ待ち
 - [x] Phase 2: バックエンド実装 (TASK-0006 ~ TASK-0011)
-- [ ] Phase 3: フロントエンド実装 (TASK-0012 ~ TASK-0019)
-- [ ] Phase 4: 統合テスト (TASK-0020 ~ TASK-0022)
+- [x] Phase 3: フロントエンド実装 (TASK-0012 ~ TASK-0019)
+- [x] Phase 4: 統合テスト (TASK-0020 ~ TASK-0022)
+
+#### code-review-remediation（コードレビュー修正 第1弾）
+- [x] Phase 1: Critical修正 (TASK-0023 ~ TASK-0029) - API契約統一、認証フロー、セキュリティ
+- [x] Phase 2: High修正 (TASK-0030 ~ TASK-0041) - datetime統一、トークンリフレッシュ、インフラ最適化
+
+#### code-review-fixes-v2（コードレビュー修正 第2弾）
+- [x] Phase 1: Critical修正 (TASK-0042 ~ TASK-0043) - APIルート統一、card_countトランザクション
+- [x] Phase 2: High修正 (TASK-0044 ~ TASK-0047) - LINE連携検証、DTO統一、通知TZ、設定統一
 
 ## 技術スタック
 
@@ -99,6 +108,52 @@ memoru-liff/
     └── vite.config.ts         # Vite設定
 ```
 
+## ローカル開発環境
+
+LINE 環境なしでも動作確認できるよう、Keycloak を Docker で起動してローカル認証を行う。
+
+### 起動手順
+
+```bash
+# 1. 全ローカルサービス起動（DynamoDB + Keycloak）
+cd backend && make local-all
+
+# 2. Keycloak 起動待ち（初回は約20秒）
+#    http://localhost:8180/health/ready で確認
+
+# 3. バックエンド API 起動（別ターミナル）
+cd backend && make local-api
+
+# 4. フロントエンド起動（別ターミナル）
+cd frontend && npm run dev
+
+# 5. ブラウザで http://localhost:3000 にアクセス
+#    → Keycloak ログイン画面 → test-user / test-password-123
+```
+
+### ローカルサービス一覧
+
+| サービス | URL | 用途 |
+|---------|-----|------|
+| Vite | http://localhost:3000 | フロントエンド |
+| SAM Local API | http://localhost:8080 | バックエンド API |
+| Keycloak | http://localhost:8180 | 認証（admin/admin で管理コンソール） |
+| DynamoDB Local | http://localhost:8000 | データベース |
+| DynamoDB Admin | http://localhost:8001 | DB 管理 UI |
+
+### テストユーザー
+
+| ユーザー名 | パスワード | ロール |
+|-----------|-----------|--------|
+| test-user | test-password-123 | user |
+| test-admin | admin-password-123 | user, admin |
+
+### 停止
+
+```bash
+cd backend && make local-all-stop
+```
+
 ## 開発コマンド
 
 ### バックエンド
@@ -109,10 +164,16 @@ cd backend
 # ローカルDynamoDB起動
 make local-db
 
+# ローカルKeycloak起動
+make local-keycloak
+
+# 全ローカルサービス起動
+make local-all
+
 # SAMビルド
 make build
 
-# ローカルAPI起動
+# ローカルAPI起動（ポート8080）
 make local-api
 
 # テスト実行
@@ -130,7 +191,7 @@ cd frontend
 # 依存関係インストール
 npm install
 
-# 開発サーバー起動
+# 開発サーバー起動（ポート3000）
 npm run dev
 
 # ビルド
@@ -143,7 +204,7 @@ npm run type-check
 ### インフラ
 
 ```bash
-# Keycloak デプロイ
+# Keycloak デプロイ（AWS）
 cd infrastructure/keycloak && make deploy-dev
 
 # LIFF ホスティング デプロイ

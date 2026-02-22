@@ -2,7 +2,7 @@
 SHELL := /bin/bash
 AWS_REGION ?= ap-northeast-1
 
-.PHONY: help install build validate deploy-dev deploy-prod local-db local-api test clean
+.PHONY: help install build validate deploy-dev deploy-prod local-db local-keycloak local-all local-all-stop local-api test clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -26,15 +26,27 @@ deploy-prod: build ## Deploy to production environment
 	sam deploy --config-env prod
 
 local-db: ## Start local DynamoDB
-	docker-compose up -d dynamodb-local dynamodb-admin setup-tables
+	docker compose up -d dynamodb-local dynamodb-admin setup-tables
 	@echo "DynamoDB Local: http://localhost:8000"
 	@echo "DynamoDB Admin: http://localhost:8001"
 
+local-keycloak: ## Start local Keycloak
+	docker compose up -d keycloak
+	@echo "Keycloak: http://localhost:8180"
+	@echo "Admin Console: http://localhost:8180/admin (admin/admin)"
+	@echo "Test User: test-user / test-password-123"
+
+local-all: local-db local-keycloak ## Start all local services
+	@echo "All local services started"
+
+local-all-stop: ## Stop all local services
+	docker compose down
+
 local-db-stop: ## Stop local DynamoDB
-	docker-compose down
+	docker compose down
 
 local-api: build ## Start local API
-	sam local start-api --docker-network memoru-network --env-vars env.json
+	sam local start-api --port 8080 --docker-network memoru-network --env-vars env.json
 
 local-invoke: build ## Invoke function locally
 	sam local invoke ApiFunction --docker-network memoru-network --env-vars env.json

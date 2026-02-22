@@ -27,7 +27,49 @@ Memoru LIFF アプリケーション用の Keycloak 認証基盤インフラス�
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## 前提条件
+## ローカル開発環境（Docker）
+
+LINE 環境なしでも認証フローの動作確認ができるよう、Keycloak を Docker で起動できます。
+
+### 構成ファイル
+
+| ファイル | 用途 |
+|---------|------|
+| `realm-export.json` | 本番/ステージング用 realm 設定（LINE IdP あり） |
+| `realm-local.json` | ローカル開発用 realm 設定（LINE IdP なし、テストユーザー付き） |
+| `test-users.json` | テストユーザー定義（realm-local.json に統合済み） |
+
+### ローカル Keycloak 起動
+
+```bash
+cd backend
+
+# Keycloak のみ起動
+make local-keycloak
+
+# DynamoDB + Keycloak をまとめて起動
+make local-all
+```
+
+- Keycloak: http://localhost:8180
+- 管理コンソール: http://localhost:8180/admin（admin / admin）
+- OIDC ディスカバリ: http://localhost:8180/realms/memoru/.well-known/openid-configuration
+
+### realm-local.json の主な変更点（realm-export.json との差分）
+
+- `sslRequired`: `"external"` → `"none"`（localhost は HTTP）
+- `loginWithEmailAllowed`: `true`（メールでもログイン可能）
+- `directAccessGrantsEnabled`: `true`（Resource Owner Password Grant 有効）
+- `identityProviders`: LINE IdP を削除
+- `users`: テストユーザーを組み込み（Keycloak 起動時に自動作成）
+- `clientScopes`: `profile`、`email` スコープを明示的に定義（realm インポート時に組み込みスコープが自動作成されないため）
+- `components`: 空（Keycloak 24.0 のデフォルトに任せる）
+
+---
+
+## AWS デプロイ
+
+### 前提条件
 
 - AWS CLI v2 がインストールされていること
 - 適切な AWS 認証情報が設定されていること
