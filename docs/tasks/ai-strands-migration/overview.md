@@ -34,7 +34,7 @@
 
 - [x] Phase 1: 基盤構築
 - [x] Phase 2: Strands カード生成移行
-- [ ] Phase 3: 新機能追加
+- [x] Phase 3: 新機能追加
 - [ ] Phase 4: ローカル開発 + 最終検証
 
 ## マイルストーン
@@ -100,7 +100,7 @@ TASK-0055 + TASK-0057 → TASK-0058
 - [x] [TASK-0060: POST /reviews/{card_id}/grade-ai エンドポイント](TASK-0060.md) - 8h (TDD) 🔵
 - [x] [TASK-0061: 学習データ集計 + アドバイスモデル・プロンプト](TASK-0061.md) - 8h (TDD) 🟡
 - [x] [TASK-0062: 学習アドバイス AI 実装 + GET /advice エンドポイント](TASK-0062.md) - 8h (TDD) 🔵
-- [ ] [TASK-0063: Phase 3 統合テスト](TASK-0063.md) - 8h (TDD) 🔵
+- [x] [TASK-0063: Phase 3 統合テスト](TASK-0063.md) - 8h (TDD) 🔵
 
 ### 依存関係
 
