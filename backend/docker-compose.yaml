@@ -1,7 +1,8 @@
 services:
   dynamodb-local:
-    image: amazon/dynamodb-local:latest
+    image: amazon/dynamodb-local:2.5.3
     container_name: memoru-dynamodb-local
+    user: root
     command: "-jar DynamoDBLocal.jar -sharedDb -dbPath /home/dynamodblocal/data"
     ports:
       - "8000:8000"
