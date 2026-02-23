@@ -61,11 +61,11 @@ memoru-liff/
 
 ### 前提条件
 
-- Python 3.12+
+- Python 3.12+ (テスト実行用。SAM ビルドは Docker コンテナで実行されるため不要)
 - Node.js 20+
 - AWS CLI v2
 - AWS SAM CLI
-- Docker (ローカル開発用)
+- Docker (ローカル開発用・SAM ビルド用)
 
 ### 初回セットアップ
 
@@ -267,6 +267,57 @@ API エンドポイント一覧：
 | GET | `/reviews/stats` | 復習統計取得 |
 | POST | `/cards/generate` | AI カード生成 |
 | POST | `/webhook/line` | LINE Webhook |
+
+## トラブルシューティング
+
+### SAM ビルドが失敗する（Python バージョン不一致）
+
+ホストマシンに Python 3.12 がない場合（例: Python 3.13 のみインストール済み）、`sam build` が失敗します。
+`Makefile` の `build` ターゲットは `--use-container` を使用しているため、Docker が起動していれば自動的に解決されます。
+
+```bash
+# Docker が起動していることを確認
+docker ps
+
+# SAM ビルド（Docker コンテナで Python 3.12 を使用）
+cd backend && make build
+```
+
+### DynamoDB Local に接続できない
+
+`make local-db` でテーブルが正しく作成されているか確認:
+
+```bash
+aws dynamodb list-tables --endpoint-url http://localhost:8000 --region ap-northeast-1
+# 期待結果: memoru-users-dev, memoru-cards-dev, memoru-reviews-dev
+```
+
+### Keycloak が起動しない
+
+初回起動は約60秒かかります。ヘルスチェックで確認:
+
+```bash
+curl -s http://localhost:8180/health/ready
+# 期待結果: {"status": "UP", ...}
+```
+
+起動しない場合は Docker ログを確認:
+
+```bash
+cd backend && docker compose logs keycloak
+```
+
+### JWT フォールバックが動作しない（SAM local）
+
+SAM local では API Gateway の JWT Authorizer が適用されないため、`ENVIRONMENT=dev` 設定時に JWT フォールバックが有効になります。`env.json` に以下が設定されていることを確認してください:
+
+```json
+{
+  "ApiFunction": {
+    "ENVIRONMENT": "dev"
+  }
+}
+```
 
 ## ライセンス
 

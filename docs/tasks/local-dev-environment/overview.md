@@ -36,7 +36,7 @@
 
 ## 全体進捗
 
-- [ ] Phase 1: 残タスク解決
+- [x] Phase 1: 残タスク解決
 
 ## マイルストーン
 
@@ -54,7 +54,7 @@
 
 - [x] [TASK-0049: JWT フォールバック テスト検証](TASK-0049.md) - 4h (TDD) 🔵
 - [x] [TASK-0050: DynamoDB Local SigV4 問題解決](TASK-0050.md) - 4h (DIRECT) 🔵
-- [ ] [TASK-0051: ローカル環境 E2E 動作確認](TASK-0051.md) - 4h (DIRECT) 🔵
+- [x] [TASK-0051: ローカル環境 E2E 動作確認](TASK-0051.md) - 4h (DIRECT) 🔵
 
 ### 依存関係
 

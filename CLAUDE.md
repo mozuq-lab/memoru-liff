@@ -61,6 +61,9 @@ LINE ベースの暗記カードアプリケーション。SRS (Spaced Repetitio
 - [x] Phase 1: Critical修正 (TASK-0042 ~ TASK-0043) - APIルート統一、card_countトランザクション
 - [x] Phase 2: High修正 (TASK-0044 ~ TASK-0047) - LINE連携検証、DTO統一、通知TZ、設定統一
 
+#### local-dev-environment（ローカル開発環境構築）
+- [x] Phase 1: 残タスク解決 (TASK-0049 ~ TASK-0051) - JWT テスト検証、DynamoDB SigV4 修正、E2E 確認
+
 ## 技術スタック
 
 ### バックエンド

@@ -10,8 +10,8 @@ help: ## Show this help
 install: ## Install Python dependencies
 	pip install -r requirements.txt -r requirements-dev.txt
 
-build: ## Build SAM application
-	sam build
+build: ## Build SAM application (uses Docker container for Python 3.12)
+	sam build --use-container
 
 validate: ## Validate SAM template
 	sam validate --lint

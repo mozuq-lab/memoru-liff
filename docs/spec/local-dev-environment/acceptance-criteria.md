@@ -35,10 +35,11 @@
 
 ##### 正常系
 
-- [ ] **TC-LD-001-01**: 全バックエンドテスト pass 🔵
+- [x] **TC-LD-001-01**: 全バックエンドテスト pass 🔵
   - **入力**: `pytest tests/ -x -q`
   - **期待結果**: 251 tests passed
   - **信頼性**: 🔵 *計画ファイルより*
+  - **確認結果**: TASK-0051 にて 260 tests passed（TASK-0049 で追加分を含む）
 
 - [ ] **TC-LD-001-02**: SAM ビルド成功 🔵
   - **入力**: `sam build`
@@ -132,10 +133,11 @@
 
 ##### 正常系
 
-- [ ] **TC-LD-031-01**: Keycloak がポート 8180 で起動する 🔵
+- [x] **TC-LD-031-01**: Keycloak がポート 8180 で起動する 🔵
   - **入力**: `make local-keycloak`
   - **期待結果**: `http://localhost:8180/health/ready` が 200 を返す
   - **信頼性**: 🔵 *計画ファイルより*
+  - **確認結果**: TASK-0051 にて確認済み（status: UP）
 
 - [ ] **TC-LD-031-02**: テストユーザーでログインできる 🔵
   - **入力**: test-user / test-password-123
@@ -171,15 +173,17 @@
 
 ##### 正常系
 
-- [ ] **TC-LD-061-01**: 正規の Keycloak トークンからユーザー ID を抽出 🔵
+- [x] **TC-LD-061-01**: 正規の Keycloak トークンからユーザー ID を抽出 🔵
   - **入力**: Keycloak が発行した有効な JWT（`Authorization: Bearer eyJ...`）
   - **期待結果**: `sub` クレームの値がユーザー ID として使用される
   - **信頼性**: 🔵 *計画ファイル・Keycloak の標準 JWT 仕様*
+  - **確認結果**: TASK-0049 テスト + TASK-0051 プログラム的検証にて確認済み
 
-- [ ] **TC-LD-061-02**: API Gateway authorizer context がある場合はフォールバック不使用 🔵
+- [x] **TC-LD-061-02**: API Gateway authorizer context がある場合はフォールバック不使用 🔵
   - **入力**: authorizer context に `sub` が含まれるイベント
   - **期待結果**: authorizer context の `sub` が優先される
   - **信頼性**: 🔵 *REQ-LD-101 制約。本番互換性*
+  - **確認結果**: TASK-0051 プログラム的検証にて確認済み
 
 ##### 異常系
 
@@ -231,20 +235,23 @@
 
 ##### 正常系
 
-- [ ] **TC-LD-071-01**: ホストマシンから DynamoDB local にテーブル一覧を取得 🔵
+- [x] **TC-LD-071-01**: ホストマシンから DynamoDB local にテーブル一覧を取得 🔵
   - **入力**: `aws dynamodb list-tables --endpoint-url http://localhost:8000`
   - **期待結果**: 3 テーブル（memoru-users-dev, memoru-cards-dev, memoru-reviews-dev）
   - **信頼性**: 🔵 *基本的な接続確認*
+  - **確認結果**: TASK-0051 にて確認済み（3テーブル存在確認）
 
-- [ ] **TC-LD-071-02**: boto3 から DynamoDB local にデータを読み書き 🔵
+- [x] **TC-LD-071-02**: boto3 から DynamoDB local にデータを読み書き 🔵
   - **入力**: Python スクリプトで put_item / get_item
   - **期待結果**: タイムアウトなしで正常完了
   - **信頼性**: 🔵 *SigV4 問題の解決確認*
+  - **確認結果**: TASK-0051 にて put_item/get_item/delete_item 正常完了確認済み
 
 - [ ] **TC-LD-071-03**: SAM local Lambda から DynamoDB local にアクセス 🔵
   - **入力**: `GET /users/me`（JWT フォールバック有効）
   - **期待結果**: ユーザーデータが返却される（または新規作成される）
   - **信頼性**: 🔵 *Docker ネットワーク経由の接続確認*
+  - **確認方法**: `make local-api` 起動後に手動確認が必要（SAM local は長時間プロセスのため自動確認外）
 
 ##### 異常系
 
