@@ -4,7 +4,7 @@ Description: Memoru LIFF - Backend API and DynamoDB Tables
 
 Globals:
   Function:
-    Timeout: 30
+    Timeout: 60
     MemorySize: 256
     Runtime: python3.12
     Architectures:
@@ -18,6 +18,7 @@ Globals:
         LOG_LEVEL: !If [IsProd, INFO, DEBUG]
         DYNAMODB_ENDPOINT_URL: ""
         AWS_ENDPOINT_URL: ""
+        USE_STRANDS: !Ref UseStrands
 
 Parameters:
   Environment:
@@ -50,8 +51,17 @@ Parameters:
     Default: ''
     Description: LINE Login Channel ID for ID token verification
 
+  UseStrands:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Enable Strands Agents SDK for AI services
+
 Conditions:
   IsProd: !Equals [!Ref Environment, prod]
+  ShouldUseStrands: !Equals [!Ref UseStrands, "true"]
 
 Resources:
   #============================================================
@@ -416,6 +426,70 @@ Resources:
         Environment: !Ref Environment
         Application: memoru
 
+  # Reviews Grade AI Function
+  ReviewsGradeAiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub memoru-reviews-grade-ai-${Environment}
+      CodeUri: src/
+      Handler: api.handler.grade_ai_handler
+      Description: AI grading handler for POST /reviews/{cardId}/grade-ai
+      Timeout: 60
+      MemorySize: 512
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UsersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CardsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ReviewsTable
+      Environment:
+        Variables:
+          KEYCLOAK_ISSUER: !Ref KeycloakIssuer
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+      Events:
+        ReviewsGradeAi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /reviews/{cardId}/grade-ai
+            Method: POST
+      Tags:
+        Environment: !Ref Environment
+        Application: memoru
+
+  # Advice Function
+  AdviceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub memoru-advice-${Environment}
+      CodeUri: src/
+      Handler: api.handler.advice_handler
+      Description: AI learning advice handler for GET /advice
+      Timeout: 60
+      MemorySize: 512
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UsersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CardsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ReviewsTable
+      Environment:
+        Variables:
+          KEYCLOAK_ISSUER: !Ref KeycloakIssuer
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+      Events:
+        Advice:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /advice
+            Method: GET
+      Tags:
+        Environment: !Ref Environment
+        Application: memoru
+
   #============================================================
   # CloudWatch Logs - LogGroups with Retention
   #============================================================
@@ -439,6 +513,20 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub "/aws/lambda/${DuePushJobFunction}"
+      RetentionInDays: !If [IsProd, 90, 14]
+
+  # Reviews Grade AI Function LogGroup
+  ReviewsGradeAiFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ReviewsGradeAiFunction}"
+      RetentionInDays: !If [IsProd, 90, 14]
+
+  # Advice Function LogGroup
+  AdviceFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AdviceFunction}"
       RetentionInDays: !If [IsProd, 90, 14]
 
   #============================================================
@@ -712,6 +800,18 @@ Outputs:
     Value: !GetAtt LineWebhookFunction.Arn
     Export:
       Name: !Sub memoru-${Environment}-line-webhook-function-arn
+
+  ReviewsGradeAiFunctionArn:
+    Description: Reviews Grade AI Lambda function ARN
+    Value: !GetAtt ReviewsGradeAiFunction.Arn
+    Export:
+      Name: !Sub memoru-${Environment}-reviews-grade-ai-function-arn
+
+  AdviceFunctionArn:
+    Description: Advice Lambda function ARN
+    Value: !GetAtt AdviceFunction.Arn
+    Export:
+      Name: !Sub memoru-${Environment}-advice-function-arn
 
   # Monitoring (Production Only)
   AlertSNSTopicArn:

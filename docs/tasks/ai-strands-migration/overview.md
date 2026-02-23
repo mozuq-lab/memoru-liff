@@ -32,7 +32,7 @@
 
 ## 全体進捗
 
-- [ ] Phase 1: 基盤構築
+- [x] Phase 1: 基盤構築
 - [ ] Phase 2: Strands カード生成移行
 - [ ] Phase 3: 新機能追加
 - [ ] Phase 4: ローカル開発 + 最終検証
@@ -57,7 +57,7 @@
 - [x] [TASK-0053: AIService Protocol + 共通型定義 + 例外階層](TASK-0053.md) - 8h (TDD) 🔵
 - [x] [TASK-0054: プロンプトモジュールディレクトリ化](TASK-0054.md) - 8h (TDD) 🔵
 - [x] [TASK-0055: BedrockAIService Protocol 準拠改修](TASK-0055.md) - 8h (TDD) 🔵
-- [ ] [TASK-0056: handler.py AIServiceFactory 統合 + template.yaml 更新](TASK-0056.md) - 8h (TDD) 🔵
+- [x] [TASK-0056: handler.py AIServiceFactory 統合 + template.yaml 更新](TASK-0056.md) - 8h (TDD) 🔵
 
 ### 依存関係
 

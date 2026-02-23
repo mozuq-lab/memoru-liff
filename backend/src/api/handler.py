@@ -7,12 +7,12 @@ from typing import Any
 
 from aws_lambda_powertools import Logger, Tracer
 from aws_lambda_powertools.event_handler import APIGatewayHttpResolver, Response, content_types
-from aws_lambda_powertools.event_handler.exceptions import NotFoundError, BadRequestError, UnauthorizedError
+from aws_lambda_powertools.event_handler.exceptions import NotFoundError, UnauthorizedError
 from aws_lambda_powertools.logging import correlation_paths
 from aws_lambda_powertools.utilities.typing import LambdaContext
 from pydantic import ValidationError
 
-from models.user import LinkLineResponse, UserSettingsRequest, UserSettingsResponse
+from models.user import LinkLineResponse, UserSettingsRequest
 from models.card import CreateCardRequest, UpdateCardRequest, CardListResponse
 from services.user_service import (
     UserService,
@@ -30,7 +30,7 @@ from services.review_service import (
     ReviewService,
     InvalidGradeError,
 )
-from services.line_service import LineService, LineApiError
+from services.line_service import LineService
 from models.review import ReviewRequest
 from models.generate import (
     GenerateCardsRequest,
@@ -38,12 +38,14 @@ from models.generate import (
     GeneratedCardResponse,
     GenerationInfoResponse,
 )
-from services.bedrock import (
-    BedrockService,
-    BedrockTimeoutError,
-    BedrockRateLimitError,
-    BedrockInternalError,
-    BedrockParseError,
+from services.ai_service import (
+    create_ai_service,
+    AIServiceError,
+    AITimeoutError,
+    AIRateLimitError,
+    AIInternalError,
+    AIParseError,
+    AIProviderError,
 )
 
 logger = Logger()
@@ -54,8 +56,55 @@ app = APIGatewayHttpResolver()
 user_service = UserService()
 card_service = CardService()
 review_service = ReviewService()
-bedrock_service = BedrockService()
 line_service = LineService()
+
+
+def _map_ai_error_to_http(error: AIServiceError) -> Response:
+    """AI サービス例外を適切な HTTP レスポンスにマッピングする。
+
+    🔵 API 仕様 api-endpoints.md に基づく確定実装。
+    各例外タイプに対してセマンティックな HTTP ステータスコードを返す。
+
+    Args:
+        error: AI サービス層から送出された例外
+
+    Returns:
+        適切な HTTP ステータスコードとエラーメッセージを含む Response オブジェクト
+    """
+    if isinstance(error, AITimeoutError):
+        # 【タイムアウト】: AI 処理が制限時間内に完了しなかった場合 → 504 Gateway Timeout
+        return Response(
+            status_code=504,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": "AI service timeout"}),
+        )
+    if isinstance(error, AIRateLimitError):
+        # 【レートリミット】: API 呼び出し上限超過 → 429 Too Many Requests
+        return Response(
+            status_code=429,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": "AI service rate limit exceeded"}),
+        )
+    if isinstance(error, AIProviderError):
+        # 【プロバイダー障害】: AI サービス自体が利用不可 → 503 Service Unavailable
+        return Response(
+            status_code=503,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": "AI service unavailable"}),
+        )
+    if isinstance(error, AIParseError):
+        # 【レスポンス解析失敗】: AI 出力の JSON パース失敗 → 500 Internal Server Error
+        return Response(
+            status_code=500,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": "AI service response parse error"}),
+        )
+    # 【その他の AI エラー】: AIInternalError を含む未分類エラー → 500 Internal Server Error
+    return Response(
+        status_code=500,
+        content_type=content_types.APPLICATION_JSON,
+        body=json.dumps({"error": "AI service error"}),
+    )
 
 
 def get_user_id_from_context() -> str:
@@ -263,11 +312,18 @@ def generate_cards():
         )
 
     try:
-        result = bedrock_service.generate_cards(
+        # 【ファクトリーパターン】: USE_STRANDS 環境変数に基づき適切な AI サービスを選択
+        # USE_STRANDS=false → BedrockAIService、USE_STRANDS=true → StrandsAIService
+        ai_service = create_ai_service()
+        result = ai_service.generate_cards(
             input_text=request.input_text,
             card_count=request.card_count,
             difficulty=request.difficulty,
             language=request.language,
+        )
+        logger.info(
+            f"Card generation succeeded: model={result.model_used}, "
+            f"cards={len(result.cards)}, time_ms={result.processing_time_ms}"
         )
 
         response = GenerateCardsResponse(
@@ -287,30 +343,10 @@ def generate_cards():
         )
         return response.model_dump(mode="json")
 
-    except BedrockTimeoutError:
-        return Response(
-            status_code=504,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "AI generation timed out"}),
-        )
-    except BedrockRateLimitError:
-        return Response(
-            status_code=429,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Too many requests, please retry later"}),
-        )
-    except BedrockInternalError:
-        return Response(
-            status_code=502,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "AI service temporarily unavailable"}),
-        )
-    except BedrockParseError:
-        return Response(
-            status_code=500,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Failed to parse AI response"}),
-        )
+    except AIServiceError as e:
+        # 【AI エラーマッピング】: 全 AI サービス例外を統一的な HTTP レスポンスに変換
+        logger.warning(f"AI service error for user_id {user_id}: {type(e).__name__}: {e}")
+        return _map_ai_error_to_http(e)
     except Exception as e:
         logger.error(f"Error generating cards: {e}")
         raise
@@ -555,6 +591,35 @@ def submit_review(card_id: str):
     except Exception as e:
         logger.error(f"Error submitting review: {e}")
         raise
+
+
+# =============================================================================
+# AI Stub Handlers (後続タスクで実装: TASK-0057, TASK-0060)
+# =============================================================================
+
+
+def grade_ai_handler(event: dict, context: Any) -> dict:
+    """POST /reviews/{cardId}/grade-ai のスタブハンドラー。
+
+    🔵 TASK-0057 で本実装予定。現在は 501 Not Implemented を返す。
+    """
+    return {
+        "statusCode": 501,
+        "headers": {"Content-Type": "application/json"},
+        "body": json.dumps({"error": "Not implemented"}),
+    }
+
+
+def advice_handler(event: dict, context: Any) -> dict:
+    """GET /advice のスタブハンドラー。
+
+    🔵 TASK-0060 で本実装予定。現在は 501 Not Implemented を返す。
+    """
+    return {
+        "statusCode": 501,
+        "headers": {"Content-Type": "application/json"},
+        "body": json.dumps({"error": "Not implemented"}),
+    }
 
 
 # =============================================================================
