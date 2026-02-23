@@ -93,7 +93,7 @@ def get_user_id_from_context() -> str:
                 payload += "=" * (4 - len(payload) % 4)
                 decoded = json.loads(base64.urlsafe_b64decode(payload))
                 return decoded["sub"]
-        except (KeyError, IndexError, ValueError, Exception) as e:
+        except Exception as e:
             logger.error(f"Failed to decode JWT from Authorization header: {e}")
 
     raise UnauthorizedError("Unable to extract user ID from token")

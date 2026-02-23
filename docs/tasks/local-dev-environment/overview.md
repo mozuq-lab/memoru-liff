@@ -52,7 +52,7 @@
 
 ### タスク一覧
 
-- [ ] [TASK-0049: JWT フォールバック テスト検証](TASK-0049.md) - 4h (TDD) 🔵
+- [x] [TASK-0049: JWT フォールバック テスト検証](TASK-0049.md) - 4h (TDD) 🔵
 - [ ] [TASK-0050: DynamoDB Local SigV4 問題解決](TASK-0050.md) - 4h (DIRECT) 🔵
 - [ ] [TASK-0051: ローカル環境 E2E 動作確認](TASK-0051.md) - 4h (DIRECT) 🔵
 
