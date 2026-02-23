@@ -12,34 +12,43 @@ import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
-from .prompts import DifficultyLevel, Language, get_card_generation_prompt
+from .prompts import DifficultyLevel, Language, get_card_generation_prompt, get_grading_prompt, get_advice_prompt
+from services.ai_service import (
+    AIServiceError,
+    AITimeoutError,
+    AIRateLimitError,
+    AIInternalError,
+    AIParseError,
+    GradingResult,
+    LearningAdvice,
+)
 
 
-class BedrockServiceError(Exception):
+class BedrockServiceError(AIServiceError):
     """Base exception for Bedrock service errors."""
 
     pass
 
 
-class BedrockTimeoutError(BedrockServiceError):
+class BedrockTimeoutError(BedrockServiceError, AITimeoutError):
     """Raised when Bedrock API times out."""
 
     pass
 
 
-class BedrockRateLimitError(BedrockServiceError):
+class BedrockRateLimitError(BedrockServiceError, AIRateLimitError):
     """Raised when Bedrock API rate limit is exceeded."""
 
     pass
 
 
-class BedrockInternalError(BedrockServiceError):
+class BedrockInternalError(BedrockServiceError, AIInternalError):
     """Raised when Bedrock API returns internal error."""
 
     pass
 
 
-class BedrockParseError(BedrockServiceError):
+class BedrockParseError(BedrockServiceError, AIParseError):
     """Raised when Bedrock response cannot be parsed."""
 
     pass
@@ -154,6 +163,156 @@ class BedrockService:
             model_used=self.model_id,
             processing_time_ms=processing_time_ms,
         )
+
+    def grade_answer(
+        self,
+        card_front: str,
+        card_back: str,
+        user_answer: str,
+        language: Language = "ja",
+    ) -> GradingResult:
+        """Grade a user's answer using AI.
+
+        Args:
+            card_front: The question side of the card.
+            card_back: The correct answer side of the card.
+            user_answer: The user's answer.
+            language: Output language (ja/en).
+
+        Returns:
+            GradingResult with grade (0-5), reasoning, and metadata.
+
+        Raises:
+            BedrockTimeoutError: If API times out.
+            BedrockRateLimitError: If rate limit exceeded.
+            BedrockInternalError: If API returns internal error.
+            BedrockParseError: If response cannot be parsed.
+        """
+        start_time = time.time()
+
+        prompt = get_grading_prompt(
+            card_front=card_front,
+            card_back=card_back,
+            user_answer=user_answer,
+            language=language,
+        )
+
+        response_text = self._invoke_with_retry(prompt)
+
+        data = self._parse_json_response(
+            response_text,
+            required_fields=["grade", "reasoning"],
+            context="grading",
+        )
+
+        grade = int(data["grade"])
+        reasoning = str(data["reasoning"])
+
+        processing_time_ms = int((time.time() - start_time) * 1000)
+
+        return GradingResult(
+            grade=grade,
+            reasoning=reasoning,
+            model_used=self.model_id,
+            processing_time_ms=processing_time_ms,
+        )
+
+    def get_learning_advice(
+        self,
+        review_summary: dict,
+        language: Language = "ja",
+    ) -> LearningAdvice:
+        """Get learning advice based on review history.
+
+        Args:
+            review_summary: Aggregated review statistics.
+            language: Output language (ja/en).
+
+        Returns:
+            LearningAdvice with advice text, weak areas, and recommendations.
+
+        Raises:
+            BedrockTimeoutError: If API times out.
+            BedrockRateLimitError: If rate limit exceeded.
+            BedrockInternalError: If API returns internal error.
+            BedrockParseError: If response cannot be parsed.
+        """
+        start_time = time.time()
+
+        prompt = get_advice_prompt(
+            review_summary=review_summary,
+            language=language,
+        )
+
+        response_text = self._invoke_with_retry(prompt)
+
+        data = self._parse_json_response(
+            response_text,
+            required_fields=["advice_text", "weak_areas", "recommendations"],
+            context="advice",
+        )
+
+        advice_text = str(data["advice_text"])
+        weak_areas = list(data["weak_areas"])
+        recommendations = list(data["recommendations"])
+
+        processing_time_ms = int((time.time() - start_time) * 1000)
+
+        return LearningAdvice(
+            advice_text=advice_text,
+            weak_areas=weak_areas,
+            recommendations=recommendations,
+            model_used=self.model_id,
+            processing_time_ms=processing_time_ms,
+        )
+
+    def _parse_json_response(
+        self,
+        response_text: str,
+        required_fields: List[str],
+        context: str,
+    ) -> dict:
+        """Extract and parse a JSON payload from a model response.
+
+        Handles two formats:
+        - Plain JSON string.
+        - JSON wrapped in a markdown ```json ... ``` code block.
+
+        Args:
+            response_text: Raw text response from the model.
+            required_fields: Field names that must be present in the parsed dict.
+            context: Short label used in error messages (e.g. "grading", "advice").
+
+        Returns:
+            Parsed JSON as a dict.
+
+        Raises:
+            BedrockParseError: If the response cannot be parsed or is missing required fields.
+        """
+        try:
+            json_match = re.search(r"```json\s*([\s\S]*?)\s*```", response_text)
+            if json_match:
+                json_str = json_match.group(1)
+            else:
+                json_str = response_text.strip()
+
+            data = json.loads(json_str)
+
+            missing = [f for f in required_fields if f not in data]
+            if missing:
+                fields_str = ", ".join(f"'{f}'" for f in missing)
+                raise BedrockParseError(
+                    f"Response missing required field(s) {fields_str} for {context}"
+                )
+
+            return data
+
+        except json.JSONDecodeError as e:
+            raise BedrockParseError(f"Failed to parse {context} JSON: {e}") from e
+        except BedrockParseError:
+            raise
+        except Exception as e:
+            raise BedrockParseError(f"Failed to parse {context} response: {e}") from e
 
     def _retry_with_jitter(self, attempt: int) -> float:
         """Full Jitter Exponential Backoff.
