@@ -1,12 +1,31 @@
-"""Prompt templates for AI card generation."""
+"""カード生成プロンプトモジュール.
+
+既存の services/prompts.py からの移行ファイル。
+get_card_generation_prompt 関数と関連定数を提供する。
+
+# 【機能概要】: フラッシュカード生成プロンプトテンプレートを管理する
+# 【実装方針】: 既存 prompts.py の内容を変更なしにそのまま移行（後方互換性維持）
+# 【テスト対応】: TC-001, TC-002, TC-003, TC-004 を通すための実装
+# 【改善内容】: Language 型を _types.py の共通定義から import し、重複定義を排除
+# 🔵 既存 backend/src/services/prompts.py をそのまま移行
+"""
 
 from typing import Literal
 
+from ._types import Language  # 【共通型インポート】: 重複定義を排除し DRY 原則を適用
 
+
+# 【型定義】: 難易度レベルの型エイリアス
+# 🔵 既存 prompts.py と同一
 DifficultyLevel = Literal["easy", "medium", "hard"]
-Language = Literal["ja", "en"]
+
+# 【型定義】: 出力言語の型エイリアス（_types.py からの再エクスポート）
+# 【改善内容】: Greenフェーズでは各ファイルに重複定義していたが、共通モジュールに集約
+# 🔵 _types.py の Language 型定義を参照
 
 
+# 【定数定義】: 難易度ガイドラインの辞書
+# 🔵 既存 prompts.py と同一
 DIFFICULTY_GUIDELINES = {
     "easy": {
         "ja": "基本的な用語定義、単純な事実を問う簡単な問題",
@@ -29,20 +48,29 @@ def get_card_generation_prompt(
     difficulty: DifficultyLevel,
     language: Language,
 ) -> str:
-    """Generate prompt for flashcard creation.
+    """フラッシュカード生成プロンプトを生成する.
+
+    # 【機能概要】: 入力テキストからフラッシュカードを生成するためのプロンプトを返す
+    # 【実装方針】: 既存 prompts.py の実装をそのまま維持（互換性保証）
+    # 【テスト対応】: TC-001（日本語）, TC-002（英語）, TC-003（難易度）
+    # 🔵 既存 prompts.py::get_card_generation_prompt と同一
 
     Args:
-        input_text: The source text to generate cards from.
-        card_count: Number of cards to generate.
-        difficulty: Difficulty level (easy/medium/hard).
-        language: Output language (ja/en).
+        input_text: カード生成元テキスト（10-2000文字）。
+        card_count: 生成カード数（1-10）。
+        difficulty: 難易度（easy/medium/hard）。
+        language: 出力言語（ja/en）。
 
     Returns:
-        Formatted prompt string.
+        フォーマット済みプロンプト文字列。
     """
+    # 【難易度ガイドライン取得】: 指定された難易度の説明を取得する
+    # 🔵 既存実装と同一
     difficulty_guide = DIFFICULTY_GUIDELINES.get(difficulty, DIFFICULTY_GUIDELINES["medium"])
     difficulty_desc = difficulty_guide.get(language, difficulty_guide["ja"])
 
+    # 【言語分岐】: 日本語と英語でテンプレートを切り替える
+    # 🔵 既存実装と同一
     if language == "ja":
         prompt = f"""あなたはフラッシュカード作成の専門家です。
 以下のテキストから学習効果の高いフラッシュカードを{card_count}枚作成してください。
@@ -68,6 +96,8 @@ def get_card_generation_prompt(
 }}
 ```"""
     else:
+        # 【英語テンプレート】: language="en" 時の英語プロンプト
+        # 🔵 既存実装と同一
         prompt = f"""You are an expert at creating flashcards.
 Create {card_count} effective flashcards from the following text.
 
