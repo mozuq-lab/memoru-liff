@@ -33,7 +33,7 @@
 ## 全体進捗
 
 - [x] Phase 1: 基盤構築
-- [ ] Phase 2: Strands カード生成移行
+- [x] Phase 2: Strands カード生成移行
 - [ ] Phase 3: 新機能追加
 - [ ] Phase 4: ローカル開発 + 最終検証
 
@@ -78,7 +78,7 @@ TASK-0054 + TASK-0055 → TASK-0056
 ### タスク一覧
 
 - [x] [TASK-0057: StrandsAIService 基本実装（カード生成）](TASK-0057.md) - 8h (TDD) 🟡
-- [ ] [TASK-0058: カード生成 API 互換性検証 + 移行テスト](TASK-0058.md) - 8h (TDD) 🔵
+- [x] [TASK-0058: カード生成 API 互換性検証 + 移行テスト](TASK-0058.md) - 8h (TDD) 🔵
 
 ### 依存関係
 
