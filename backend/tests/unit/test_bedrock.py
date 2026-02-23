@@ -1,7 +1,4 @@
-"""Unit tests for Bedrock service and AI card generation.
-
-TASK-0059 追加: TestBedrockGradeAnswer クラスを追加 (TC-BDK-001 ~ TC-BDK-011)
-"""
+"""Unit tests for Bedrock service and AI card generation."""
 
 import json
 import pytest
@@ -17,7 +14,7 @@ from services.bedrock import (
     GeneratedCard,
 )
 from services.prompts import get_card_generation_prompt
-from services.ai_service import GradingResult
+from services.ai_service import GradingResult, LearningAdvice
 
 
 class TestPrompts:
@@ -538,3 +535,192 @@ class TestBedrockGradeAnswer:
             user_answer="東京",
             language="en",
         )
+
+
+# ---------------------------------------------------------------------------
+# TASK-0062 追加: BedrockService.get_learning_advice() テスト (TC-BDK-ADV-001 ~ TC-BDK-ADV-012)
+# ---------------------------------------------------------------------------
+
+
+class TestBedrockGetLearningAdvice:
+    """BedrockService.get_learning_advice() テスト (TC-BDK-ADV-001 ~ TC-BDK-ADV-012).
+
+    BedrockService.get_learning_advice() は既に実装済み (bedrock.py L220-267)。
+    テストは既存実装の動作を確認する。
+    """
+
+    @pytest.fixture
+    def mock_bedrock_client(self):
+        """Create mock Bedrock client."""
+        return MagicMock()
+
+    @pytest.fixture
+    def bedrock_service(self, mock_bedrock_client):
+        """Create BedrockService with mock client."""
+        return BedrockService(bedrock_client=mock_bedrock_client)
+
+    def _mock_invoke_response(self, mock_client, response_text):
+        """Bedrock invoke_model のモックレスポンスを設定するヘルパー."""
+        mock_body = MagicMock()
+        mock_body.read.return_value = json.dumps({
+            "content": [{"text": response_text}]
+        }).encode()
+        mock_client.invoke_model.return_value = {"body": mock_body}
+
+    # --- 正常系 ---
+
+    def test_get_learning_advice_success(self, bedrock_service, mock_bedrock_client):
+        """TC-BDK-ADV-001: 正常系で LearningAdvice が返る."""
+        self._mock_invoke_response(
+            mock_bedrock_client,
+            '{"advice_text": "数学を復習しましょう", "weak_areas": ["数学"], "recommendations": ["毎日復習"]}'
+        )
+
+        result = bedrock_service.get_learning_advice(
+            review_summary={"total_reviews": 50},
+        )
+
+        assert isinstance(result, LearningAdvice)
+        assert result.advice_text == "数学を復習しましょう"
+        assert result.weak_areas == ["数学"]
+        assert result.recommendations == ["毎日復習"]
+
+    def test_get_learning_advice_with_markdown(self, bedrock_service, mock_bedrock_client):
+        """TC-BDK-ADV-002: Markdown コードブロック内 JSON が正しくパースされる."""
+        self._mock_invoke_response(
+            mock_bedrock_client,
+            '```json\n{"advice_text": "Study more", "weak_areas": ["math"], "recommendations": ["Review"]}\n```'
+        )
+
+        result = bedrock_service.get_learning_advice(
+            review_summary={"total_reviews": 10},
+        )
+
+        assert result.advice_text == "Study more"
+        assert result.weak_areas == ["math"]
+
+    def test_get_learning_advice_model_used(self, mock_bedrock_client):
+        """TC-BDK-ADV-003: model_used が self.model_id と一致する."""
+        service = BedrockService(
+            model_id="test-model-id",
+            bedrock_client=mock_bedrock_client,
+        )
+        self._mock_invoke_response(
+            mock_bedrock_client,
+            '{"advice_text": "Advice", "weak_areas": [], "recommendations": []}'
+        )
+
+        result = service.get_learning_advice(review_summary={})
+
+        assert result.model_used == "test-model-id"
+
+    def test_get_learning_advice_processing_time_ms(self, bedrock_service, mock_bedrock_client):
+        """TC-BDK-ADV-004: processing_time_ms が 0 以上の整数."""
+        self._mock_invoke_response(
+            mock_bedrock_client,
+            '{"advice_text": "Advice", "weak_areas": [], "recommendations": []}'
+        )
+
+        result = bedrock_service.get_learning_advice(review_summary={})
+
+        assert isinstance(result.processing_time_ms, int)
+        assert result.processing_time_ms >= 0
+
+    # --- 引数伝搬 ---
+
+    def test_get_learning_advice_calls_get_advice_prompt(self, bedrock_service, mock_bedrock_client):
+        """TC-BDK-ADV-005: get_advice_prompt に正しい引数が渡される."""
+        self._mock_invoke_response(
+            mock_bedrock_client,
+            '{"advice_text": "Advice", "weak_areas": [], "recommendations": []}'
+        )
+
+        with patch("services.bedrock.get_advice_prompt", return_value="mocked") as mock_prompt:
+            bedrock_service.get_learning_advice(
+                review_summary={"total_reviews": 10},
+                language="en",
+            )
+
+        mock_prompt.assert_called_once_with(
+            review_summary={"total_reviews": 10},
+            language="en",
+        )
+
+    # --- パースエラー ---
+
+    def test_get_learning_advice_parse_error(self, bedrock_service, mock_bedrock_client):
+        """TC-BDK-ADV-006: 無効な JSON で BedrockParseError."""
+        self._mock_invoke_response(
+            mock_bedrock_client,
+            "This is not valid JSON"
+        )
+
+        with pytest.raises(BedrockParseError):
+            bedrock_service.get_learning_advice(review_summary={})
+
+    def test_get_learning_advice_missing_advice_text(self, bedrock_service, mock_bedrock_client):
+        """TC-BDK-ADV-007: advice_text 欠落で BedrockParseError."""
+        self._mock_invoke_response(
+            mock_bedrock_client,
+            '{"weak_areas": [], "recommendations": []}'
+        )
+
+        with pytest.raises(BedrockParseError):
+            bedrock_service.get_learning_advice(review_summary={})
+
+    def test_get_learning_advice_missing_weak_areas(self, bedrock_service, mock_bedrock_client):
+        """TC-BDK-ADV-008: weak_areas 欠落で BedrockParseError."""
+        self._mock_invoke_response(
+            mock_bedrock_client,
+            '{"advice_text": "Advice", "recommendations": []}'
+        )
+
+        with pytest.raises(BedrockParseError):
+            bedrock_service.get_learning_advice(review_summary={})
+
+    def test_get_learning_advice_missing_recommendations(self, bedrock_service, mock_bedrock_client):
+        """TC-BDK-ADV-009: recommendations 欠落で BedrockParseError."""
+        self._mock_invoke_response(
+            mock_bedrock_client,
+            '{"advice_text": "Advice", "weak_areas": []}'
+        )
+
+        with pytest.raises(BedrockParseError):
+            bedrock_service.get_learning_advice(review_summary={})
+
+    # --- API エラー ---
+
+    def test_get_learning_advice_timeout(self, bedrock_service, mock_bedrock_client):
+        """TC-BDK-ADV-010: ReadTimeoutError で BedrockTimeoutError."""
+        mock_bedrock_client.invoke_model.side_effect = ClientError(
+            {"Error": {"Code": "ReadTimeoutError", "Message": "Timeout"}},
+            "InvokeModel",
+        )
+
+        with pytest.raises(BedrockTimeoutError):
+            bedrock_service.get_learning_advice(review_summary={})
+
+    def test_get_learning_advice_rate_limit(self, bedrock_service, mock_bedrock_client):
+        """TC-BDK-ADV-011: ThrottlingException で BedrockRateLimitError（リトライ後）."""
+        mock_bedrock_client.invoke_model.side_effect = ClientError(
+            {"Error": {"Code": "ThrottlingException", "Message": "Rate limit"}},
+            "InvokeModel",
+        )
+
+        with pytest.raises(BedrockRateLimitError):
+            bedrock_service.get_learning_advice(review_summary={})
+
+        # リトライ: initial + 2 retries = 3 calls
+        assert mock_bedrock_client.invoke_model.call_count == 3
+
+    def test_get_learning_advice_internal_error(self, bedrock_service, mock_bedrock_client):
+        """TC-BDK-ADV-012: InternalServerException で BedrockInternalError（リトライ後）."""
+        mock_bedrock_client.invoke_model.side_effect = ClientError(
+            {"Error": {"Code": "InternalServerException", "Message": "Internal"}},
+            "InvokeModel",
+        )
+
+        with pytest.raises(BedrockInternalError):
+            bedrock_service.get_learning_advice(review_summary={})
+
+        assert mock_bedrock_client.invoke_model.call_count == 3

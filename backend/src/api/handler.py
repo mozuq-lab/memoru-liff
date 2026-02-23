@@ -1,6 +1,7 @@
 """Main API handler for Memoru LIFF application."""
 
 import base64
+import dataclasses
 import json
 import os
 from typing import Any
@@ -38,6 +39,7 @@ from models.generate import (
     GeneratedCardResponse,
     GenerationInfoResponse,
 )
+from models.advice import LearningAdviceResponse
 from models.grading import GradeAnswerRequest, GradeAnswerResponse
 from services.ai_service import (
     create_ai_service,
@@ -63,8 +65,8 @@ line_service = LineService()
 def _map_ai_error_to_http(error: AIServiceError) -> Response:
     """AI サービス例外を適切な HTTP レスポンスにマッピングする。
 
-    🔵 API 仕様 api-endpoints.md に基づく確定実装。
-    各例外タイプに対してセマンティックな HTTP ステータスコードを返す。
+    API 仕様 api-endpoints.md に基づき、各例外タイプに対してセマンティックな
+    HTTP ステータスコードを返す。
 
     Args:
         error: AI サービス層から送出された例外
@@ -651,7 +653,7 @@ def submit_review(card_id: str):
 
 
 # =============================================================================
-# Standalone Lambda Handlers (grade_ai_handler: TASK-0060 実装済み / advice_handler: TASK-0061 予定)
+# Standalone Lambda Handlers
 # =============================================================================
 
 
@@ -744,15 +746,73 @@ def grade_ai_handler(event: dict, context: Any) -> dict:
 
 
 def advice_handler(event: dict, context: Any) -> dict:
-    """GET /advice のスタブハンドラー。
+    """GET /advice の Lambda ハンドラー。
 
-    TASK-0061 で本実装予定。現在は 501 Not Implemented を返す。
+    独立 Lambda 関数として API Gateway HTTP API v2 イベントを直接受け取る。
+    requestContext.authorizer.jwt.claims.sub からユーザー ID を取得し、
+    ReviewService から復習サマリーを取得して AI アドバイスを生成する。
     """
-    return {
-        "statusCode": 501,
-        "headers": {"Content-Type": "application/json"},
-        "body": json.dumps({"error": "Not implemented"}),
-    }
+    try:
+        # 1. Extract user_id from JWT claims
+        user_id = _get_user_id_from_event(event)
+        if not user_id:
+            return _make_lambda_response(401, {"error": "Unauthorized"})
+
+        logger.info(f"Advice request: user_id={user_id}")
+
+        # 2. Get language from query string parameters (default "ja")
+        language = (event.get("queryStringParameters") or {}).get("language", "ja")
+
+        # 3. Get review summary from ReviewService
+        review_summary = review_service.get_review_summary(user_id)
+
+        # 4. Convert ReviewSummary dataclass to dict for AI service
+        review_summary_dict = dataclasses.asdict(review_summary)
+
+        # 5. Call AI service to get learning advice
+        try:
+            ai_service = create_ai_service()
+            result = ai_service.get_learning_advice(
+                review_summary=review_summary_dict,
+                language=language,
+            )
+        except AIServiceError as e:
+            logger.warning(
+                f"AI service error getting advice for user {user_id}: {type(e).__name__}: {e}"
+            )
+            ai_response = _map_ai_error_to_http(e)
+            return {
+                "statusCode": ai_response.status_code,
+                "headers": {"Content-Type": "application/json"},
+                "body": ai_response.body,
+            }
+
+        # 6. Build and return LearningAdviceResponse
+        logger.info(
+            f"Advice succeeded: user_id={user_id}, model={result.model_used}, "
+            f"time_ms={result.processing_time_ms}"
+        )
+        response = LearningAdviceResponse(
+            advice_text=result.advice_text,
+            weak_areas=result.weak_areas,
+            recommendations=result.recommendations,
+            study_stats={
+                "total_reviews": review_summary.total_reviews,
+                "average_grade": review_summary.average_grade,
+                "total_cards": review_summary.total_cards,
+                "cards_due_today": review_summary.cards_due_today,
+                "streak_days": review_summary.streak_days,
+            },
+            advice_info={
+                "model_used": result.model_used,
+                "processing_time_ms": result.processing_time_ms,
+            },
+        )
+        return _make_lambda_response(200, response.model_dump(mode="json"))
+
+    except Exception as e:
+        logger.error(f"Unexpected error in advice_handler: {e}")
+        return _make_lambda_response(500, {"error": "Internal Server Error"})
 
 
 # =============================================================================

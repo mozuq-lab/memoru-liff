@@ -35,7 +35,8 @@ from services.ai_service import (
     Language,
     LearningAdvice,
 )
-from services.prompts import get_card_generation_prompt, get_grading_prompt
+from services.prompts import get_advice_prompt, get_card_generation_prompt, get_grading_prompt
+from services.prompts.advice import ADVICE_SYSTEM_PROMPT
 from services.prompts.grading import GRADING_SYSTEM_PROMPT
 
 # Bedrock のデフォルトモデル ID
@@ -51,9 +52,7 @@ _MODEL_USED_OLLAMA = "strands_ollama"
 class StrandsAIService:
     """AWS Strands Agents SDK を使用した AI サービス実装.
 
-    AIService Protocol に準拠し、カード生成と回答採点を提供する。
-    get_learning_advice() は Phase 3 で実装予定のため、
-    現在は NotImplementedError を raise するスタブになっている。
+    AIService Protocol に準拠し、カード生成、回答採点、学習アドバイス生成を提供する。
 
     Attributes:
         environment: 実行環境名 ('prod', 'staging', 'dev' 等)。
@@ -386,18 +385,113 @@ class StrandsAIService:
         review_summary: dict,
         language: Language = "ja",
     ) -> LearningAdvice:
-        """学習アドバイスを取得する（Phase 3 で実装予定のスタブ）.
+        """学習アドバイスを Strands Agent 経由で取得する.
 
         Args:
-            review_summary: 復習履歴の集計データ。
-            language: 出力言語。
+            review_summary: 復習履歴の集計データ（dict）。
+            language: 出力言語（'ja', 'en'）。
+
+        Returns:
+            LearningAdvice: アドバイステキスト、弱点エリア、推奨事項。
 
         Raises:
-            NotImplementedError: このメソッドは Phase 3 で実装予定。
+            AITimeoutError: Agent 呼び出しがタイムアウトした場合。
+            AIRateLimitError: レート制限に達した場合。
+            AIProviderError: プロバイダー接続エラーが発生した場合。
+            AIParseError: レスポンスの解析に失敗した場合。
+            AIServiceError: その他の予期しないエラーが発生した場合。
         """
-        raise NotImplementedError(
-            "get_learning_advice is not implemented yet (Phase 3)"
-        )
+        start_time = time.time()
+
+        try:
+            # プロンプトを生成
+            user_prompt = get_advice_prompt(
+                review_summary=review_summary,
+                language=language,
+            )
+
+            # Strands Agent を作成して呼び出す
+            agent = Agent(model=self.model, system_prompt=ADVICE_SYSTEM_PROMPT)
+            response = agent(user_prompt)
+
+            # レスポンスをテキストに変換して解析
+            response_text = str(response)
+            advice_text, weak_areas, recommendations = self._parse_advice_result(response_text)
+
+            processing_time_ms = int((time.time() - start_time) * 1000)
+
+            return LearningAdvice(
+                advice_text=advice_text,
+                weak_areas=weak_areas,
+                recommendations=recommendations,
+                model_used=self.model_used,
+                processing_time_ms=processing_time_ms,
+            )
+
+        except AIServiceError:
+            # 既にマッピング済みの例外はそのまま再 raise
+            raise
+        except TimeoutError as e:
+            raise AITimeoutError(f"Agent timed out: {e}") from e
+        except ConnectionError as e:
+            raise AIProviderError(f"Provider connection error: {e}") from e
+        except Exception as e:
+            # botocore.exceptions.ClientError などの SDK 固有例外を処理
+            error_str = str(e)
+
+            # ClientError (botocore) のレート制限チェック
+            if _is_rate_limit_error(e):
+                raise AIRateLimitError(f"Rate limit exceeded: {e}") from e
+
+            # タイムアウト関連エラーのチェック
+            if "timeout" in error_str.lower() or "timed out" in error_str.lower():
+                raise AITimeoutError(f"Agent timed out: {e}") from e
+
+            # 接続エラー関連チェック（エラーメッセージと例外クラス名を確認）
+            if "connection" in error_str.lower() or "connect" in type(e).__name__.lower():
+                raise AIProviderError(f"Provider connection error: {e}") from e
+
+            # その他の予期しない例外を AIServiceError にラップ
+            raise AIServiceError(f"Unexpected error: {e}") from e
+
+    def _parse_advice_result(self, response_text: str) -> tuple[str, List[str], List[str]]:
+        """Strands Agent のレスポンステキストからアドバイス結果を抽出する.
+
+        Args:
+            response_text: Agent から返されたレスポンステキスト。
+
+        Returns:
+            (advice_text: str, weak_areas: List[str], recommendations: List[str]) のタプル。
+
+        Raises:
+            AIParseError: JSON の解析に失敗した場合、または必須フィールドが欠落している場合。
+        """
+        try:
+            # Markdown コードブロックを検出して JSON を抽出
+            json_match = re.search(r"```json\s*([\s\S]*?)\s*```", response_text)
+            if json_match:
+                json_str = json_match.group(1)
+            else:
+                json_str = response_text.strip()
+
+            data = json.loads(json_str)
+
+        except json.JSONDecodeError as e:
+            raise AIParseError(f"Failed to parse JSON response: {e}") from e
+
+        # 必須フィールドチェック
+        for field in ("advice_text", "weak_areas", "recommendations"):
+            if field not in data:
+                raise AIParseError(
+                    f"Response missing required '{field}' field. "
+                    f"Available keys: {list(data.keys())}"
+                )
+
+        advice_text = str(data["advice_text"])
+        weak_areas = list(data["weak_areas"])
+        recommendations = list(data["recommendations"])
+
+        return advice_text, weak_areas, recommendations
 
 
 def _is_rate_limit_error(exc: Exception) -> bool:

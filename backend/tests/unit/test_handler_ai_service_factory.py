@@ -497,7 +497,11 @@ class TestGenerateCardsCompatibility:
 
 
 class TestStubHandlers:
-    """カテゴリ D: grade_ai_handler 実装確認 / advice_handler スタブの 501 レスポンス確認."""
+    """カテゴリ D: grade_ai_handler 実装確認。
+
+    TC-056-015 (advice_handler スタブの 501 テスト) は TASK-0062 で advice_handler が
+    本実装されたため削除済み。
+    """
 
     def test_grade_ai_handler_is_implemented(self, lambda_context):
         """TC-056-014: grade_ai_handler が 501 スタブではなく本実装であることを確認.
@@ -531,35 +535,6 @@ class TestStubHandlers:
         assert response["headers"]["Content-Type"] == "application/json"  # 🔵
         # 認証情報なしなので 401 Unauthorized が返ることを確認
         assert response["statusCode"] == 401  # 🔵
-
-    def test_advice_handler_returns_501(self, lambda_context):
-        """TC-056-015: advice_handler スタブの 501 レスポンス確認.
-
-        【テスト目的】: advice_handler スタブが 501 を返すことを確認
-        【テスト内容】: Lambda イベントを直接渡してスタブレスポンスを検証
-        【期待される動作】: statusCode=501, Content-Type=application/json, body={"error": "Not implemented"}
-        🔵 信頼性レベル: 青信号 - 要件定義書 2.4 節「handler.py スタブハンドラー追加」から確定
-        """
-        # Given
-        event = {
-            "version": "2.0",
-            "routeKey": "GET /advice",
-            "rawPath": "/advice",
-            "requestContext": {
-                "http": {"method": "GET"},
-            },
-        }
-
-        # When
-        # 【実際の処理実行】: advice_handler を直接呼び出す
-        from api.handler import advice_handler
-        response = advice_handler(event, lambda_context)
-
-        # Then
-        assert response["statusCode"] == 501  # 🔵
-        assert response["headers"]["Content-Type"] == "application/json"  # 🔵
-        body = json.loads(response["body"])
-        assert body["error"] == "Not implemented"  # 🔵
 
 
 # ==============================================================================
