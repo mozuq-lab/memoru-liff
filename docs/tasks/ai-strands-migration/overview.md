@@ -53,7 +53,7 @@
 
 ### タスク一覧
 
-- [ ] [TASK-0052: Strands Agents SDK 依存追加 + ビルド確認](TASK-0052.md) - 4h (DIRECT) 🔵
+- [x] [TASK-0052: Strands Agents SDK 依存追加 + ビルド確認](TASK-0052.md) - 4h (DIRECT) 🔵
 - [ ] [TASK-0053: AIService Protocol + 共通型定義 + 例外階層](TASK-0053.md) - 8h (TDD) 🔵
 - [ ] [TASK-0054: プロンプトモジュールディレクトリ化](TASK-0054.md) - 8h (TDD) 🔵
 - [ ] [TASK-0055: BedrockAIService Protocol 準拠改修](TASK-0055.md) - 8h (TDD) 🔵
