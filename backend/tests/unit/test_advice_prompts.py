@@ -334,3 +334,61 @@ class TestAdviceSystemPromptJsonFields:
         # 【検証項目】: "recommendations" フィールドが指示されていること
         # 🔵 api-endpoints.md の LearningAdviceResponse 仕様
         assert "recommendations" in ADVICE_SYSTEM_PROMPT  # 【確認内容】: recommendations フィールドが指示されていること
+
+
+class TestAdvicePromptWithReviewSummaryFields:
+    """TC-061-PROMPT-001, TC-061-PROMPT-002: ReviewSummary の特定フィールドがプロンプトに反映される."""
+
+    def test_advice_prompt_includes_tag_performance(self):
+        """TC-061-PROMPT-001: tag_performance のタグ名と値がプロンプトに含まれること.
+
+        # 【テスト目的】: ReviewSummary.tag_performance の内容がプロンプトに埋め込まれることを確認
+        # 【テスト内容】: tag_performance を持つ ReviewSummary でプロンプト生成し、タグ名と値を検証
+        # 【期待される動作】: タグ名 "math", "english" と値 "4.2", "2.1" がプロンプトに含まれる
+        # 🔵 prompts/advice.py L103-104 の tag_perf_str 生成ロジックから確定
+        """
+        from services.prompts.advice import get_advice_prompt
+        from services.ai_service import ReviewSummary
+
+        summary = ReviewSummary(
+            total_reviews=50,
+            average_grade=3.5,
+            total_cards=20,
+            cards_due_today=5,
+            streak_days=3,
+            tag_performance={"math": 4.2, "english": 2.1},
+            recent_review_dates=["2026-02-24"],
+        )
+        prompt = get_advice_prompt(summary, language="ja")
+
+        assert "math" in prompt
+        assert "english" in prompt
+        assert "4.2" in prompt
+        assert "2.1" in prompt
+
+    def test_advice_prompt_no_reviews_shows_zero(self):
+        """TC-061-PROMPT-002: ゼロ値の ReviewSummary でエラーなくプロンプトが生成される.
+
+        # 【テスト目的】: total_reviews=0, average_grade=0.0 の ReviewSummary でのプロンプト生成を確認
+        # 【テスト内容】: 全ゼロの ReviewSummary でプロンプト生成し、"0.0" が含まれることを検証
+        # 【期待される動作】: エラーなく str が返り、"0.0" が含まれる
+        # 🔵 prompts/advice.py L116 の {average_grade:.1f} フォーマットから確定
+        """
+        from services.prompts.advice import get_advice_prompt
+        from services.ai_service import ReviewSummary
+
+        summary = ReviewSummary(
+            total_reviews=0,
+            average_grade=0.0,
+            total_cards=0,
+            cards_due_today=0,
+            streak_days=0,
+            tag_performance={},
+            recent_review_dates=[],
+        )
+        prompt = get_advice_prompt(summary, language="ja")
+
+        assert isinstance(prompt, str)
+        assert len(prompt) > 0
+        # average_grade=0.0 is formatted as "0.0"
+        assert "0.0" in prompt

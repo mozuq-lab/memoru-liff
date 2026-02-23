@@ -1,10 +1,11 @@
 """Review service for managing card reviews."""
 
 import os
-from datetime import datetime, timezone
-from typing import List, Optional
+from datetime import date, datetime, timedelta, timezone
+from typing import Dict, List, Optional
 
 import boto3
+from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import ClientError
 
 from models.card import Card
@@ -15,6 +16,7 @@ from models.review import (
     ReviewResponse,
     ReviewUpdatedState,
 )
+from .ai_service import ReviewSummary
 from .card_service import CardNotFoundError, CardService, CardServiceError
 from .srs import ReviewHistoryEntry, SM2Result, add_review_history, calculate_sm2
 
@@ -336,3 +338,132 @@ class ReviewService:
         except ClientError:
             pass
         return None
+
+    def get_review_summary(self, user_id: str) -> ReviewSummary:
+        """Get a summary of review statistics for a user.
+
+        Args:
+            user_id: The user's ID.
+
+        Returns:
+            ReviewSummary dataclass with aggregated statistics.
+            Returns a default (all-zeros) ReviewSummary on error.
+        """
+        default = ReviewSummary(
+            total_reviews=0,
+            average_grade=0.0,
+            total_cards=0,
+            cards_due_today=0,
+            streak_days=0,
+            tag_performance={},
+            recent_review_dates=[],
+        )
+
+        try:
+            # Fetch all reviews for the user via the GSI
+            reviews: List[Dict] = []
+            paginator_kwargs = {
+                "IndexName": "user_id-reviewed_at-index",
+                "KeyConditionExpression": Key("user_id").eq(user_id),
+            }
+            while True:
+                response = self.reviews_table.query(**paginator_kwargs)
+                reviews.extend(response.get("Items", []))
+                last_key = response.get("LastEvaluatedKey")
+                if not last_key:
+                    break
+                paginator_kwargs["ExclusiveStartKey"] = last_key
+
+            # Fetch all cards for the user
+            cards: List[Dict] = []
+            card_kwargs = {
+                "KeyConditionExpression": Key("user_id").eq(user_id),
+            }
+            while True:
+                response = self.cards_table.query(**card_kwargs)
+                cards.extend(response.get("Items", []))
+                last_key = response.get("LastEvaluatedKey")
+                if not last_key:
+                    break
+                card_kwargs["ExclusiveStartKey"] = last_key
+
+            total_reviews = len(reviews)
+            average_grade = (
+                sum(int(r["grade"]) for r in reviews) / total_reviews
+                if reviews
+                else 0.0
+            )
+            total_cards = len(cards)
+
+            now_iso = datetime.now(timezone.utc).isoformat()
+            cards_due_today = sum(
+                1 for c in cards if c.get("next_review_at", "") <= now_iso
+            )
+
+            # Unique review dates, newest first
+            unique_dates = sorted(
+                {r["reviewed_at"][:10] for r in reviews},
+                reverse=True,
+            )
+            streak_days = self._calculate_streak(unique_dates)
+
+            # Build tag_performance: tag -> fraction of reviews with grade >= 3
+            card_tags: Dict[str, List[str]] = {
+                c["card_id"]: c.get("tags") or [] for c in cards
+            }
+            tag_grades: Dict[str, List[int]] = {}
+            for review in reviews:
+                card_id = review.get("card_id", "")
+                grade = int(review["grade"])
+                for tag in card_tags.get(card_id, []):
+                    tag_grades.setdefault(tag, []).append(grade)
+
+            tag_performance: Dict[str, float] = {
+                tag: sum(1 for g in grades if g >= 3) / len(grades)
+                for tag, grades in tag_grades.items()
+                if grades
+            }
+
+            return ReviewSummary(
+                total_reviews=total_reviews,
+                average_grade=average_grade,
+                total_cards=total_cards,
+                cards_due_today=cards_due_today,
+                streak_days=streak_days,
+                tag_performance=tag_performance,
+                recent_review_dates=unique_dates,
+            )
+
+        except ClientError:
+            return default
+
+    @staticmethod
+    def _calculate_streak(sorted_dates_desc: List[str]) -> int:
+        """Calculate consecutive study streak days ending at today or yesterday.
+
+        Args:
+            sorted_dates_desc: Unique review dates as YYYY-MM-DD strings, newest first.
+
+        Returns:
+            Number of consecutive days studied.
+        """
+        if not sorted_dates_desc:
+            return 0
+
+        today = date.today()
+        # Streak must end at today or yesterday
+        latest = date.fromisoformat(sorted_dates_desc[0])
+        if latest < today - timedelta(days=1):
+            return 0
+
+        streak = 0
+        expected = latest
+        for date_str in sorted_dates_desc:
+            d = date.fromisoformat(date_str)
+            if d == expected:
+                streak += 1
+                expected = expected - timedelta(days=1)
+            elif d < expected:
+                break
+
+        return streak
