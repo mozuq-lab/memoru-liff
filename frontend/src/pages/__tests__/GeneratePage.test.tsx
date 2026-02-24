@@ -94,7 +94,7 @@ describe('GeneratePage', () => {
       renderGeneratePage();
 
       const textarea = screen.getByTestId('input-text');
-      await user.type(textarea, 'テストテキスト');
+      await user.type(textarea, 'テスト用のテキストです');
 
       const generateButton = screen.getByTestId('generate-button');
       await user.click(generateButton);
@@ -109,7 +109,7 @@ describe('GeneratePage', () => {
       renderGeneratePage();
 
       const textarea = screen.getByTestId('input-text');
-      await user.type(textarea, 'テストテキスト');
+      await user.type(textarea, 'テスト用のテキストです');
 
       await user.click(screen.getByTestId('generate-button'));
 
@@ -131,7 +131,7 @@ describe('GeneratePage', () => {
       renderGeneratePage();
 
       const textarea = screen.getByTestId('input-text');
-      await user.type(textarea, 'テストテキスト');
+      await user.type(textarea, 'テスト用のテキストです');
       await user.click(screen.getByTestId('generate-button'));
 
       await waitFor(() => {
@@ -152,7 +152,7 @@ describe('GeneratePage', () => {
 
       renderGeneratePage();
 
-      await user.type(screen.getByTestId('input-text'), 'テストテキスト');
+      await user.type(screen.getByTestId('input-text'), 'テスト用のテキストです');
       await user.click(screen.getByTestId('generate-button'));
 
       await waitFor(() => {
@@ -160,7 +160,7 @@ describe('GeneratePage', () => {
       });
     });
 
-    it('デフォルトで全てのカードが選択されている', async () => {
+    it('デフォルトで全てのカードが未選択である', async () => {
       const user = userEvent.setup();
       mockGenerateCards.mockResolvedValue({
         generated_cards: [
@@ -172,17 +172,17 @@ describe('GeneratePage', () => {
 
       renderGeneratePage();
 
-      await user.type(screen.getByTestId('input-text'), 'テストテキスト');
+      await user.type(screen.getByTestId('input-text'), 'テスト用のテキストです');
       await user.click(screen.getByTestId('generate-button'));
 
       await waitFor(() => {
-        expect(screen.getByTestId('selected-count')).toHaveTextContent('2枚選択中');
+        expect(screen.getByTestId('selected-count')).toHaveTextContent('0枚選択中');
       });
     });
   });
 
   describe('テストケース6: カードの選択/解除', () => {
-    it('カードの選択を解除できる', async () => {
+    it('カードを選択・解除できる', async () => {
       const user = userEvent.setup();
       mockGenerateCards.mockResolvedValue({
         generated_cards: [
@@ -193,16 +193,20 @@ describe('GeneratePage', () => {
 
       renderGeneratePage();
 
-      await user.type(screen.getByTestId('input-text'), 'テストテキスト');
+      await user.type(screen.getByTestId('input-text'), 'テスト用のテキストです');
       await user.click(screen.getByTestId('generate-button'));
 
       await waitFor(() => {
-        expect(screen.getByTestId('selected-count')).toHaveTextContent('1枚選択中');
+        expect(screen.getByTestId('selected-count')).toHaveTextContent('0枚選択中');
       });
 
+      // 選択
       const toggleButton = screen.getByTestId('toggle-select');
       await user.click(toggleButton);
+      expect(screen.getByTestId('selected-count')).toHaveTextContent('1枚選択中');
 
+      // 解除
+      await user.click(toggleButton);
       expect(screen.getByTestId('selected-count')).toHaveTextContent('0枚選択中');
     });
   });
@@ -219,7 +223,7 @@ describe('GeneratePage', () => {
 
       renderGeneratePage();
 
-      await user.type(screen.getByTestId('input-text'), 'テストテキスト');
+      await user.type(screen.getByTestId('input-text'), 'テスト用のテキストです');
       await user.click(screen.getByTestId('generate-button'));
 
       await waitFor(() => {
@@ -243,7 +247,7 @@ describe('GeneratePage', () => {
 
       renderGeneratePage();
 
-      await user.type(screen.getByTestId('input-text'), 'テストテキスト');
+      await user.type(screen.getByTestId('input-text'), 'テスト用のテキストです');
       await user.click(screen.getByTestId('generate-button'));
 
       await waitFor(() => {
@@ -275,13 +279,15 @@ describe('GeneratePage', () => {
 
       renderGeneratePage();
 
-      await user.type(screen.getByTestId('input-text'), 'テストテキスト');
+      await user.type(screen.getByTestId('input-text'), 'テスト用のテキストです');
       await user.click(screen.getByTestId('generate-button'));
 
       await waitFor(() => {
-        expect(screen.getByTestId('save-button')).toBeInTheDocument();
+        expect(screen.getByTestId('toggle-select')).toBeInTheDocument();
       });
 
+      // デフォルト未選択なので選択してから保存
+      await user.click(screen.getByTestId('toggle-select'));
       await user.click(screen.getByTestId('save-button'));
 
       await waitFor(() => {
@@ -305,16 +311,14 @@ describe('GeneratePage', () => {
 
       renderGeneratePage();
 
-      await user.type(screen.getByTestId('input-text'), 'テストテキスト');
+      await user.type(screen.getByTestId('input-text'), 'テスト用のテキストです');
       await user.click(screen.getByTestId('generate-button'));
 
       await waitFor(() => {
-        expect(screen.getByTestId('toggle-select')).toBeInTheDocument();
+        expect(screen.getByTestId('save-button')).toBeInTheDocument();
       });
 
-      // 選択を解除
-      await user.click(screen.getByTestId('toggle-select'));
-
+      // デフォルトで未選択なので保存ボタンは無効
       expect(screen.getByTestId('save-button')).toBeDisabled();
     });
   });
@@ -326,7 +330,7 @@ describe('GeneratePage', () => {
 
       renderGeneratePage();
 
-      await user.type(screen.getByTestId('input-text'), 'テストテキスト');
+      await user.type(screen.getByTestId('input-text'), 'テスト用のテキストです');
       await user.click(screen.getByTestId('generate-button'));
 
       await waitFor(() => {
@@ -347,13 +351,15 @@ describe('GeneratePage', () => {
 
       renderGeneratePage();
 
-      await user.type(screen.getByTestId('input-text'), 'テストテキスト');
+      await user.type(screen.getByTestId('input-text'), 'テスト用のテキストです');
       await user.click(screen.getByTestId('generate-button'));
 
       await waitFor(() => {
-        expect(screen.getByTestId('save-button')).toBeInTheDocument();
+        expect(screen.getByTestId('toggle-select')).toBeInTheDocument();
       });
 
+      // デフォルト未選択なので選択してから保存
+      await user.click(screen.getByTestId('toggle-select'));
       await user.click(screen.getByTestId('save-button'));
 
       await waitFor(() => {

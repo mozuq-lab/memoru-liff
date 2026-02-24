@@ -13,6 +13,7 @@ import { Error } from '@/components/common/Error';
 import { cardsApi } from '@/services/api';
 import type { GeneratedCardWithId, GenerateCardsRequest, CreateCardRequest } from '@/types';
 
+const MIN_CHARS = 10;
 const MAX_CHARS = 2000;
 const MAX_GENERATION_TIME = 30000; // 30秒
 
@@ -29,8 +30,9 @@ export const GeneratePage = () => {
   const [error, setError] = useState<string | null>(null);
 
   const charCount = inputText.length;
+  const isUnderLimit = inputText.trim().length > 0 && inputText.trim().length < MIN_CHARS;
   const isOverLimit = charCount > MAX_CHARS;
-  const canGenerate = inputText.trim().length > 0 && !isOverLimit && !isGenerating;
+  const canGenerate = inputText.trim().length >= MIN_CHARS && !isOverLimit && !isGenerating;
 
   // 【テキスト入力ハンドラ】
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -68,8 +70,7 @@ export const GeneratePage = () => {
       }));
 
       setGeneratedCards(cardsWithId);
-      // デフォルトで全てのカードを選択
-      setSelectedCards(new Set(cardsWithId.map(c => c.tempId)));
+      setSelectedCards(new Set());
     } catch (err) {
       clearTimeout(timeoutId);
       setError('カードの生成に失敗しました。もう一度お試しください。');
@@ -158,6 +159,11 @@ export const GeneratePage = () => {
             >
               {charCount} / {MAX_CHARS}文字
             </span>
+            {isUnderLimit && (
+              <span className="text-sm text-orange-500" data-testid="under-limit-error">
+                {MIN_CHARS}文字以上入力してください
+              </span>
+            )}
             {isOverLimit && (
               <span className="text-sm text-red-500" data-testid="over-limit-error">
                 文字数制限を超えています
