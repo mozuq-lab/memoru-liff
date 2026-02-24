@@ -784,9 +784,10 @@ class TestEnvJsonConfig:
             # 【検証項目】: USE_STRANDS のデフォルト値
             assert func_vars["USE_STRANDS"] == "false"  # 🔵
             # 【検証項目】: OLLAMA_HOST のローカル開発値
-            assert func_vars["OLLAMA_HOST"] == "http://localhost:11434"  # 🔵
+            # SAM local は Docker コンテナ内で Lambda を実行するため host.docker.internal を使用
+            assert func_vars["OLLAMA_HOST"] == "http://host.docker.internal:11434"  # 🔵
             # 【検証項目】: OLLAMA_MODEL のローカル開発値
-            assert func_vars["OLLAMA_MODEL"] == "neural-chat"  # 🔵
+            assert func_vars["OLLAMA_MODEL"] == "llama3.2"  # 🔵
 
 
 # ==============================================================================
