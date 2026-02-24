@@ -303,6 +303,12 @@ class ReviewService:
                 )
             )
 
+        # Get total due count (independent of limit)
+        total_due_count = self.card_service.get_due_card_count(
+            user_id=user_id,
+            before=now if not include_future else None,
+        )
+
         # Get next due date if no cards are due now
         next_due_date = None
         if not due_card_infos:
@@ -310,7 +316,7 @@ class ReviewService:
 
         return DueCardsResponse(
             due_cards=due_card_infos,
-            total_due_count=len(due_card_infos),
+            total_due_count=total_due_count,
             next_due_date=next_due_date,
         )
 
