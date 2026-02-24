@@ -123,6 +123,24 @@ services:
       retries: 10
       start_period: 60s
 
+  ollama:
+    image: ollama/ollama:latest
+    container_name: memoru-ollama
+    ports:
+      - "11434:11434"
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+    volumes:
+      - ollama-data:/root/.ollama
+    networks:
+      - memoru-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
 networks:
   memoru-network:
     name: memoru-network
@@ -131,3 +149,5 @@ networks:
 volumes:
   dynamodb-data:
     name: memoru-dynamodb-data
+  ollama-data:
+    name: memoru-ollama-data

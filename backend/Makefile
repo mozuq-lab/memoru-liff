@@ -2,7 +2,7 @@
 SHELL := /bin/bash
 AWS_REGION ?= ap-northeast-1
 
-.PHONY: help install build validate deploy-dev deploy-prod local-db local-keycloak local-all local-all-stop local-api test clean
+.PHONY: help install build validate deploy-dev deploy-prod local-db local-keycloak local-ollama local-ollama-pull local-ollama-stop local-ollama-logs local-all local-all-stop local-api test clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -36,7 +36,22 @@ local-keycloak: ## Start local Keycloak
 	@echo "Admin Console: http://localhost:8180/admin (admin/admin)"
 	@echo "Test User: test-user / test-password-123"
 
-local-all: local-db local-keycloak ## Start all local services
+local-ollama: ## Start local Ollama (Docker)
+	docker compose up -d ollama
+	@echo "Waiting for Ollama service to be ready..."
+	@echo "Ollama: http://localhost:11434"
+
+local-ollama-pull: ## Pull Ollama model
+	docker compose exec ollama ollama pull $${OLLAMA_MODEL:-llama3.2}
+	@echo "Model downloaded successfully"
+
+local-ollama-stop: ## Stop local Ollama
+	docker compose stop ollama
+
+local-ollama-logs: ## Show Ollama logs
+	docker compose logs -f ollama
+
+local-all: local-db local-keycloak local-ollama ## Start all local services
 	@echo "All local services started"
 
 local-all-stop: ## Stop all local services

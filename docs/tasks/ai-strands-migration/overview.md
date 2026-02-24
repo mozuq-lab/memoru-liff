@@ -35,7 +35,7 @@
 - [x] Phase 1: 基盤構築
 - [x] Phase 2: Strands カード生成移行
 - [x] Phase 3: 新機能追加
-- [ ] Phase 4: ローカル開発 + 最終検証
+- [~] Phase 4: ローカル開発 + 最終検証
 
 ## マイルストーン
 
@@ -123,7 +123,7 @@ TASK-0058 + TASK-0060 + TASK-0062 → TASK-0063
 
 ### タスク一覧
 
-- [ ] [TASK-0064: Ollama プロバイダー + docker-compose 統合](TASK-0064.md) - 6h (DIRECT) 🔵
+- [x] [TASK-0064: Ollama プロバイダー + docker-compose 統合](TASK-0064.md) - 6h (DIRECT) 🔵
 - [ ] [TASK-0065: 全体統合テスト + 品質確認](TASK-0065.md) - 6h (TDD) 🔵
 
 ### 依存関係
