@@ -1,4 +1,7 @@
-"""Unit tests for Bedrock service and AI card generation."""
+"""Unit tests for Bedrock service and AI card generation.
+
+TASK-0059 追加: TestBedrockGradeAnswer クラスを追加 (TC-BDK-001 ~ TC-BDK-011)
+"""
 
 import json
 import pytest
@@ -14,6 +17,7 @@ from services.bedrock import (
     GeneratedCard,
 )
 from services.prompts import get_card_generation_prompt
+from services.ai_service import GradingResult
 
 
 class TestPrompts:
@@ -334,3 +338,203 @@ class TestGenerateCardsValidation:
         )
 
         assert result.input_length == len(input_text)
+
+
+# ---------------------------------------------------------------------------
+# TASK-0059 追加: BedrockService.grade_answer() テスト (TC-BDK-001 ~ TC-BDK-011)
+# ---------------------------------------------------------------------------
+
+
+class TestBedrockGradeAnswer:
+    """BedrockService.grade_answer() テスト (TC-BDK-001 ~ TC-BDK-011).
+
+    BedrockService.grade_answer() は既に実装済み (bedrock.py L167-218)。
+    テストは既存実装の動作を確認する。
+    """
+
+    @pytest.fixture
+    def mock_bedrock_client(self):
+        """Create mock Bedrock client."""
+        return MagicMock()
+
+    @pytest.fixture
+    def bedrock_service(self, mock_bedrock_client):
+        """Create BedrockService with mock client."""
+        return BedrockService(bedrock_client=mock_bedrock_client)
+
+    def _mock_invoke_response(self, mock_client, response_text):
+        """Bedrock invoke_model のモックレスポンスを設定するヘルパー."""
+        mock_body = MagicMock()
+        mock_body.read.return_value = json.dumps({
+            "content": [{"text": response_text}]
+        }).encode()
+        mock_client.invoke_model.return_value = {"body": mock_body}
+
+    # --- 正常系 ---
+
+    def test_grade_answer_success(self, bedrock_service, mock_bedrock_client):
+        """TC-BDK-001: 正常系で GradingResult が返る."""
+        self._mock_invoke_response(
+            mock_bedrock_client,
+            '{"grade": 3, "reasoning": "Partially correct"}'
+        )
+
+        result = bedrock_service.grade_answer(
+            card_front="日本の首都は？",
+            card_back="東京",
+            user_answer="京都",
+        )
+
+        assert isinstance(result, GradingResult)
+        assert result.grade == 3
+        assert result.reasoning == "Partially correct"
+
+    def test_grade_answer_success_with_markdown(self, bedrock_service, mock_bedrock_client):
+        """TC-BDK-002: Markdown コードブロック内 JSON が正しくパースされる."""
+        self._mock_invoke_response(
+            mock_bedrock_client,
+            '```json\n{"grade": 4, "reasoning": "Good answer"}\n```'
+        )
+
+        result = bedrock_service.grade_answer(
+            card_front="Q", card_back="A", user_answer="A",
+        )
+
+        assert result.grade == 4
+        assert result.reasoning == "Good answer"
+
+    def test_grade_answer_model_used(self, mock_bedrock_client):
+        """TC-BDK-003: model_used が self.model_id と一致する."""
+        service = BedrockService(
+            model_id="test-model-id",
+            bedrock_client=mock_bedrock_client,
+        )
+        self._mock_invoke_response(
+            mock_bedrock_client,
+            '{"grade": 5, "reasoning": "Perfect"}'
+        )
+
+        result = service.grade_answer(
+            card_front="Q", card_back="A", user_answer="A",
+        )
+
+        assert result.model_used == "test-model-id"
+
+    def test_grade_answer_processing_time_ms(self, bedrock_service, mock_bedrock_client):
+        """TC-BDK-004: processing_time_ms が 0 以上の整数."""
+        self._mock_invoke_response(
+            mock_bedrock_client,
+            '{"grade": 5, "reasoning": "Perfect"}'
+        )
+
+        result = bedrock_service.grade_answer(
+            card_front="Q", card_back="A", user_answer="A",
+        )
+
+        assert isinstance(result.processing_time_ms, int)
+        assert result.processing_time_ms >= 0
+
+    # --- パースエラー ---
+
+    def test_grade_answer_parse_error(self, bedrock_service, mock_bedrock_client):
+        """TC-BDK-005: 無効な JSON で BedrockParseError."""
+        self._mock_invoke_response(
+            mock_bedrock_client,
+            "This is not valid JSON"
+        )
+
+        with pytest.raises(BedrockParseError):
+            bedrock_service.grade_answer(
+                card_front="Q", card_back="A", user_answer="A",
+            )
+
+    def test_grade_answer_missing_grade_field(self, bedrock_service, mock_bedrock_client):
+        """TC-BDK-006: grade フィールド欠落で BedrockParseError."""
+        self._mock_invoke_response(
+            mock_bedrock_client,
+            '{"reasoning": "Some reasoning"}'
+        )
+
+        with pytest.raises(BedrockParseError):
+            bedrock_service.grade_answer(
+                card_front="Q", card_back="A", user_answer="A",
+            )
+
+    def test_grade_answer_missing_reasoning_field(self, bedrock_service, mock_bedrock_client):
+        """TC-BDK-007: reasoning フィールド欠落で BedrockParseError."""
+        self._mock_invoke_response(
+            mock_bedrock_client,
+            '{"grade": 3}'
+        )
+
+        with pytest.raises(BedrockParseError):
+            bedrock_service.grade_answer(
+                card_front="Q", card_back="A", user_answer="A",
+            )
+
+    # --- API エラー ---
+
+    def test_grade_answer_timeout(self, bedrock_service, mock_bedrock_client):
+        """TC-BDK-008: ReadTimeoutError で BedrockTimeoutError."""
+        mock_bedrock_client.invoke_model.side_effect = ClientError(
+            {"Error": {"Code": "ReadTimeoutError", "Message": "Timeout"}},
+            "InvokeModel",
+        )
+
+        with pytest.raises(BedrockTimeoutError):
+            bedrock_service.grade_answer(
+                card_front="Q", card_back="A", user_answer="A",
+            )
+
+    def test_grade_answer_rate_limit(self, bedrock_service, mock_bedrock_client):
+        """TC-BDK-009: ThrottlingException で BedrockRateLimitError（リトライ後）."""
+        mock_bedrock_client.invoke_model.side_effect = ClientError(
+            {"Error": {"Code": "ThrottlingException", "Message": "Rate limit"}},
+            "InvokeModel",
+        )
+
+        with pytest.raises(BedrockRateLimitError):
+            bedrock_service.grade_answer(
+                card_front="Q", card_back="A", user_answer="A",
+            )
+
+        # リトライ: initial + 2 retries = 3 calls
+        assert mock_bedrock_client.invoke_model.call_count == 3
+
+    def test_grade_answer_internal_error(self, bedrock_service, mock_bedrock_client):
+        """TC-BDK-010: InternalServerException で BedrockInternalError（リトライ後）."""
+        mock_bedrock_client.invoke_model.side_effect = ClientError(
+            {"Error": {"Code": "InternalServerException", "Message": "Internal"}},
+            "InvokeModel",
+        )
+
+        with pytest.raises(BedrockInternalError):
+            bedrock_service.grade_answer(
+                card_front="Q", card_back="A", user_answer="A",
+            )
+
+        assert mock_bedrock_client.invoke_model.call_count == 3
+
+    # --- 引数伝搬 ---
+
+    def test_grade_answer_calls_get_grading_prompt(self, bedrock_service, mock_bedrock_client):
+        """TC-BDK-011: get_grading_prompt に正しい引数が渡される."""
+        self._mock_invoke_response(
+            mock_bedrock_client,
+            '{"grade": 5, "reasoning": "Perfect"}'
+        )
+
+        with patch("services.bedrock.get_grading_prompt", return_value="mocked") as mock_prompt:
+            bedrock_service.grade_answer(
+                card_front="日本の首都は？",
+                card_back="東京",
+                user_answer="東京",
+                language="en",
+            )
+
+        mock_prompt.assert_called_once_with(
+            card_front="日本の首都は？",
+            card_back="東京",
+            user_answer="東京",
+            language="en",
+        )

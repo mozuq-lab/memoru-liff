@@ -1,15 +1,17 @@
 """StrandsAIService のテストスイート.
 
 TASK-0057: StrandsAIService 基本実装（カード生成）- TDD Red フェーズ
+TASK-0059: 回答採点モデル・プロンプト・AI実装 - TDD Red フェーズ（grade_answer テスト追加）
 
 カテゴリ:
 - TestStrandsServiceProtocol: Protocol 準拠テスト (TC-PROTO-001 ~ TC-PROTO-003)
 - TestStrandsServiceGenerateCards: カード生成 正常系テスト (TC-GEN-001 ~ TC-GEN-005)
 - TestStrandsServiceEnvironment: 環境別モデルプロバイダー選択テスト (TC-ENV-001 ~ TC-ENV-005)
-- TestStrandsServiceStubs: Phase 3 スタブメソッドテスト (TC-STUB-001 ~ TC-STUB-003)
+- TestStrandsServiceStubs: Phase 3 スタブメソッドテスト (TC-STUB-002, TC-STUB-003 修正版)
 - TestStrandsServiceErrors: エラーハンドリングテスト (TC-ERR-001 ~ TC-ERR-008)
 - TestStrandsServiceParsing: レスポンス解析テスト (TC-PARSE-001 ~ TC-PARSE-009)
 - TestStrandsServiceFactory: ファクトリ統合テスト (TC-COMPAT-001 ~ TC-COMPAT-002)
+- TestStrandsGradeAnswer: grade_answer() テスト (TC-STR-001 ~ TC-STR-018)
 """
 
 import inspect
@@ -320,20 +322,11 @@ class TestStrandsServiceEnvironment:
 
 
 class TestStrandsServiceStubs:
-    """Phase 3 スタブメソッドテスト (TC-STUB-001 ~ TC-STUB-003)."""
+    """Phase 3 スタブメソッドテスト (TC-STUB-002, TC-STUB-003 修正版).
 
-    def test_grade_answer_raises_not_implemented(self):
-        """TC-STUB-001: grade_answer() は NotImplementedError を raise する."""
-        with patch("services.strands_service.Agent"), \
-             patch("services.strands_service.BedrockModel"):
-            service = StrandsAIService()
-
-        with pytest.raises(NotImplementedError):
-            service.grade_answer(
-                card_front="日本の首都は？",
-                card_back="東京",
-                user_answer="東京",
-            )
+    TC-STUB-001 は削除済み: grade_answer() は TASK-0059 で実装されるため
+    NotImplementedError を raise しなくなる。
+    """
 
     def test_get_learning_advice_raises_not_implemented(self):
         """TC-STUB-002: get_learning_advice() は NotImplementedError を raise する."""
@@ -347,14 +340,15 @@ class TestStrandsServiceStubs:
             )
 
     def test_not_implemented_error_message_contains_phase3(self):
-        """TC-STUB-003: NotImplementedError のメッセージに 'Phase 3' を含む."""
+        """TC-STUB-003: NotImplementedError のメッセージに 'Phase 3' を含む.
+
+        TASK-0059 修正版: grade_answer は実装済みのため get_learning_advice のみ検証する。
+        """
         with patch("services.strands_service.Agent"), \
              patch("services.strands_service.BedrockModel"):
             service = StrandsAIService()
 
-        with pytest.raises(NotImplementedError, match="Phase 3"):
-            service.grade_answer(card_front="Q", card_back="A", user_answer="A")
-
+        # get_learning_advice のみ検証（grade_answer は実装済み）
         with pytest.raises(NotImplementedError, match="Phase 3"):
             service.get_learning_advice(review_summary={})
 
@@ -659,3 +653,303 @@ class TestStrandsServiceFactory:
         assert isinstance(result.input_length, int)
         assert isinstance(result.model_used, str)
         assert isinstance(result.processing_time_ms, int)
+
+
+# ---------------------------------------------------------------------------
+# Category 8: grade_answer() テスト (TC-STR)  [TASK-0059 追加]
+# ---------------------------------------------------------------------------
+
+
+class TestStrandsGradeAnswer:
+    """StrandsAIService.grade_answer() テスト (TC-STR-001 ~ TC-STR-018).
+
+    注意: grade_answer() は TASK-0059 で実装予定。
+    現時点では NotImplementedError を raise するため、これらのテストは失敗する。
+    これは TDD Red フェーズの意図した挙動である。
+    """
+
+    # --- 正常系 ---
+
+    def test_grade_answer_success_perfect(self):
+        """TC-STR-001: 完璧な回答で grade=5 が返る."""
+        response_json = json.dumps({"grade": 5, "reasoning": "Perfect response"})
+        mock_agent_instance = _make_mock_agent_instance(response_json)
+
+        with patch("services.strands_service.Agent", return_value=mock_agent_instance), \
+             patch("services.strands_service.BedrockModel"):
+            service = StrandsAIService()
+            result = service.grade_answer(
+                card_front="日本の首都は？",
+                card_back="東京",
+                user_answer="東京",
+            )
+
+        assert isinstance(result, GradingResult)
+        assert result.grade == 5
+        assert result.reasoning == "Perfect response"
+
+    def test_grade_answer_success_zero(self):
+        """TC-STR-002: 完全不正解で grade=0 が返る."""
+        response_json = json.dumps({"grade": 0, "reasoning": "No answer provided"})
+        mock_agent_instance = _make_mock_agent_instance(response_json)
+
+        with patch("services.strands_service.Agent", return_value=mock_agent_instance), \
+             patch("services.strands_service.BedrockModel"):
+            service = StrandsAIService()
+            result = service.grade_answer(
+                card_front="日本の首都は？",
+                card_back="東京",
+                user_answer="わかりません",
+            )
+
+        assert result.grade == 0
+
+    def test_grade_answer_success_partial(self):
+        """TC-STR-003: 部分正解で grade=3 が返る."""
+        response_json = json.dumps({"grade": 3, "reasoning": "Partially correct"})
+        mock_agent_instance = _make_mock_agent_instance(response_json)
+
+        with patch("services.strands_service.Agent", return_value=mock_agent_instance), \
+             patch("services.strands_service.BedrockModel"):
+            service = StrandsAIService()
+            result = service.grade_answer(
+                card_front="光合成の化学式は？",
+                card_back="6CO2 + 6H2O → C6H12O6 + 6O2",
+                user_answer="CO2と水から糖ができる",
+            )
+
+        assert result.grade == 3
+
+    def test_grade_answer_markdown_wrapped_response(self):
+        """TC-STR-004: Markdown コードブロック内 JSON が正しくパースされる."""
+        response_text = '```json\n{"grade": 4, "reasoning": "Good answer"}\n```'
+        mock_agent_instance = _make_mock_agent_instance(response_text)
+
+        with patch("services.strands_service.Agent", return_value=mock_agent_instance), \
+             patch("services.strands_service.BedrockModel"):
+            service = StrandsAIService()
+            result = service.grade_answer(
+                card_front="Q", card_back="A", user_answer="A",
+            )
+
+        assert result.grade == 4
+        assert result.reasoning == "Good answer"
+
+    def test_grade_answer_model_used(self):
+        """TC-STR-005: model_used が self.model_used と一致する."""
+        response_json = json.dumps({"grade": 5, "reasoning": "Perfect"})
+        mock_agent_instance = _make_mock_agent_instance(response_json)
+
+        with patch("services.strands_service.Agent", return_value=mock_agent_instance), \
+             patch("services.strands_service.BedrockModel"):
+            service = StrandsAIService()
+            result = service.grade_answer(
+                card_front="Q", card_back="A", user_answer="A",
+            )
+
+        assert result.model_used == service.model_used
+
+    def test_grade_answer_processing_time_ms(self):
+        """TC-STR-006: processing_time_ms が 0 以上の整数."""
+        response_json = json.dumps({"grade": 5, "reasoning": "Perfect"})
+        mock_agent_instance = _make_mock_agent_instance(response_json)
+
+        with patch("services.strands_service.Agent", return_value=mock_agent_instance), \
+             patch("services.strands_service.BedrockModel"):
+            service = StrandsAIService()
+            result = service.grade_answer(
+                card_front="Q", card_back="A", user_answer="A",
+            )
+
+        assert isinstance(result.processing_time_ms, int)
+        assert result.processing_time_ms >= 0
+
+    # --- 引数伝搬 ---
+
+    @patch("services.strands_service.get_grading_prompt", return_value="mocked prompt")
+    def test_grade_answer_passes_correct_args_to_prompt(self, mock_prompt):
+        """TC-STR-007: get_grading_prompt に正しい引数が渡される."""
+        response_json = json.dumps({"grade": 5, "reasoning": "Perfect"})
+        mock_agent_instance = _make_mock_agent_instance(response_json)
+
+        with patch("services.strands_service.Agent", return_value=mock_agent_instance), \
+             patch("services.strands_service.BedrockModel"):
+            service = StrandsAIService()
+            service.grade_answer(
+                card_front="日本の首都は？",
+                card_back="東京",
+                user_answer="東京",
+                language="ja",
+            )
+
+        mock_prompt.assert_called_once_with(
+            card_front="日本の首都は？",
+            card_back="東京",
+            user_answer="東京",
+            language="ja",
+        )
+
+    @patch("services.strands_service.get_grading_prompt", return_value="mocked prompt")
+    def test_grade_answer_language_ja(self, mock_prompt):
+        """TC-STR-008: language='ja' が get_grading_prompt に渡される."""
+        response_json = json.dumps({"grade": 5, "reasoning": "Perfect"})
+        mock_agent_instance = _make_mock_agent_instance(response_json)
+
+        with patch("services.strands_service.Agent", return_value=mock_agent_instance), \
+             patch("services.strands_service.BedrockModel"):
+            service = StrandsAIService()
+            service.grade_answer(
+                card_front="Q", card_back="A", user_answer="A", language="ja",
+            )
+
+        assert mock_prompt.call_args.kwargs["language"] == "ja"
+
+    @patch("services.strands_service.get_grading_prompt", return_value="mocked prompt")
+    def test_grade_answer_language_en(self, mock_prompt):
+        """TC-STR-009: language='en' が get_grading_prompt に渡される."""
+        response_json = json.dumps({"grade": 5, "reasoning": "Perfect"})
+        mock_agent_instance = _make_mock_agent_instance(response_json)
+
+        with patch("services.strands_service.Agent", return_value=mock_agent_instance), \
+             patch("services.strands_service.BedrockModel"):
+            service = StrandsAIService()
+            service.grade_answer(
+                card_front="Q", card_back="A", user_answer="A", language="en",
+            )
+
+        assert mock_prompt.call_args.kwargs["language"] == "en"
+
+    # --- パースエラー ---
+
+    def test_grade_answer_parse_error_invalid_json(self):
+        """TC-STR-010: 非 JSON レスポンスで AIParseError."""
+        mock_agent_instance = _make_mock_agent_instance("This is not valid JSON")
+
+        with patch("services.strands_service.Agent", return_value=mock_agent_instance), \
+             patch("services.strands_service.BedrockModel"):
+            service = StrandsAIService()
+
+            with pytest.raises(AIParseError):
+                service.grade_answer(
+                    card_front="Q", card_back="A", user_answer="A",
+                )
+
+    def test_grade_answer_parse_error_missing_grade(self):
+        """TC-STR-011: grade フィールド欠落で AIParseError."""
+        response_json = json.dumps({"reasoning": "Some reasoning"})
+        mock_agent_instance = _make_mock_agent_instance(response_json)
+
+        with patch("services.strands_service.Agent", return_value=mock_agent_instance), \
+             patch("services.strands_service.BedrockModel"):
+            service = StrandsAIService()
+
+            with pytest.raises(AIParseError):
+                service.grade_answer(
+                    card_front="Q", card_back="A", user_answer="A",
+                )
+
+    def test_grade_answer_parse_error_missing_reasoning(self):
+        """TC-STR-012: reasoning フィールド欠落で AIParseError."""
+        response_json = json.dumps({"grade": 5})
+        mock_agent_instance = _make_mock_agent_instance(response_json)
+
+        with patch("services.strands_service.Agent", return_value=mock_agent_instance), \
+             patch("services.strands_service.BedrockModel"):
+            service = StrandsAIService()
+
+            with pytest.raises(AIParseError):
+                service.grade_answer(
+                    card_front="Q", card_back="A", user_answer="A",
+                )
+
+    def test_grade_answer_parse_error_invalid_grade_type(self):
+        """TC-STR-013: grade が数値変換不可で AIParseError."""
+        response_json = json.dumps({"grade": "five", "reasoning": "Some reasoning"})
+        mock_agent_instance = _make_mock_agent_instance(response_json)
+
+        with patch("services.strands_service.Agent", return_value=mock_agent_instance), \
+             patch("services.strands_service.BedrockModel"):
+            service = StrandsAIService()
+
+            with pytest.raises(AIParseError):
+                service.grade_answer(
+                    card_front="Q", card_back="A", user_answer="A",
+                )
+
+    # --- エラーハンドリング ---
+
+    def test_grade_answer_timeout(self):
+        """TC-STR-014: TimeoutError で AITimeoutError."""
+        mock_agent_instance = MagicMock()
+        mock_agent_instance.side_effect = TimeoutError("Agent timed out")
+
+        with patch("services.strands_service.Agent", return_value=mock_agent_instance), \
+             patch("services.strands_service.BedrockModel"):
+            service = StrandsAIService()
+
+            with pytest.raises(AITimeoutError):
+                service.grade_answer(
+                    card_front="Q", card_back="A", user_answer="A",
+                )
+
+    def test_grade_answer_rate_limit(self):
+        """TC-STR-015: ThrottlingException で AIRateLimitError. (🟡 SDK 依存)"""
+        from botocore.exceptions import ClientError
+        mock_agent_instance = MagicMock()
+        mock_agent_instance.side_effect = ClientError(
+            {"Error": {"Code": "ThrottlingException", "Message": "Rate limit"}},
+            "InvokeModel",
+        )
+
+        with patch("services.strands_service.Agent", return_value=mock_agent_instance), \
+             patch("services.strands_service.BedrockModel"):
+            service = StrandsAIService()
+
+            with pytest.raises(AIRateLimitError):
+                service.grade_answer(
+                    card_front="Q", card_back="A", user_answer="A",
+                )
+
+    def test_grade_answer_connection_error(self):
+        """TC-STR-016: ConnectionError で AIProviderError."""
+        mock_agent_instance = MagicMock()
+        mock_agent_instance.side_effect = ConnectionError("Connection refused")
+
+        with patch("services.strands_service.Agent", return_value=mock_agent_instance), \
+             patch("services.strands_service.BedrockModel"):
+            service = StrandsAIService()
+
+            with pytest.raises(AIProviderError):
+                service.grade_answer(
+                    card_front="Q", card_back="A", user_answer="A",
+                )
+
+    def test_grade_answer_unknown_exception(self):
+        """TC-STR-017: RuntimeError で AIServiceError."""
+        mock_agent_instance = MagicMock()
+        mock_agent_instance.side_effect = RuntimeError("Something unexpected")
+
+        with patch("services.strands_service.Agent", return_value=mock_agent_instance), \
+             patch("services.strands_service.BedrockModel"):
+            service = StrandsAIService()
+
+            with pytest.raises(AIServiceError):
+                service.grade_answer(
+                    card_front="Q", card_back="A", user_answer="A",
+                )
+
+    def test_grade_answer_exception_chain_preserved(self):
+        """TC-STR-018: 例外チェーン (__cause__) が保持される."""
+        mock_agent_instance = MagicMock()
+        mock_agent_instance.side_effect = ConnectionError("Connection refused")
+
+        with patch("services.strands_service.Agent", return_value=mock_agent_instance), \
+             patch("services.strands_service.BedrockModel"):
+            service = StrandsAIService()
+
+            with pytest.raises(AIProviderError) as exc_info:
+                service.grade_answer(
+                    card_front="Q", card_back="A", user_answer="A",
+                )
+
+            assert exc_info.value.__cause__ is not None

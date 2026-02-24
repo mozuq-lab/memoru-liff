@@ -35,7 +35,8 @@ from services.ai_service import (
     Language,
     LearningAdvice,
 )
-from services.prompts import get_card_generation_prompt
+from services.prompts import get_card_generation_prompt, get_grading_prompt
+from services.prompts.grading import GRADING_SYSTEM_PROMPT
 
 # Bedrock のデフォルトモデル ID
 _DEFAULT_BEDROCK_MODEL_ID = "anthropic.claude-3-haiku-20240307-v1:0"
@@ -50,8 +51,8 @@ _MODEL_USED_OLLAMA = "strands_ollama"
 class StrandsAIService:
     """AWS Strands Agents SDK を使用した AI サービス実装.
 
-    AIService Protocol に準拠し、カード生成を提供する。
-    grade_answer() と get_learning_advice() は Phase 3 で実装予定のため、
+    AIService Protocol に準拠し、カード生成と回答採点を提供する。
+    get_learning_advice() は Phase 3 で実装予定のため、
     現在は NotImplementedError を raise するスタブになっている。
 
     Attributes:
@@ -254,20 +255,131 @@ class StrandsAIService:
         user_answer: str,
         language: Language = "ja",
     ) -> GradingResult:
-        """ユーザーの回答を採点する（Phase 3 で実装予定のスタブ）.
+        """ユーザーの回答を Strands Agent 経由で採点する.
 
         Args:
             card_front: カードの問題文。
             card_back: カードの正解。
             user_answer: ユーザーの回答。
-            language: 出力言語。
+            language: 出力言語（'ja', 'en'）。
+
+        Returns:
+            GradingResult: SM-2 グレード（0-5）と採点理由。
 
         Raises:
-            NotImplementedError: このメソッドは Phase 3 で実装予定。
+            AITimeoutError: Agent 呼び出しがタイムアウトした場合。
+            AIRateLimitError: レート制限に達した場合。
+            AIProviderError: プロバイダー接続エラーが発生した場合。
+            AIParseError: レスポンスの解析に失敗した場合。
+            AIServiceError: その他の予期しないエラーが発生した場合。
         """
-        raise NotImplementedError(
-            "grade_answer is not implemented yet (Phase 3)"
-        )
+        start_time = time.time()
+
+        try:
+            # プロンプトを生成
+            user_prompt = get_grading_prompt(
+                card_front=card_front,
+                card_back=card_back,
+                user_answer=user_answer,
+                language=language,
+            )
+
+            # Strands Agent を作成して呼び出す
+            agent = Agent(model=self.model)
+            response = agent(user_prompt)
+
+            # レスポンスをテキストに変換して解析
+            response_text = str(response)
+            grade, reasoning = self._parse_grading_result(response_text)
+
+            processing_time_ms = int((time.time() - start_time) * 1000)
+
+            return GradingResult(
+                grade=grade,
+                reasoning=reasoning,
+                model_used=self.model_used,
+                processing_time_ms=processing_time_ms,
+            )
+
+        except AIServiceError:
+            # 既にマッピング済みの例外はそのまま再 raise
+            raise
+        except TimeoutError as e:
+            raise AITimeoutError(f"Agent timed out: {e}") from e
+        except ConnectionError as e:
+            raise AIProviderError(f"Provider connection error: {e}") from e
+        except Exception as e:
+            # botocore.exceptions.ClientError などの SDK 固有例外を処理
+            error_str = str(e)
+
+            # ClientError (botocore) のレート制限チェック
+            if _is_rate_limit_error(e):
+                raise AIRateLimitError(f"Rate limit exceeded: {e}") from e
+
+            # タイムアウト関連エラーのチェック
+            if "timeout" in error_str.lower() or "timed out" in error_str.lower():
+                raise AITimeoutError(f"Agent timed out: {e}") from e
+
+            # 接続エラー関連チェック（エラーメッセージと例外クラス名を確認）
+            if "connection" in error_str.lower() or "connect" in type(e).__name__.lower():
+                raise AIProviderError(f"Provider connection error: {e}") from e
+
+            # その他の予期しない例外を AIServiceError にラップ
+            raise AIServiceError(f"Unexpected error: {e}") from e
+
+    def _parse_grading_result(self, response_text: str) -> tuple[int, str]:
+        """Strands Agent のレスポンステキストから採点結果を抽出する.
+
+        以下の 2 種類のフォーマットに対応する:
+        1. プレーン JSON: {"grade": 5, "reasoning": "..."}
+        2. Markdown コードブロック: ```json\\n{...}\\n```
+
+        Args:
+            response_text: Agent から返されたレスポンステキスト。
+
+        Returns:
+            (grade: int, reasoning: str) のタプル。
+
+        Raises:
+            AIParseError: JSON の解析に失敗した場合、または必須フィールドが
+                欠落している場合、または grade が整数に変換できない場合。
+        """
+        try:
+            # Markdown コードブロックを検出して JSON を抽出
+            json_match = re.search(r"```json\s*([\s\S]*?)\s*```", response_text)
+            if json_match:
+                json_str = json_match.group(1)
+            else:
+                json_str = response_text.strip()
+
+            data = json.loads(json_str)
+
+        except json.JSONDecodeError as e:
+            raise AIParseError(f"Failed to parse JSON response: {e}") from e
+
+        # 必須フィールドチェック
+        if "grade" not in data:
+            raise AIParseError(
+                "Response missing required 'grade' field. "
+                f"Available keys: {list(data.keys())}"
+            )
+        if "reasoning" not in data:
+            raise AIParseError(
+                "Response missing required 'reasoning' field. "
+                f"Available keys: {list(data.keys())}"
+            )
+
+        # grade を整数に変換（変換不可の場合は AIParseError）
+        try:
+            grade = int(data["grade"])
+        except (ValueError, TypeError) as e:
+            raise AIParseError(
+                f"Failed to convert 'grade' to int: {data['grade']!r}"
+            ) from e
+
+        reasoning = str(data["reasoning"])
+
+        return grade, reasoning
 
     def get_learning_advice(
         self,
