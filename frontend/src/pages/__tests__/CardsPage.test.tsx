@@ -11,11 +11,14 @@ import type { Card } from '@/types';
 
 // CardsContext モック
 const mockFetchCards = vi.fn();
+const mockFetchDueCards = vi.fn();
 const mockCardsContext = {
   cards: [] as Card[],
+  dueCards: [] as Card[],
   isLoading: false,
   error: null as Error | null,
   fetchCards: mockFetchCards,
+  fetchDueCards: mockFetchDueCards,
   addCard: vi.fn(),
   updateCard: vi.fn(),
   deleteCard: vi.fn(),
@@ -68,6 +71,7 @@ describe('CardsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockCardsContext.cards = [];
+    mockCardsContext.dueCards = [];
     mockCardsContext.isLoading = false;
     mockCardsContext.error = null;
 

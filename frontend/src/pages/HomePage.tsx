@@ -84,7 +84,7 @@ export const HomePage = () => {
           </div>
           {dueCount > 0 && (
             <Link
-              to="/cards"
+              to="/cards?tab=due"
               className="mt-4 block w-full py-3 bg-blue-600 text-white text-center rounded-lg hover:bg-blue-700 active:bg-blue-800 min-h-[44px] transition-colors"
             >
               復習を始める

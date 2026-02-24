@@ -116,7 +116,7 @@ describe('HomePage', () => {
       mockCardsContext.dueCount = 5;
       renderHomePage();
       const link = screen.getByText('復習を始める');
-      expect(link).toHaveAttribute('href', '/cards');
+      expect(link).toHaveAttribute('href', '/cards?tab=due');
     });
   });
 
