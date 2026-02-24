@@ -97,7 +97,7 @@ TASK-0055 + TASK-0057 → TASK-0058
 ### タスク一覧
 
 - [x] [TASK-0059: 回答採点モデル・プロンプト・AI 実装](TASK-0059.md) - 8h (TDD) 🔵
-- [ ] [TASK-0060: POST /reviews/{card_id}/grade-ai エンドポイント](TASK-0060.md) - 8h (TDD) 🔵
+- [x] [TASK-0060: POST /reviews/{card_id}/grade-ai エンドポイント](TASK-0060.md) - 8h (TDD) 🔵
 - [ ] [TASK-0061: 学習データ集計 + アドバイスモデル・プロンプト](TASK-0061.md) - 8h (TDD) 🟡
 - [ ] [TASK-0062: 学習アドバイス AI 実装 + GET /advice エンドポイント](TASK-0062.md) - 8h (TDD) 🔵
 - [ ] [TASK-0063: Phase 3 統合テスト](TASK-0063.md) - 8h (TDD) 🔵

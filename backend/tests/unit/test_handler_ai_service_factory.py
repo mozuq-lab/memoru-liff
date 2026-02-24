@@ -497,24 +497,26 @@ class TestGenerateCardsCompatibility:
 
 
 class TestStubHandlers:
-    """カテゴリ D: grade_ai_handler と advice_handler スタブの 501 レスポンス確認."""
+    """カテゴリ D: grade_ai_handler 実装確認 / advice_handler スタブの 501 レスポンス確認."""
 
-    def test_grade_ai_handler_returns_501(self, lambda_context):
-        """TC-056-014: grade_ai_handler スタブの 501 レスポンス確認.
+    def test_grade_ai_handler_is_implemented(self, lambda_context):
+        """TC-056-014: grade_ai_handler が 501 スタブではなく本実装であることを確認.
 
-        【テスト目的】: grade_ai_handler スタブが 501 を返すことを確認
-        【テスト内容】: Lambda イベントを直接渡してスタブレスポンスを検証
-        【期待される動作】: statusCode=501, Content-Type=application/json, body={"error": "Not implemented"}
-        🔵 信頼性レベル: 青信号 - 要件定義書 2.4 節「handler.py スタブハンドラー追加」から確定
+        【テスト目的】: TASK-0060 実装後、grade_ai_handler がスタブ(501)を返さないことを確認
+        【テスト内容】: 認証なしイベントを渡して 401 が返ること（501 ではないこと）を検証
+        【期待される動作】: statusCode != 501（認証なしなので 401 Unauthorized が返る）
+        🔵 信頼性レベル: 青信号 - TASK-0060 で grade_ai_handler 本実装済み
         """
         # Given
-        # 【テストデータ準備】: 最小限の Lambda イベント
+        # 【テストデータ準備】: 認証情報なしの Lambda イベント
         event = {
             "version": "2.0",
             "routeKey": "POST /reviews/{cardId}/grade-ai",
             "rawPath": "/reviews/card-123/grade-ai",
+            "pathParameters": {"cardId": "card-123"},
             "requestContext": {
                 "http": {"method": "POST"},
+                "authorizer": {},
             },
         }
 
@@ -524,11 +526,11 @@ class TestStubHandlers:
         response = grade_ai_handler(event, lambda_context)
 
         # Then
-        # 【結果検証】: 501 Not Implemented レスポンス
-        assert response["statusCode"] == 501  # 🔵
+        # 【結果検証】: スタブ(501)ではなく本実装のレスポンスが返ること
+        assert response["statusCode"] != 501  # 【検証項目】: スタブ 501 が返らないこと 🔵
         assert response["headers"]["Content-Type"] == "application/json"  # 🔵
-        body = json.loads(response["body"])
-        assert body["error"] == "Not implemented"  # 🔵
+        # 認証情報なしなので 401 Unauthorized が返ることを確認
+        assert response["statusCode"] == 401  # 🔵
 
     def test_advice_handler_returns_501(self, lambda_context):
         """TC-056-015: advice_handler スタブの 501 レスポンス確認.

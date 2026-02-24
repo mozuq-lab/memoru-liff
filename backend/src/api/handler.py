@@ -38,6 +38,7 @@ from models.generate import (
     GeneratedCardResponse,
     GenerationInfoResponse,
 )
+from models.grading import GradeAnswerRequest, GradeAnswerResponse
 from services.ai_service import (
     create_ai_service,
     AIServiceError,
@@ -146,6 +147,62 @@ def get_user_id_from_context() -> str:
             logger.error(f"Failed to decode JWT from Authorization header: {e}")
 
     raise UnauthorizedError("Unable to extract user ID from token")
+
+
+def _get_user_id_from_event(event: dict) -> str | None:
+    """Extract user_id from API Gateway HTTP API v2 Lambda event JWT claims.
+
+    Used by standalone Lambda handlers that receive raw API Gateway events
+    (not routed through APIGatewayHttpResolver).
+
+    Args:
+        event: Raw API Gateway HTTP API v2 event dict.
+
+    Returns:
+        user_id string if found, None otherwise.
+    """
+    try:
+        claims = event.get("requestContext", {}).get("authorizer", {})
+        if claims and "jwt" in claims:
+            return claims["jwt"]["claims"]["sub"]
+        if claims and "claims" in claims:
+            return claims["claims"]["sub"]
+        if claims and "sub" in claims:
+            return claims["sub"]
+    except (KeyError, TypeError, AttributeError):
+        pass
+
+    # Dev environment fallback: decode JWT from Authorization header directly.
+    if os.environ.get("ENVIRONMENT") == "dev":
+        try:
+            auth_header = (event.get("headers") or {}).get("authorization", "")
+            if auth_header.startswith("Bearer "):
+                token = auth_header.split(" ", 1)[1]
+                payload = token.split(".")[1]
+                payload += "=" * (4 - len(payload) % 4)
+                decoded = json.loads(base64.urlsafe_b64decode(payload))
+                return decoded.get("sub")
+        except Exception:
+            pass
+
+    return None
+
+
+def _make_lambda_response(status_code: int, body: dict) -> dict:
+    """Create a Lambda proxy integration response dict.
+
+    Args:
+        status_code: HTTP status code.
+        body: Response body dict (will be JSON-serialized).
+
+    Returns:
+        Lambda proxy integration response dict.
+    """
+    return {
+        "statusCode": status_code,
+        "headers": {"Content-Type": "application/json"},
+        "body": json.dumps(body),
+    }
 
 
 # =============================================================================
@@ -594,26 +651,102 @@ def submit_review(card_id: str):
 
 
 # =============================================================================
-# AI Stub Handlers (後続タスクで実装: TASK-0057, TASK-0060)
+# Standalone Lambda Handlers (grade_ai_handler: TASK-0060 実装済み / advice_handler: TASK-0061 予定)
 # =============================================================================
 
 
 def grade_ai_handler(event: dict, context: Any) -> dict:
-    """POST /reviews/{cardId}/grade-ai のスタブハンドラー。
+    """POST /reviews/{cardId}/grade-ai の Lambda ハンドラー。
 
-    🔵 TASK-0057 で本実装予定。現在は 501 Not Implemented を返す。
+    独立 Lambda 関数として API Gateway HTTP API v2 イベントを直接受け取る。
+    pathParameters.cardId (camelCase) からカード ID を取得し、
+    requestContext.authorizer.jwt.claims.sub からユーザー ID を取得する。
     """
-    return {
-        "statusCode": 501,
-        "headers": {"Content-Type": "application/json"},
-        "body": json.dumps({"error": "Not implemented"}),
-    }
+    try:
+        # 1. Extract user_id from JWT claims
+        user_id = _get_user_id_from_event(event)
+        if not user_id:
+            return _make_lambda_response(401, {"error": "Unauthorized"})
+
+        # 2. Extract card_id from pathParameters (camelCase: cardId)
+        path_params = event.get("pathParameters") or {}
+        card_id = path_params.get("cardId")
+        if not card_id:
+            return _make_lambda_response(400, {"error": "card_id is required"})
+
+        logger.info(
+            f"Grade AI request: card_id={card_id}, user_id={user_id}, "
+            f"user_answer_length={len((event.get('body') or ''))}"
+        )
+
+        # 3. Parse and validate request body
+        body_str = event.get("body") or ""
+        try:
+            body_dict = json.loads(body_str)
+            request = GradeAnswerRequest(**body_dict)
+        except json.JSONDecodeError:
+            return _make_lambda_response(400, {"error": "Invalid request body"})
+        except ValidationError as e:
+            # Use model_dump_json to get JSON-safe error details from Pydantic
+            try:
+                details = json.loads(e.json())
+            except Exception:
+                details = []
+            return _make_lambda_response(400, {"error": "Invalid request body", "details": details})
+
+        # 4. Get language from query string parameters (default "ja")
+        language = (event.get("queryStringParameters") or {}).get("language", "ja")
+
+        # 5. Get card from CardService
+        try:
+            card = card_service.get_card(user_id, card_id)
+        except CardNotFoundError:
+            return _make_lambda_response(404, {"error": "Not Found"})
+
+        # 6. Call AI service to grade the answer
+        try:
+            ai_service = create_ai_service()
+            result = ai_service.grade_answer(
+                card_front=card.front,
+                card_back=card.back,
+                user_answer=request.user_answer,
+                language=language,
+            )
+        except AIServiceError as e:
+            logger.warning(f"AI service error grading card {card_id} for user {user_id}: {type(e).__name__}: {e}")
+            ai_response = _map_ai_error_to_http(e)
+            return {
+                "statusCode": ai_response.status_code,
+                "headers": {"Content-Type": "application/json"},
+                "body": ai_response.body,
+            }
+
+        # 7. Build and return GradeAnswerResponse
+        logger.info(
+            f"Grade AI succeeded: card_id={card_id}, grade={result.grade}, "
+            f"model={result.model_used}"
+        )
+        response = GradeAnswerResponse(
+            grade=result.grade,
+            reasoning=result.reasoning,
+            card_front=card.front,
+            card_back=card.back,
+            grading_info={
+                "model_used": result.model_used,
+                "processing_time_ms": result.processing_time_ms,
+            },
+        )
+        return _make_lambda_response(200, response.model_dump(mode="json"))
+
+    except Exception as e:
+        logger.error(f"Unexpected error in grade_ai_handler: {e}")
+        return _make_lambda_response(500, {"error": "Internal Server Error"})
 
 
 def advice_handler(event: dict, context: Any) -> dict:
     """GET /advice のスタブハンドラー。
 
-    🔵 TASK-0060 で本実装予定。現在は 501 Not Implemented を返す。
+    TASK-0061 で本実装予定。現在は 501 Not Implemented を返す。
     """
     return {
         "statusCode": 501,
