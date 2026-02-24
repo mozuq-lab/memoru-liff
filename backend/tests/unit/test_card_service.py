@@ -215,7 +215,7 @@ def card_service(dynamodb_table):
 
         return {}
 
-    service.dynamodb.meta.client.transact_write_items = mock_transact_write_items
+    service._client.transact_write_items = mock_transact_write_items
     return service
 
 
@@ -531,7 +531,7 @@ class TestCardServiceRaceConditionPrevention:
 
         # Mock transact_write_items to simulate successful transaction
         # (moto has bugs with transact_write_items, so we mock it)
-        original_client = card_service.dynamodb.meta.client
+        original_client = card_service._client
 
         def mock_transact_write_items(*args, **kwargs):
             # Simulate the transaction: update card_count and create card
@@ -575,7 +575,7 @@ class TestCardServiceRaceConditionPrevention:
         )
 
         # Mock transact_write_items to raise TransactionCanceledException (condition failed)
-        original_client = card_service.dynamodb.meta.client
+        original_client = card_service._client
 
         def mock_transact_write_items(*args, **kwargs):
             raise ClientError(
@@ -623,7 +623,7 @@ class TestCardServiceRaceConditionPrevention:
         )
 
         # Mock transact_write_items to raise TransactionCanceledException
-        original_client = card_service.dynamodb.meta.client
+        original_client = card_service._client
 
         def mock_transact_write_items(*args, **kwargs):
             raise ClientError(
@@ -665,7 +665,7 @@ class TestCardServiceRaceConditionPrevention:
         )
 
         # Mock transact_write_items to raise TransactionCanceledException
-        original_client = card_service.dynamodb.meta.client
+        original_client = card_service._client
 
         def mock_transact_write_items(*args, **kwargs):
             raise ClientError(
@@ -777,7 +777,7 @@ class TestTransactionErrorClassification:
         from botocore.exceptions import ClientError
 
         # 【テストデータ準備】: CardLimit超過を模擬するモックを設定する
-        original_client = card_service.dynamodb.meta.client
+        original_client = card_service._client
 
         def mock_transact(*args, **kwargs):
             # 【処理内容】: card_count >= 2000 のConditionalCheckFailed を模擬する
@@ -827,7 +827,7 @@ class TestTransactionErrorClassification:
         # このテストは InternalError が追加されるまで ImportError で失敗する
         from services.card_service import InternalError  # noqa: F401
 
-        original_client = card_service.dynamodb.meta.client
+        original_client = card_service._client
 
         def mock_transact(*args, **kwargs):
             # 【処理内容】: ValidationError (非ConditionalCheckFailed) を模擬する
@@ -872,7 +872,7 @@ class TestTransactionErrorClassification:
         from botocore.exceptions import ClientError
         from services.card_service import InternalError  # noqa: F401
 
-        original_client = card_service.dynamodb.meta.client
+        original_client = card_service._client
 
         def mock_transact(*args, **kwargs):
             # 【処理内容】: CancellationReasons キーなしのTransactionCanceledExceptionを模擬する
@@ -915,7 +915,7 @@ class TestTransactionErrorClassification:
         from botocore.exceptions import ClientError
         from services.card_service import InternalError  # noqa: F401
 
-        original_client = card_service.dynamodb.meta.client
+        original_client = card_service._client
 
         def mock_transact(*args, **kwargs):
             # 【処理内容】: CancellationReasons が空リストのTransactionCanceledExceptionを模擬する
@@ -1025,7 +1025,7 @@ class TestDeleteCardTransaction:
         monkeypatch.setattr(card_service, "get_card", lambda uid, cid: mock_card)
 
         # 【初期条件設定】: transact_write_items がカードが既に削除された状態を模擬する
-        original_client = card_service.dynamodb.meta.client
+        original_client = card_service._client
 
         def mock_transact(*args, **kwargs):
             # 【処理内容】: Index 0 (Cards Delete) でConditionalCheckFailed (レースコンディション)
@@ -1037,8 +1037,7 @@ class TestDeleteCardTransaction:
                     },
                     "CancellationReasons": [
                         {"Code": "ConditionalCheckFailed", "Message": "Card does not exist"},  # Index 0: Cards Delete
-                        {"Code": "None"},   # Index 1: Reviews Delete (条件なし)
-                        {"Code": "None"},   # Index 2: Users Update
+                        {"Code": "None"},   # Index 1: Users Update
                     ],
                 },
                 "TransactWriteItems",
@@ -1079,10 +1078,10 @@ class TestDeleteCardTransaction:
         monkeypatch.setattr(card_service, "get_card", lambda uid, cid: mock_card)
 
         # 【初期条件設定】: card_count = 0 の条件チェック失敗を模擬する
-        original_client = card_service.dynamodb.meta.client
+        original_client = card_service._client
 
         def mock_transact(*args, **kwargs):
-            # 【処理内容】: Index 2 (Users Update) でConditionalCheckFailed (card_count > 0 が偽)
+            # 【処理内容】: Index 1 (Users Update) でConditionalCheckFailed (card_count > 0 が偽)
             raise ClientError(
                 {
                     "Error": {
@@ -1091,8 +1090,7 @@ class TestDeleteCardTransaction:
                     },
                     "CancellationReasons": [
                         {"Code": "None"},                       # Index 0: Cards Delete OK
-                        {"Code": "None"},                       # Index 1: Reviews Delete OK
-                        {"Code": "ConditionalCheckFailed"},     # Index 2: card_count > :zero 条件失敗
+                        {"Code": "ConditionalCheckFailed"},     # Index 1: card_count > :zero 条件失敗
                     ],
                 },
                 "TransactWriteItems",

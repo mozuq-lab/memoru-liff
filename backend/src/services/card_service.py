@@ -74,10 +74,10 @@ class CardService:
         # 【レビューテーブル設定】: delete_card トランザクションで Reviews テーブルを参照するために必要
         self.reviews_table_name = reviews_table_name or os.environ.get("REVIEWS_TABLE", "memoru-reviews-dev")
 
+        endpoint_url = os.environ.get("DYNAMODB_ENDPOINT_URL") or os.environ.get("AWS_ENDPOINT_URL")
         if dynamodb_resource:
             self.dynamodb = dynamodb_resource
         else:
-            endpoint_url = os.environ.get("DYNAMODB_ENDPOINT_URL") or os.environ.get("AWS_ENDPOINT_URL")
             if endpoint_url:
                 self.dynamodb = boto3.resource("dynamodb", endpoint_url=endpoint_url)
             else:
@@ -85,6 +85,15 @@ class CardService:
 
         self.table = self.dynamodb.Table(self.table_name)
         self.users_table = self.dynamodb.Table(self.users_table_name)
+
+        # 低レベルクライアント: transact_write_items 用
+        # boto3.resource().meta.client はリソース層の型変換イベントハンドラーを含むため、
+        # 低レベル DynamoDB JSON を二重シリアライズしてしまう。
+        # 直接 boto3.client() を使うことで回避する。
+        if endpoint_url:
+            self._client = boto3.client("dynamodb", endpoint_url=endpoint_url)
+        else:
+            self._client = boto3.client("dynamodb")
 
     def create_card(
         self,
@@ -124,7 +133,7 @@ class CardService:
             # Use TransactWriteItems to atomically:
             # 1. Increment card_count in users table with condition check
             # 2. Create the card in cards table
-            client = self.dynamodb.meta.client
+            client = self._client
             serializer = TypeSerializer()
 
             # Serialize the card item
@@ -138,19 +147,16 @@ class CardService:
                         'Update': {
                             'TableName': self.users_table_name,
                             'Key': {'user_id': {'S': user_id}},
-                            # 【UpdateExpression修正】: if_not_exists(card_count, :zero) を使用して
-                            # card_count属性が存在しない場合に安全に0として扱う (EARS-001)
-                            # 🔵 信頼性レベル: 青信号 - CR-02で特定されたバグの修正
-                            'UpdateExpression': 'SET card_count = if_not_exists(card_count, :zero) + :inc',
-                            # 【ConditionExpression修正】: if_not_exists(card_count, :zero) を使用して
-                            # card_count属性が存在しない場合のリミットチェックも安全に行う (EARS-002)
-                            # 🔵 信頼性レベル: 青信号 - CR-02で特定されたバグの修正
-                            'ConditionExpression': 'if_not_exists(card_count, :zero) < :limit',
+                            # 【UpdateExpression修正】: ADD を使用して
+                            # card_count属性が存在しない場合は自動的に作成し、
+                            # 存在する場合はインクリメントする
+                            'UpdateExpression': 'ADD card_count :inc',
+                            # 【ConditionExpression修正】: attribute_not_exists OR card_count < :limit
+                            # card_count属性が未存在時は許可し、存在時はリミットチェック
+                            'ConditionExpression': 'attribute_not_exists(card_count) OR card_count < :limit',
                             'ExpressionAttributeValues': {
                                 ':inc': {'N': '1'},
                                 ':limit': {'N': str(self.MAX_CARDS_PER_USER)},
-                                # 【:zero追加】: if_not_exists のフォールバック値として必要 (EARS-003)
-                                ':zero': {'N': '0'}
                             }
                         }
                     },
@@ -302,15 +308,32 @@ class CardService:
 
         【トランザクション設計】:
           - TransactItems[0] の ConditionalCheckFailed: 並行削除によるレースコンディション → CardNotFoundError
-          - TransactItems[2] の ConditionalCheckFailed: card_count が既に 0 → CardServiceError
+          - TransactItems[1] の ConditionalCheckFailed: card_count が既に 0 → CardServiceError
+          - Reviews 削除はトランザクション外で事前実行（card_id + reviewed_at の複合キーのため）
         🔵 信頼性レベル: 青信号 - CR-02で特定された非トランザクション実装の修正 (EARS-010)
         """
         # 【カード存在確認】: 削除前にカードが存在することを確認する
         self.get_card(user_id, card_id)
 
+        # 【Reviews 事前削除】: Reviews テーブルのキーは card_id + reviewed_at のため、
+        # トランザクション内の単一 Delete では全レビューを削除できない。
+        # クエリで全レビューを取得し、バッチ削除する（ベストエフォート）。
         try:
-            client = self.dynamodb.meta.client
-            # 【トランザクション実行】: 3つの操作をアトミックに実行する
+            reviews_table = self.dynamodb.Table(self.reviews_table_name)
+            response = reviews_table.query(
+                KeyConditionExpression="card_id = :cid",
+                ExpressionAttributeValues={":cid": card_id},
+                ProjectionExpression="card_id, reviewed_at",
+            )
+            with reviews_table.batch_writer() as batch:
+                for item in response.get("Items", []):
+                    batch.delete_item(Key={"card_id": item["card_id"], "reviewed_at": item["reviewed_at"]})
+        except Exception:
+            pass  # Reviews cleanup is best-effort
+
+        try:
+            client = self._client
+            # 【トランザクション実行】: 2つの操作をアトミックに実行する
             client.transact_write_items(
                 TransactItems=[
                     {
@@ -323,15 +346,7 @@ class CardService:
                         }
                     },
                     {
-                        # 【Index 1】: Reviews テーブルから関連レビューを削除
-                        # 条件なし - レビューが存在しなくても成功する (EC-012対応)
-                        'Delete': {
-                            'TableName': self.reviews_table_name,
-                            'Key': {'user_id': {'S': user_id}, 'card_id': {'S': card_id}}
-                        }
-                    },
-                    {
-                        # 【Index 2】: Users テーブルの card_count を 1 デクリメント
+                        # 【Index 1】: Users テーブルの card_count を 1 デクリメント
                         # card_count > :zero の条件でネガティブ値を防止 (EARS-014)
                         'Update': {
                             'TableName': self.users_table_name,
@@ -353,9 +368,9 @@ class CardService:
                 # レースコンディションにより別リクエストがカードを削除した場合 (EARS-012)
                 if reasons and reasons[0].get("Code") == "ConditionalCheckFailed":
                     raise CardNotFoundError(f"Card not found: {card_id}")
-                # 【Index 2 確認】: Users Update の ConditionalCheckFailed は card_count が既に 0
+                # 【Index 1 確認】: Users Update の ConditionalCheckFailed は card_count が既に 0
                 # データ整合性のドリフト状態 (EARS-013)
-                if len(reasons) > 2 and reasons[2].get("Code") == "ConditionalCheckFailed":
+                if len(reasons) > 1 and reasons[1].get("Code") == "ConditionalCheckFailed":
                     raise CardServiceError("Cannot delete card: card_count already at 0")
             raise CardServiceError(f"Failed to delete card: {e}")
 

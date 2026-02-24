@@ -4,7 +4,7 @@ Description: Memoru LIFF - Backend API and DynamoDB Tables
 
 Globals:
   Function:
-    Timeout: 60
+    Timeout: 120
     MemorySize: 256
     Runtime: python3.12
     Architectures:
@@ -19,6 +19,8 @@ Globals:
         DYNAMODB_ENDPOINT_URL: ""
         AWS_ENDPOINT_URL: ""
         USE_STRANDS: !Ref UseStrands
+        OLLAMA_HOST: ""
+        OLLAMA_MODEL: ""
 
 Parameters:
   Environment:

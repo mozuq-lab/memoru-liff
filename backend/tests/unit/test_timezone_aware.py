@@ -144,7 +144,7 @@ def card_service(dynamodb_resource):
 
         return {}
 
-    service.dynamodb.meta.client.transact_write_items = mock_transact_write_items
+    service._client.transact_write_items = mock_transact_write_items
     return service
 
 
