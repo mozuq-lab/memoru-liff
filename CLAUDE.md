@@ -64,6 +64,14 @@ LINE ベースの暗記カードアプリケーション。SRS (Spaced Repetitio
 #### local-dev-environment（ローカル開発環境構築）
 - [x] Phase 1: 残タスク解決 (TASK-0049 ~ TASK-0051) - JWT テスト検証、DynamoDB SigV4 修正、E2E 確認
 
+#### ai-strands-migration（AI Strands SDK 移行）
+- [x] Phase 1: 基盤構築 (TASK-0052 ~ TASK-0056) - AIService Protocol、ファクトリ、プロンプト分割、例外統一
+- [x] Phase 2: Strands カード生成移行 (TASK-0057 ~ TASK-0058) - StrandsAIService、互換性検証
+- [x] Phase 3: 新機能追加 (TASK-0059 ~ TASK-0063) - 回答採点、学習アドバイス、統合テスト
+- [x] Phase 4: ローカル開発 + 最終検証 (TASK-0064 ~ TASK-0065) - Ollama 統合、品質確認
+
+**最終状態**: 完了 - Bedrock から Strands Agents SDK へのマイグレーション完了（784テスト全通過、カバレッジ 80.04%）
+
 ## 技術スタック
 
 ### バックエンド
