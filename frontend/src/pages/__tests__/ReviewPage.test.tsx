@@ -328,4 +328,201 @@ describe('ReviewPage', () => {
       expect(mockNavigate).toHaveBeenCalledWith(-1);
     });
   });
+
+  // --- TASK-0072: 統合テスト + エッジケース ---
+
+  describe('統合テスト: 復習セッション全体フロー', () => {
+    it('3枚中2枚採点・1枚スキップで完了画面に「2枚」と表示される', async () => {
+      const user = userEvent.setup();
+      renderReviewPage();
+
+      // カード1: フリップ → 採点(4)
+      await waitFor(() => {
+        expect(screen.getByText('質問1')).toBeInTheDocument();
+      });
+      await user.click(screen.getByRole('button', { name: /カード表面を表示中/ }));
+      await user.click(screen.getByLabelText('4 - やや迷ったが正解'));
+
+      // カード2: フリップ → スキップ
+      await waitFor(() => {
+        expect(screen.getByText('質問2')).toBeInTheDocument();
+      });
+      await user.click(screen.getByRole('button', { name: /カード表面を表示中/ }));
+      await user.click(screen.getByLabelText('スキップ'));
+
+      // カード3: フリップ → 採点(5)
+      await waitFor(() => {
+        expect(screen.getByText('質問3')).toBeInTheDocument();
+      });
+      await user.click(screen.getByRole('button', { name: /カード表面を表示中/ }));
+      await user.click(screen.getByLabelText('5 - 完璧'));
+
+      // 完了画面
+      await waitFor(() => {
+        expect(screen.getByText('復習完了!')).toBeInTheDocument();
+        expect(screen.getByText('2枚のカードを復習しました')).toBeInTheDocument();
+      });
+
+      // API呼び出しの確認
+      expect(mockSubmitReview).toHaveBeenCalledTimes(2);
+      expect(mockSubmitReview).toHaveBeenCalledWith('card-1', 4);
+      expect(mockSubmitReview).toHaveBeenCalledWith('card-3', 5);
+    });
+
+    it('完了画面に「ホームに戻る」リンクがある', async () => {
+      const user = userEvent.setup();
+      mockGetDueCards.mockResolvedValue({
+        due_cards: [mockDueCards[0]],
+        total_due_count: 1,
+        next_due_date: null,
+      });
+      renderReviewPage();
+
+      await waitFor(() => {
+        expect(screen.getByText('質問1')).toBeInTheDocument();
+      });
+      await user.click(screen.getByRole('button', { name: /カード表面を表示中/ }));
+      await user.click(screen.getByLabelText('5 - 完璧'));
+
+      await waitFor(() => {
+        expect(screen.getByText('ホームに戻る')).toBeInTheDocument();
+      });
+      expect(screen.getByText('ホームに戻る').closest('a')).toHaveAttribute('href', '/');
+    });
+  });
+
+  describe('エッジケース: カード1枚のみ', () => {
+    it('1枚を採点すると即座に完了画面に遷移する', async () => {
+      const user = userEvent.setup();
+      mockGetDueCards.mockResolvedValue({
+        due_cards: [{ card_id: 'card-single', front: '単独質問', back: '単独解答', overdue_days: 0 }],
+        total_due_count: 1,
+        next_due_date: null,
+      });
+      renderReviewPage();
+
+      await waitFor(() => {
+        expect(screen.getByText('単独質問')).toBeInTheDocument();
+      });
+      expect(screen.getByText('1 / 1')).toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: /カード表面を表示中/ }));
+      await user.click(screen.getByLabelText('3 - 難しかったが正解'));
+
+      await waitFor(() => {
+        expect(screen.getByText('復習完了!')).toBeInTheDocument();
+        expect(screen.getByText('1枚のカードを復習しました')).toBeInTheDocument();
+      });
+    });
+  });
+
+  describe('エッジケース: 全カードスキップ', () => {
+    it('全カードスキップで完了画面に「0枚」と表示される', async () => {
+      const user = userEvent.setup();
+      renderReviewPage();
+
+      // カード1: フリップ → スキップ
+      await waitFor(() => {
+        expect(screen.getByText('質問1')).toBeInTheDocument();
+      });
+      await user.click(screen.getByRole('button', { name: /カード表面を表示中/ }));
+      await user.click(screen.getByLabelText('スキップ'));
+
+      // カード2: フリップ → スキップ
+      await waitFor(() => {
+        expect(screen.getByText('質問2')).toBeInTheDocument();
+      });
+      await user.click(screen.getByRole('button', { name: /カード表面を表示中/ }));
+      await user.click(screen.getByLabelText('スキップ'));
+
+      // カード3: フリップ → スキップ
+      await waitFor(() => {
+        expect(screen.getByText('質問3')).toBeInTheDocument();
+      });
+      await user.click(screen.getByRole('button', { name: /カード表面を表示中/ }));
+      await user.click(screen.getByLabelText('スキップ'));
+
+      // 完了画面
+      await waitFor(() => {
+        expect(screen.getByText('復習完了!')).toBeInTheDocument();
+        expect(screen.getByText('0枚のカードを復習しました')).toBeInTheDocument();
+      });
+
+      expect(mockSubmitReview).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('エッジケース: 初期読み込みエラーからのリトライ', () => {
+    it('リトライ成功後にカードが表示される', async () => {
+      const user = userEvent.setup();
+      mockGetDueCards
+        .mockRejectedValueOnce(new Error('Network error'))
+        .mockResolvedValueOnce({
+          due_cards: mockDueCards,
+          total_due_count: 3,
+          next_due_date: null,
+        });
+      renderReviewPage();
+
+      await waitFor(() => {
+        expect(screen.getByText('復習カードの取得に失敗しました')).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByText('再試行'));
+
+      await waitFor(() => {
+        expect(screen.getByText('質問1')).toBeInTheDocument();
+      });
+      expect(mockGetDueCards).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('アクセシビリティ', () => {
+    it('FlipCard に role="button" が設定されている', async () => {
+      renderReviewPage();
+
+      await waitFor(() => {
+        expect(screen.getByText('質問1')).toBeInTheDocument();
+      });
+
+      expect(screen.getByRole('button', { name: /カード表面を表示中/ })).toBeInTheDocument();
+    });
+
+    it('進捗バーに role="progressbar" が設定されている', async () => {
+      renderReviewPage();
+
+      await waitFor(() => {
+        expect(screen.getByText('質問1')).toBeInTheDocument();
+      });
+
+      expect(screen.getByRole('progressbar')).toBeInTheDocument();
+    });
+
+    it('戻るボタンに aria-label が設定されている', async () => {
+      renderReviewPage();
+
+      await waitFor(() => {
+        expect(screen.getByText('質問1')).toBeInTheDocument();
+      });
+
+      expect(screen.getByLabelText('戻る')).toBeInTheDocument();
+    });
+
+    it('エラーメッセージに role="alert" が設定されている', async () => {
+      const user = userEvent.setup();
+      mockSubmitReview.mockRejectedValue(new Error('Submit error'));
+      renderReviewPage();
+
+      await waitFor(() => {
+        expect(screen.getByText('質問1')).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByRole('button', { name: /カード表面を表示中/ }));
+      await user.click(screen.getByLabelText('4 - やや迷ったが正解'));
+
+      await waitFor(() => {
+        expect(screen.getByRole('alert')).toHaveTextContent('採点の送信に失敗しました');
+      });
+    });
+  });
 });
