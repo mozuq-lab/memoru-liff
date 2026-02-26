@@ -166,7 +166,7 @@ export const ReviewPage = () => {
       </header>
 
       <main className="flex-1 flex flex-col px-4">
-        <div className="flex-1 flex items-center justify-center py-4">
+        <div className="flex-1 flex items-center justify-center">
           <div className="w-full max-w-md">
             <FlipCard
               front={currentCard.front}
@@ -183,15 +183,15 @@ export const ReviewPage = () => {
           </p>
         )}
 
-        {isFlipped && (
-          <div className="pb-6">
+        <div className="pb-6 min-h-[200px]">
+          {isFlipped && (
             <GradeButtons
               onGrade={handleGrade}
               onSkip={handleSkip}
               disabled={isSubmitting}
             />
-          </div>
-        )}
+          )}
+        </div>
       </main>
     </div>
   );

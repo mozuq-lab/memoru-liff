@@ -10,7 +10,7 @@ interface FlipCardProps {
 export const FlipCard = ({ front, back, isFlipped, onFlip }: FlipCardProps) => {
   return (
     <div
-      className="flip-card w-full min-h-[200px] cursor-pointer"
+      className="flip-card w-full h-[240px] cursor-pointer"
       role="button"
       tabIndex={0}
       aria-label={isFlipped ? 'カード裏面を表示中。タップで表面に戻す' : 'カード表面を表示中。タップで裏面を見る'}
