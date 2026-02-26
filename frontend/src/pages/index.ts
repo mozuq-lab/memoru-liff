@@ -5,3 +5,4 @@ export { CardDetailPage } from './CardDetailPage';
 export { SettingsPage } from './SettingsPage';
 export { LinkLinePage } from './LinkLinePage';
 export { CallbackPage } from './CallbackPage';
+export { ReviewPage } from './ReviewPage';
