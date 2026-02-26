@@ -112,11 +112,11 @@ describe('HomePage', () => {
       expect(screen.getByText('復習を始める')).toBeInTheDocument();
     });
 
-    it('「復習を始める」ボタンがカード一覧へリンクする', () => {
+    it('「復習を始める」ボタンが復習画面へリンクする', () => {
       mockCardsContext.dueCount = 5;
       renderHomePage();
       const link = screen.getByText('復習を始める');
-      expect(link).toHaveAttribute('href', '/cards?tab=due');
+      expect(link).toHaveAttribute('href', '/review');
     });
   });
 

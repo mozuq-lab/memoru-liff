@@ -125,6 +125,17 @@ export const CardsPage = () => {
       </div>
 
       <main className="flex-1 px-4 mt-4">
+        {/* 復習開始ボタン */}
+        {activeTab === 'due' && displayCards.length > 0 && (
+          <Link
+            to="/review"
+            className="block w-full py-3 mb-4 bg-blue-600 text-white text-center rounded-lg hover:bg-blue-700 active:bg-blue-800 min-h-[44px] transition-colors font-medium"
+            data-testid="start-review-button"
+          >
+            復習開始
+          </Link>
+        )}
+
         {/* 成功メッセージ */}
         {successMessage && (
           <div

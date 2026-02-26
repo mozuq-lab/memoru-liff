@@ -59,9 +59,10 @@ const mockCards: Card[] = [
   },
 ];
 
-const renderCardsPage = (locationState?: { message: string }) => {
+const renderCardsPage = (locationState?: { message: string }, searchParams?: string) => {
+  const path = searchParams ? `/cards?${searchParams}` : '/cards';
   return render(
-    <MemoryRouter initialEntries={[{ pathname: '/cards', state: locationState }]}>
+    <MemoryRouter initialEntries={[{ pathname: '/cards', search: searchParams ? `?${searchParams}` : '', state: locationState }]}>
       <CardsPage />
     </MemoryRouter>
   );
@@ -183,6 +184,30 @@ describe('CardsPage', () => {
       renderCardsPage();
 
       expect(screen.getByText('カードの取得に失敗しました')).toBeInTheDocument();
+    });
+  });
+
+  describe('復習開始ボタン', () => {
+    it('復習対象タブでカードがある場合に復習開始ボタンが表示される', () => {
+      mockCardsContext.dueCards = mockCards;
+      renderCardsPage(undefined, 'tab=due');
+
+      expect(screen.getByTestId('start-review-button')).toBeInTheDocument();
+      expect(screen.getByTestId('start-review-button')).toHaveAttribute('href', '/review');
+    });
+
+    it('復習対象タブでカードが0枚の場合は復習開始ボタンが非表示', () => {
+      mockCardsContext.dueCards = [];
+      renderCardsPage(undefined, 'tab=due');
+
+      expect(screen.queryByTestId('start-review-button')).not.toBeInTheDocument();
+    });
+
+    it('すべてタブでは復習開始ボタンが非表示', () => {
+      mockCardsContext.cards = mockCards;
+      renderCardsPage();
+
+      expect(screen.queryByTestId('start-review-button')).not.toBeInTheDocument();
     });
   });
 
