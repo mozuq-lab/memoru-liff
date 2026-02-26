@@ -26,7 +26,7 @@
 
 ## 全体進捗
 
-- [ ] Phase 1: 基盤コンポーネント実装 (TASK-0066 ~ TASK-0069)
+- [x] Phase 1: 基盤コンポーネント実装 (TASK-0066 ~ TASK-0069)
 - [ ] Phase 2: ページ統合・ナビゲーション (TASK-0070 ~ TASK-0072)
 
 ## マイルストーン
@@ -43,10 +43,10 @@
 
 ### タスク一覧
 
-- [ ] [TASK-0066: FlipCard コンポーネント + フリップアニメーション CSS](TASK-0066.md) - 8h (TDD) 🔵
-- [ ] [TASK-0067: GradeButtons 採点ボタンコンポーネント](TASK-0067.md) - 6h (TDD) 🔵
-- [ ] [TASK-0068: ReviewProgress 進捗バーコンポーネント](TASK-0068.md) - 4h (TDD) 🔵
-- [ ] [TASK-0069: ReviewComplete 復習完了画面コンポーネント](TASK-0069.md) - 4h (TDD) 🔵
+- [x] [TASK-0066: FlipCard コンポーネント + フリップアニメーション CSS](TASK-0066.md) - 8h (TDD) 🔵
+- [x] [TASK-0067: GradeButtons 採点ボタンコンポーネント](TASK-0067.md) - 6h (TDD) 🔵
+- [x] [TASK-0068: ReviewProgress 進捗バーコンポーネント](TASK-0068.md) - 4h (TDD) 🔵
+- [x] [TASK-0069: ReviewComplete 復習完了画面コンポーネント](TASK-0069.md) - 4h (TDD) 🔵
 
 ### 依存関係
 
