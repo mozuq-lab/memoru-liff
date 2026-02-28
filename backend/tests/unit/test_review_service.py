@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from services.review_service import (
     ReviewService,
     InvalidGradeError,
+    NoReviewHistoryError,
 )
 from services.card_service import CardNotFoundError
 
@@ -827,3 +828,127 @@ class TestGetReviewSummary:
 
         # grade < 3 is incorrect
         assert result.tag_performance["test-tag"] == pytest.approx(0.0)
+
+
+class TestUndoReview:
+    """Tests for ReviewService.undo_review method."""
+
+    def test_undo_review_restores_srs_parameters(self, review_service, sample_card):
+        """Test that undo restores ease_factor, interval, repetitions, next_review_at."""
+        # First, submit a review to create history
+        review_service.submit_review(
+            user_id="test-user-id",
+            card_id="test-card-id",
+            grade=4,
+        )
+
+        # Now undo it
+        response = review_service.undo_review(
+            user_id="test-user-id",
+            card_id="test-card-id",
+        )
+
+        assert response.card_id == "test-card-id"
+        assert response.restored.ease_factor == 2.5  # Original ease_factor
+        assert response.restored.interval == 1  # Original interval
+        assert response.restored.repetitions == 0  # Original repetitions
+        assert response.undone_at is not None
+
+    def test_undo_review_removes_latest_history_entry(self, review_service, sample_card):
+        """Test that undo removes the latest review_history entry."""
+        # Submit two reviews
+        review_service.submit_review(
+            user_id="test-user-id",
+            card_id="test-card-id",
+            grade=4,
+        )
+        review_service.submit_review(
+            user_id="test-user-id",
+            card_id="test-card-id",
+            grade=5,
+        )
+
+        # Verify 2 history entries exist
+        table = review_service.cards_table
+        item = table.get_item(
+            Key={"user_id": "test-user-id", "card_id": "test-card-id"}
+        )["Item"]
+        assert len(item["review_history"]) == 2
+
+        # Undo the latest review
+        review_service.undo_review(
+            user_id="test-user-id",
+            card_id="test-card-id",
+        )
+
+        # Verify only 1 history entry remains
+        item = table.get_item(
+            Key={"user_id": "test-user-id", "card_id": "test-card-id"}
+        )["Item"]
+        assert len(item["review_history"]) == 1
+
+    def test_undo_review_no_history_raises_error(self, review_service, sample_card):
+        """Test that undo with no review history raises NoReviewHistoryError."""
+        with pytest.raises(NoReviewHistoryError):
+            review_service.undo_review(
+                user_id="test-user-id",
+                card_id="test-card-id",
+            )
+
+    def test_undo_review_card_not_found(self, review_service):
+        """Test that undo with non-existent card raises CardNotFoundError."""
+        with pytest.raises(CardNotFoundError):
+            review_service.undo_review(
+                user_id="test-user-id",
+                card_id="non-existent-card",
+            )
+
+    def test_undo_review_wrong_user(self, review_service, sample_card):
+        """Test that undo with wrong user raises CardNotFoundError."""
+        with pytest.raises(CardNotFoundError):
+            review_service.undo_review(
+                user_id="other-user-id",
+                card_id="test-card-id",
+            )
+
+    def test_undo_review_returns_correct_response_format(self, review_service, sample_card):
+        """Test that UndoReviewResponse has correct structure."""
+        from models.review import UndoReviewResponse, UndoRestoredState
+
+        review_service.submit_review(
+            user_id="test-user-id",
+            card_id="test-card-id",
+            grade=4,
+        )
+
+        response = review_service.undo_review(
+            user_id="test-user-id",
+            card_id="test-card-id",
+        )
+
+        assert isinstance(response, UndoReviewResponse)
+        assert isinstance(response.restored, UndoRestoredState)
+        assert isinstance(response.restored.ease_factor, float)
+        assert isinstance(response.restored.interval, int)
+        assert isinstance(response.restored.repetitions, int)
+        assert isinstance(response.restored.due_date, str)
+
+    def test_undo_review_preserves_reviews_table(self, review_service, sample_card):
+        """Test that reviews table records are preserved after undo."""
+        # Submit a review (creates record in reviews table)
+        review_service.submit_review(
+            user_id="test-user-id",
+            card_id="test-card-id",
+            grade=4,
+        )
+
+        # Undo the review
+        review_service.undo_review(
+            user_id="test-user-id",
+            card_id="test-card-id",
+        )
+
+        # Verify reviews table still has the record
+        reviews_table = review_service.reviews_table
+        response = reviews_table.scan()
+        assert len(response["Items"]) >= 1

@@ -30,6 +30,7 @@ from services.card_service import (
 from services.review_service import (
     ReviewService,
     InvalidGradeError,
+    NoReviewHistoryError,
 )
 from services.line_service import LineService
 from models.review import ReviewRequest
@@ -649,6 +650,32 @@ def submit_review(card_id: str):
         )
     except Exception as e:
         logger.error(f"Error submitting review: {e}")
+        raise
+
+
+@app.post("/reviews/<card_id>/undo")
+@tracer.capture_method
+def undo_review(card_id: str):
+    """Undo the latest review for a card."""
+    user_id = get_user_id_from_context()
+    logger.info(f"Undoing review for card {card_id} by user_id: {user_id}")
+
+    try:
+        response = review_service.undo_review(
+            user_id=user_id,
+            card_id=card_id,
+        )
+        return response.model_dump(mode="json")
+    except CardNotFoundError:
+        raise NotFoundError(f"Card not found: {card_id}")
+    except NoReviewHistoryError as e:
+        return Response(
+            status_code=400,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": str(e)}),
+        )
+    except Exception as e:
+        logger.error(f"Error undoing review: {e}")
         raise
 
 

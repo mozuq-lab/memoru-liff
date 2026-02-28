@@ -48,6 +48,23 @@ class ReviewResponse(BaseModel):
     reviewed_at: datetime
 
 
+class UndoRestoredState(BaseModel):
+    """Restored state after undo."""
+
+    ease_factor: float
+    interval: int
+    repetitions: int
+    due_date: str
+
+
+class UndoReviewResponse(BaseModel):
+    """Response model for undo review."""
+
+    card_id: str
+    restored: UndoRestoredState
+    undone_at: datetime
+
+
 class DueCardInfo(BaseModel):
     """Information about a card due for review."""
 

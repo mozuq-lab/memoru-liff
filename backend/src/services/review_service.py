@@ -15,6 +15,8 @@ from models.review import (
     ReviewPreviousState,
     ReviewResponse,
     ReviewUpdatedState,
+    UndoRestoredState,
+    UndoReviewResponse,
 )
 from .ai_service import ReviewSummary
 from .card_service import CardNotFoundError, CardService, CardServiceError
@@ -29,6 +31,12 @@ class ReviewServiceError(Exception):
 
 class InvalidGradeError(ReviewServiceError):
     """Raised when grade is invalid."""
+
+    pass
+
+
+class NoReviewHistoryError(ReviewServiceError):
+    """Raised when there is no review history to undo."""
 
     pass
 
@@ -152,6 +160,103 @@ class ReviewService:
             previous=previous,
             updated=updated,
             reviewed_at=now,
+        )
+
+    def undo_review(
+        self,
+        user_id: str,
+        card_id: str,
+    ) -> UndoReviewResponse:
+        """Undo the latest review for a card and restore SRS parameters.
+
+        Args:
+            user_id: The user's ID.
+            card_id: The card's ID.
+
+        Returns:
+            UndoReviewResponse with restored state.
+
+        Raises:
+            CardNotFoundError: If card does not exist or belongs to another user.
+            NoReviewHistoryError: If card has no review history to undo.
+        """
+        # Get the card (also verifies ownership)
+        card = self.card_service.get_card(user_id, card_id)
+
+        # Get existing review history
+        try:
+            response = self.cards_table.get_item(
+                Key={"user_id": user_id, "card_id": card_id},
+                ProjectionExpression="review_history",
+            )
+            review_history = response.get("Item", {}).get("review_history", [])
+        except ClientError:
+            review_history = []
+
+        if not review_history:
+            raise NoReviewHistoryError("No review history to undo")
+
+        # Get latest entry
+        latest_entry = review_history[-1]
+
+        # Extract before values for restoration
+        restored_ease_factor = float(latest_entry.get("ease_factor_before", card.ease_factor))
+        restored_interval = int(latest_entry.get("interval_before", card.interval))
+        restored_repetitions = latest_entry.get("repetitions_before")
+        if restored_repetitions is not None:
+            restored_repetitions = int(restored_repetitions)
+        else:
+            restored_repetitions = card.repetitions
+        restored_next_review_at = latest_entry.get("next_review_at_before")
+        if restored_next_review_at is None:
+            restored_next_review_at = card.next_review_at.isoformat() if card.next_review_at else datetime.now(timezone.utc).isoformat()
+
+        # Remove latest entry from history
+        updated_history = review_history[:-1]
+
+        # Update card with restored parameters
+        now = datetime.now(timezone.utc)
+        try:
+            self.cards_table.update_item(
+                Key={"user_id": user_id, "card_id": card_id},
+                UpdateExpression=(
+                    "SET next_review_at = :next_review, "
+                    "#interval = :interval, "
+                    "ease_factor = :ease_factor, "
+                    "repetitions = :repetitions, "
+                    "updated_at = :updated_at, "
+                    "review_history = :review_history"
+                ),
+                ExpressionAttributeNames={"#interval": "interval"},
+                ExpressionAttributeValues={
+                    ":next_review": restored_next_review_at,
+                    ":interval": restored_interval,
+                    ":ease_factor": str(restored_ease_factor),
+                    ":repetitions": restored_repetitions,
+                    ":updated_at": now.isoformat(),
+                    ":review_history": updated_history,
+                },
+            )
+        except ClientError as e:
+            raise CardServiceError(f"Failed to undo review: {e}")
+
+        # Parse due_date from restored_next_review_at
+        try:
+            due_date = datetime.fromisoformat(restored_next_review_at).date().isoformat()
+        except (ValueError, TypeError):
+            due_date = restored_next_review_at
+
+        restored = UndoRestoredState(
+            ease_factor=restored_ease_factor,
+            interval=restored_interval,
+            repetitions=restored_repetitions,
+            due_date=due_date,
+        )
+
+        return UndoReviewResponse(
+            card_id=card_id,
+            restored=restored,
+            undone_at=now,
         )
 
     def _update_card_review_data(

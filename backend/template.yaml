@@ -334,6 +334,12 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /reviews/{cardId}
             Method: POST
+        UndoReview:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /reviews/{cardId}/undo
+            Method: POST
         GetReviewStats:
           Type: HttpApi
           Properties:
