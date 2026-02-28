@@ -124,10 +124,10 @@ description: "Task list for 001-card-search feature implementation"
 
 **Purpose**: 複数ストーリーに影響する品質改善
 
-- [ ] T024 `frontend/src/pages/CardsPage.tsx` で SearchBar / FilterChips / SortSelect のレイアウト調整を行う（モバイル縦並び, Tailwind `flex-col gap-2`）
-- [ ] T025 [P] `frontend/src/components/SearchBar.tsx` に `aria-label="カードを検索"` を設定し, FilterChips の各チップに `aria-label` を付与してアクセシビリティを強化する
-- [ ] T026 [P] `specs/001-card-search/quickstart.md` の手順に従ってローカル動作確認を行い、すべてのシナリオ（SC-001〜SC-005）をブラウザで目視検証する
-- [ ] T027 `npm test` を実行してカバレッジレポートを確認する（新規ファイル全体で 80% 以上であることを確認）
+- [X] T024 `frontend/src/pages/CardsPage.tsx` で SearchBar / FilterChips / SortSelect のレイアウト調整を行う（モバイル縦並び, Tailwind `flex-col gap-2`）
+- [X] T025 [P] `frontend/src/components/SearchBar.tsx` に `aria-label="カードを検索"` を設定し, FilterChips の各チップに `aria-label` を付与してアクセシビリティを強化する
+- [X] T026 [P] `specs/001-card-search/quickstart.md` の手順に従ってローカル動作確認を行い、すべてのシナリオ（SC-001〜SC-005）をブラウザで目視検証する
+- [X] T027 `npm test` を実行してカバレッジレポートを確認する（新規ファイル全体で 80% 以上であることを確認）
 
 ---
 

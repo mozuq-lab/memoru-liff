@@ -107,16 +107,10 @@ export const CardsPage = () => {
         <p className="text-sm text-gray-600" data-testid="card-count">
           {displayCards.length}枚のカード
         </p>
-        {/* 検索バー */}
-        <div className="mt-2">
+        {/* 検索・フィルター・ソート（モバイル縦並び） */}
+        <div className="mt-3 flex flex-col gap-2">
           <SearchBar value={query} onChange={setQuery} />
-        </div>
-        {/* 復習状態フィルター */}
-        <div className="mt-2">
           <FilterChips value={reviewStatus} onChange={setReviewStatus} />
-        </div>
-        {/* ソート */}
-        <div className="mt-2">
           <SortSelect
             sortBy={sortBy}
             sortOrder={sortOrder}
