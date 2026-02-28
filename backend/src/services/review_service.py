@@ -379,6 +379,7 @@ class ReviewService:
         user_id: str,
         limit: int = 20,
         include_future: bool = False,
+        deck_id: Optional[str] = None,
     ) -> DueCardsResponse:
         """Get cards due for review.
 
@@ -386,6 +387,7 @@ class ReviewService:
             user_id: The user's ID.
             limit: Maximum number of cards to return.
             include_future: Include cards with future due dates.
+            deck_id: Optional filter by deck ID.
 
         Returns:
             DueCardsResponse with due cards and metadata.
@@ -398,6 +400,10 @@ class ReviewService:
             limit=limit,
             before=now if not include_future else None,
         )
+
+        # Filter by deck_id if specified
+        if deck_id is not None:
+            due_cards = [c for c in due_cards if c.deck_id == deck_id]
 
         # Convert to response format
         due_card_infos: List[DueCardInfo] = []
@@ -419,10 +425,14 @@ class ReviewService:
             )
 
         # Get total due count (independent of limit)
-        total_due_count = self.card_service.get_due_card_count(
-            user_id=user_id,
-            before=now if not include_future else None,
-        )
+        # When deck_id filter is active, count only the filtered cards
+        if deck_id is not None:
+            total_due_count = len(due_card_infos)
+        else:
+            total_due_count = self.card_service.get_due_card_count(
+                user_id=user_id,
+                before=now if not include_future else None,
+            )
 
         # Get next due date if no cards are due now
         next_due_date = None

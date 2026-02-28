@@ -28,8 +28,8 @@
   - `DeckListResponse`: `decks: list[DeckResponse]`, `total: int`
   - _Requirements: 1.6, 2.2, 2.3, 2.6_
 
-- [ ] 3. バックエンドサービス: DeckService 実装
-- [ ] 3.1 `backend/src/services/deck_service.py` を作成
+- [x] 3. バックエンドサービス: DeckService 実装
+- [x] 3.1 `backend/src/services/deck_service.py` を作成
   - `DeckServiceError`, `DeckNotFoundError`, `DeckLimitExceededError` 例外クラス定義
   - `DeckService.__init__()`: `DECKS_TABLE` / `CARDS_TABLE` 環境変数からテーブル名取得、boto3 リソース初期化
   - `create_deck()`: デッキ数上限チェック（Query Select=COUNT で現在数取得、50 超で DeckLimitExceededError）、Deck インスタンス生成、`put_item` で保存
@@ -41,8 +41,8 @@
   - `get_deck_due_counts()`: Cards テーブル Query (user_id-due-index) + FilterExpression でデッキ別 due 数を集計
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.7, 3.5_
 
-- [ ] 4. バックエンドハンドラー: デッキ CRUD エンドポイント追加
-- [ ] 4.1 handler.py にデッキ CRUD エンドポイントを追加
+- [x] 4. バックエンドハンドラー: デッキ CRUD エンドポイント追加
+- [x] 4.1 handler.py にデッキ CRUD エンドポイントを追加
   - `from services.deck_service import DeckService, DeckNotFoundError, DeckLimitExceededError` をインポート
   - `from models.deck import CreateDeckRequest, UpdateDeckRequest, DeckListResponse` をインポート
   - `deck_service = DeckService()` をモジュールスコープで初期化
@@ -52,7 +52,7 @@
   - `DELETE /decks/<deck_id>` → `delete_deck()`: DeckService.delete_deck → 204 No Content
   - DeckNotFoundError → NotFoundError (404)、DeckLimitExceededError → Response(400)、ValidationError → Response(400)
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8_
-- [ ] 4.2 handler.py の `get_due_cards()` に `deck_id` フィルタリングを追加 (P)
+- [x] 4.2 handler.py の `get_due_cards()` に `deck_id` フィルタリングを追加 (P)
   - クエリパラメータから `deck_id` を取得
   - `review_service.get_due_cards()` に `deck_id` パラメータを渡す
   - `ReviewService.get_due_cards()` で `deck_id` フィルタリングを実装（CardService.get_due_cards の結果をフィルタ、または CardService に deck_id パラメータ追加）
