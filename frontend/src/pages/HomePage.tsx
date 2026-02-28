@@ -8,7 +8,9 @@ import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useCardsContext } from '@/contexts/CardsContext';
 import { useAuthContext } from '@/contexts/AuthContext';
+import { useDecksContext } from '@/contexts/DecksContext';
 import { Navigation } from '@/components/Navigation';
+import { DeckSummary } from '@/components/DeckSummary';
 import { Loading } from '@/components/common/Loading';
 import { Error } from '@/components/common/Error';
 
@@ -19,11 +21,13 @@ import { Error } from '@/components/common/Error';
 export const HomePage = () => {
   const { user } = useAuthContext();
   const { dueCount, fetchDueCount, isLoading, error } = useCardsContext();
+  const { fetchDecks } = useDecksContext();
 
-  // 【復習待ちカード数取得】: 画面表示時に取得
+  // 【復習待ちカード数取得 + デッキ一覧取得】: 画面表示時に取得
   useEffect(() => {
     fetchDueCount();
-  }, [fetchDueCount]);
+    fetchDecks();
+  }, [fetchDueCount, fetchDecks]);
 
   // 【ローディング表示】
   if (isLoading) {
@@ -95,6 +99,11 @@ export const HomePage = () => {
               復習待ちのカードはありません
             </p>
           )}
+        </section>
+
+        {/* デッキサマリー */}
+        <section className="mb-6" aria-label="デッキサマリー">
+          <DeckSummary />
         </section>
 
         {/* クイックアクション */}

@@ -7,10 +7,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { CardForm } from '@/components/CardForm';
+import { DeckSelector } from '@/components/DeckSelector';
 import { Navigation } from '@/components/Navigation';
 import { Loading } from '@/components/common/Loading';
 import { Error } from '@/components/common/Error';
 import { cardsApi } from '@/services/api';
+import { useDecksContext } from '@/contexts/DecksContext';
 import type { Card } from '@/types';
 import { formatDueDate, getDueStatus } from '@/utils/date';
 
@@ -27,6 +29,7 @@ const INTERVAL_PRESET_DAYS = [1, 3, 7, 14, 30] as const;
 export const CardDetailPage = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { decks, fetchDecks } = useDecksContext();
   const [card, setCard] = useState<Card | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
@@ -37,6 +40,11 @@ export const CardDetailPage = () => {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   // 【状態追加】: 復習間隔調整APIの呼び出し中かどうかを管理する。プリセットボタンの disabled 制御に使用 🔵
   const [isAdjusting, setIsAdjusting] = useState(false);
+
+  // デッキ一覧を取得
+  useEffect(() => {
+    fetchDecks();
+  }, [fetchDecks]);
 
   // 【カード取得】
   const fetchCard = useCallback(async () => {
@@ -132,6 +140,20 @@ export const CardDetailPage = () => {
     } finally {
       // 【状態復帰】: 成功・失敗いずれの場合も isAdjusting を false に戻してボタンを再有効化する 🔵
       setIsAdjusting(false);
+    }
+  }, [id]);
+
+  // 【デッキ変更ハンドラ】
+  const handleDeckChange = useCallback(async (deckId: string | null) => {
+    if (!id) return;
+
+    setError(null);
+    try {
+      const updatedCard = await cardsApi.updateCard(id, { deck_id: deckId ?? undefined });
+      setCard(updatedCard);
+      setSuccessMessage('デッキを変更しました');
+    } catch (_err) {
+      setError('デッキの変更に失敗しました');
     }
   }, [id]);
 
@@ -279,6 +301,29 @@ export const CardDetailPage = () => {
                   {card.interval}日
                 </span>
               </div>
+            </div>
+
+            {/* デッキ変更 */}
+            <div className="bg-white rounded-lg shadow p-4 mb-4" data-testid="card-deck">
+              <p className="text-sm text-gray-600 mb-2">デッキ</p>
+              <DeckSelector
+                value={card.deck_id}
+                onChange={handleDeckChange}
+              />
+              {card.deck_id && (
+                <div className="mt-2 flex items-center">
+                  <div
+                    className="w-2 h-2 rounded-full mr-2"
+                    style={{
+                      backgroundColor:
+                        decks.find((d) => d.deck_id === card.deck_id)?.color || '#6B7280',
+                    }}
+                  />
+                  <span className="text-xs text-gray-500">
+                    {decks.find((d) => d.deck_id === card.deck_id)?.name || card.deck_id}
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* 復習間隔プリセットボタンセクション */}

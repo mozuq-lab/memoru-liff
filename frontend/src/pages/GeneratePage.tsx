@@ -4,13 +4,15 @@
  * 【テスト対応】: TASK-0015 テストケース1〜9
  * 🔵 青信号: user-stories.md 2.1より
  */
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CardPreview } from '@/components/CardPreview';
+import { DeckSelector } from '@/components/DeckSelector';
 import { Navigation } from '@/components/Navigation';
 import { Loading } from '@/components/common/Loading';
 import { Error } from '@/components/common/Error';
 import { cardsApi } from '@/services/api';
+import { useDecksContext } from '@/contexts/DecksContext';
 import type { GeneratedCardWithId, GenerateCardsRequest, CreateCardRequest } from '@/types';
 
 const MIN_CHARS = 5;
@@ -22,12 +24,19 @@ const MAX_GENERATION_TIME = 30000; // 30秒
  */
 export const GeneratePage = () => {
   const navigate = useNavigate();
+  const { fetchDecks } = useDecksContext();
   const [inputText, setInputText] = useState('');
   const [generatedCards, setGeneratedCards] = useState<GeneratedCardWithId[]>([]);
   const [selectedCards, setSelectedCards] = useState<Set<string>>(new Set());
+  const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // デッキ一覧を取得
+  useEffect(() => {
+    fetchDecks();
+  }, [fetchDecks]);
 
   const charCount = inputText.length;
   const isUnderLimit = inputText.trim().length > 0 && inputText.trim().length < MIN_CHARS;
@@ -117,6 +126,7 @@ export const GeneratePage = () => {
           front: card.front,
           back: card.back,
           tags: card.suggested_tags,
+          ...(selectedDeckId ? { deck_id: selectedDeckId } : {}),
         };
         await cardsApi.createCard(request);
       }
@@ -126,7 +136,7 @@ export const GeneratePage = () => {
     } finally {
       setIsSaving(false);
     }
-  }, [generatedCards, selectedCards, navigate]);
+  }, [generatedCards, selectedCards, selectedDeckId, navigate]);
 
   const selectedCount = selectedCards.size;
 
@@ -223,6 +233,18 @@ export const GeneratePage = () => {
                   onEdit={(front, back) => handleEditCard(card.tempId, front, back)}
                 />
               ))}
+            </div>
+
+            {/* デッキ選択 */}
+            <div className="mt-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                保存先デッキ
+              </label>
+              <DeckSelector
+                value={selectedDeckId}
+                onChange={setSelectedDeckId}
+                disabled={isSaving}
+              />
             </div>
 
             {/* 保存ボタン */}

@@ -107,13 +107,13 @@
   - Navigation コンポーネントを含む
   - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 6.1_
 
-- [ ] 7. 共有コンポーネント
-- [ ] 7.1 `frontend/src/components/DeckSelector.tsx` を作成 (P)
+- [x] 7. 共有コンポーネント
+- [x] 7.1 `frontend/src/components/DeckSelector.tsx` を作成 (P)
   - Props: `value?: string | null`, `onChange: (deckId: string | null) => void`, `className?: string`
   - DecksContext から `decks` を消費
   - `<select>` で「未分類」+ デッキ一覧を表示（カラーインジケーター付き）
   - _Requirements: 5.3, 5.4_
-- [ ] 7.2 `frontend/src/components/DeckSummary.tsx` を作成 (P)
+- [x] 7.2 `frontend/src/components/DeckSummary.tsx` を作成 (P)
   - DecksContext から `decks` を消費
   - 最大 5 件のデッキを due 数付きで表示
   - デッキ 0 件時は「デッキを作成して学習を整理しましょう」メッセージ
@@ -121,21 +121,21 @@
   - デッキタップ → `/cards?deck_id=xxx` に遷移
   - _Requirements: 7.1, 7.2, 7.3, 7.4_
 
-- [ ] 8. 既存ページ拡張
-- [ ] 8.1 Navigation.tsx にデッキタブを追加 (P)
+- [x] 8. 既存ページ拡張
+- [x] 8.1 Navigation.tsx にデッキタブを追加 (P)
   - `navItems` 配列に `{ path: '/decks', label: 'デッキ', icon: <FolderIcon /> }` を追加
   - 「カード」タブの前に配置（ホーム → 作成 → デッキ → カード → 設定）
   - _Requirements: 4.8_
-- [ ] 8.2 ReviewPage.tsx にデッキ指定復習対応を追加 (P)
+- [x] 8.2 ReviewPage.tsx にデッキ指定復習対応を追加 (P)
   - `useSearchParams` で `deck_id` クエリパラメータを取得（既に `useSearchParams` なし → `useSearchParams` を追加）
   - `fetchCards` 内で `deck_id` がある場合は `cardsApi.getDueCards(limit, deckId)` に渡す
   - due カード 0 件時のメッセージをデッキ指定時用に変更（「このデッキに復習対象のカードはありません」）
   - _Requirements: 6.2, 6.3, 6.4_
-- [ ] 8.3 HomePage.tsx にデッキサマリーセクションを追加 (P)
+- [x] 8.3 HomePage.tsx にデッキサマリーセクションを追加 (P)
   - `DeckSummary` コンポーネントを復習カード数セクションの下に配置
   - DecksContext の `fetchDecks` を `useEffect` で呼び出し
   - _Requirements: 7.1, 7.2, 7.3, 7.4_
-- [ ] 8.4 GeneratePage・CardDetailPage に DeckSelector を統合
+- [x] 8.4 GeneratePage・CardDetailPage に DeckSelector を統合
   - GeneratePage: AI 生成カード保存時にデッキ選択を追加
   - CardDetailPage: 編集モードでデッキ変更を追加
   - _Requirements: 5.1, 5.2_

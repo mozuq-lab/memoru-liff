@@ -45,6 +45,15 @@ export const Navigation = () => {
       ),
     },
     {
+      path: '/decks',
+      label: 'デッキ',
+      icon: (
+        <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2 7a2 2 0 012-2h5l2 2h9a2 2 0 012 2v9a2 2 0 01-2 2H4a2 2 0 01-2-2V7z" />
+        </svg>
+      ),
+    },
+    {
       path: '/cards',
       label: 'カード',
       icon: (
