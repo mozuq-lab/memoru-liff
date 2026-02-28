@@ -54,4 +54,22 @@ describe('HighlightText', () => {
     expect(marks).toHaveLength(2);
     marks.forEach((mark) => expect(mark.textContent).toBe('cat'));
   });
+
+  // HT-007: H-3 fix - NFKC 正規化で文字数が変わるケースのハイライトが正しい
+  it('HT-007: NFKC で文字長が変わる文字（㌔等）のハイライトが正しい', () => {
+    // ㌔ は NFKC で "キロ"（1文字→2文字）に正規化される
+    render(<HighlightText text="100㌔走った" query="キロ" />);
+    const mark = document.querySelector('mark');
+    expect(mark).toBeInTheDocument();
+    expect(mark?.textContent).toBe('㌔');
+  });
+
+  // HT-008: NFKC でラテン合字のハイライトが正しい
+  it('HT-008: NFKC でラテン合字（ﬃ等）のハイライトが正しい', () => {
+    // ﬃ は NFKC で "ffi"（1文字→3文字）に正規化される
+    render(<HighlightText text="oﬃce work" query="ffi" />);
+    const mark = document.querySelector('mark');
+    expect(mark).toBeInTheDocument();
+    expect(mark?.textContent).toBe('ﬃ');
+  });
 });

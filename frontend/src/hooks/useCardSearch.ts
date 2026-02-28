@@ -39,7 +39,9 @@ const normalize = (str: string): string => str.normalize('NFKC').toLowerCase();
 /** カードの復習状態を判定する */
 const getReviewStatus = (card: Card, today: string): ReviewStatusFilter => {
   if (card.repetitions === 0) return 'new';
-  if (card.next_review_at && card.next_review_at <= today) return 'due';
+  // H-1 fix: 時刻付き ISO 文字列でも正しく判定するため日付部分のみ比較
+  if (card.next_review_at && card.next_review_at.slice(0, 10) <= today)
+    return 'due';
   return 'learning';
 };
 
@@ -53,6 +55,8 @@ export const useCardSearch = ({ cards }: UseCardSearchOptions): UseCardSearchRet
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
 
   const filteredCards = useMemo(() => {
+    // L-4 note: today は useMemo 内で計算。日付をまたぐ長時間セッションでは
+    // 他の依存 state 更新時に再計算される。日付変更のみでの再計算は不要と判断。
     const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
     const normalizedQuery = normalize(query);
 
@@ -85,10 +89,11 @@ export const useCardSearch = ({ cards }: UseCardSearchOptions): UseCardSearchRet
       } else if (sortBy === 'ease_factor') {
         comparison = a.ease_factor - b.ease_factor;
       } else if (sortBy === 'next_review_at') {
-        // null は末尾
-        const aVal = a.next_review_at ?? '\uFFFF'; // 最大文字で末尾にする
-        const bVal = b.next_review_at ?? '\uFFFF';
-        comparison = aVal.localeCompare(bVal);
+        // H-2 fix: null は sortOrder に関わらず常に末尾
+        if (a.next_review_at === null && b.next_review_at === null) return 0;
+        if (a.next_review_at === null) return 1;
+        if (b.next_review_at === null) return -1;
+        comparison = a.next_review_at.localeCompare(b.next_review_at);
       }
 
       return sortOrder === 'asc' ? comparison : -comparison;

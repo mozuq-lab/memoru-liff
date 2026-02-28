@@ -38,9 +38,12 @@ export const CardsPage = () => {
     sortBy, setSortBy,
     sortOrder, setSortOrder,
     filteredCards,
+    reset: resetSearch,
   } = useCardSearch({ cards: tabCards });
 
   const setActiveTab = (tab: TabType) => {
+    // M-2 fix: タブ切替時にフィルターをリセットして二重フィルタリングの混乱を防ぐ
+    resetSearch();
     if (tab === 'due') {
       setSearchParams({ tab: 'due' });
     } else {
@@ -188,7 +191,11 @@ export const CardsPage = () => {
               />
             </svg>
             <p className="text-gray-600 mb-4">
-              {activeTab === 'due' ? '復習対象のカードはありません' : 'カードがありません'}
+              {query
+                ? '該当するカードがありません'
+                : activeTab === 'due'
+                  ? '復習対象のカードはありません'
+                  : 'カードがありません'}
             </p>
             {activeTab === 'due' ? (
               <button
