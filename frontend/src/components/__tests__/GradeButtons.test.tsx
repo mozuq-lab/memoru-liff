@@ -250,16 +250,16 @@ describe('GradeButtons', () => {
         expect(screen.queryByRole('button', { name: '覚えていない' })).toBeNull();
       });
 
-      it('再確認ボタンに min-h-[44px] クラスが適用されている (TC-GB-011)', () => {
+      it('再確認ボタンに min-h-[56px] クラスが適用されている (TC-GB-011)', () => {
         // 【実際の処理実行】: 再確認モードでレンダリング
         render(<GradeButtons {...reconfirmProps} />);
 
-        // 【結果検証】: 両ボタンの className に min-h-[44px] が含まれること
-        // 【検証項目】: WCAG 2.1 Level AAA のタップ領域最小値（44px x 44px）NFR-201 🟡
+        // 【結果検証】: 両ボタンの className に min-h-[56px] が含まれること
+        // 【検証項目】: WCAG 2.1 Level AAA のタップ領域最小値を上回る56pxで設計 NFR-201 🟡
         const rememberedButton = screen.getByRole('button', { name: '覚えた' });
         const forgottenButton = screen.getByRole('button', { name: '覚えていない' });
-        expect(rememberedButton.className).toContain('min-h-[44px]');
-        expect(forgottenButton.className).toContain('min-h-[44px]');
+        expect(rememberedButton.className).toContain('min-h-[56px]');
+        expect(forgottenButton.className).toContain('min-h-[56px]');
       });
     });
   });

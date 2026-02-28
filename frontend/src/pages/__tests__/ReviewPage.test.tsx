@@ -916,7 +916,7 @@ describe('ReviewPage', () => {
     };
 
     // TC-TDD-021-01
-    it('Undo 後の再採点で quality 2 を選択すると再確認キューにカードが追加される', async () => {
+    it('Undo 後の再採点で quality 2 を選択すると再確認モードに遷移する', async () => {
       const user = userEvent.setup();
       await gradeAndCompleteWith4(user);
 
@@ -928,7 +928,7 @@ describe('ReviewPage', () => {
         expect(screen.getByText('再採点')).toBeInTheDocument();
       });
 
-      // regrade: quality 2 → reconfirmQueue に追加
+      // regrade: quality 2 → reconfirmQueue に追加 → 再確認モードに遷移
       await user.click(screen.getByRole('button', { name: /カード表面を表示中/ }));
       await user.click(screen.getByLabelText('2 - 間違えたが見覚えあり'));
 
@@ -938,13 +938,19 @@ describe('ReviewPage', () => {
         expect(mockSubmitReview).toHaveBeenLastCalledWith('card-1', 2);
       });
 
-      // regrade 後は isComplete = true に戻るが、reconfirmQueue にカードがある
-      // 再確認モードに遷移するため、完了画面に戻った後 isReconfirmMode = true になるはず
-      // NOTE: regrade 後の挙動: reconfirmQueue に追加 → isComplete = true → 完了画面表示
-      // この時点では完了画面 (復習完了!) が表示されているはずだが、
-      // reconfirmQueue に追加されていることを検証したい
-      // → 完了画面後の再確認モード遷移は UI 上は TASK-0082 の範囲。
-      // → ここでは submitReview が 2 回呼ばれたことのみ検証する
+      // regrade で quality < 3 → 再確認モードに遷移（完了画面ではない）
+      await waitFor(() => {
+        expect(screen.queryByText('復習完了!')).not.toBeInTheDocument();
+        expect(screen.getByText('再確認')).toBeInTheDocument();
+      });
+
+      // 「覚えた」でセッション完了
+      const rememberedButton = screen.getByRole('button', { name: '覚えた' });
+      await user.click(rememberedButton);
+
+      await waitFor(() => {
+        expect(screen.getByText('復習完了!')).toBeInTheDocument();
+      });
     });
 
     // TC-TDD-021-02
@@ -1281,7 +1287,7 @@ describe('ReviewPage', () => {
     });
 
     // TC-TDD-060-02 (TC-TDD-021-01 と同一シナリオ)
-    it('Undo 後の再採点で quality 0-2 を選択すると再び再確認キューに追加される', async () => {
+    it('Undo 後の再採点で quality 0-2 を選択すると再確認モードに遷移する', async () => {
       const user = userEvent.setup();
       mockGetDueCards.mockResolvedValue({
         due_cards: [mockDueCards[0]],
@@ -1310,13 +1316,27 @@ describe('ReviewPage', () => {
         expect(screen.getByText('再採点')).toBeInTheDocument();
       });
 
-      // regrade: quality 1 → reconfirmQueue に再追加
+      // regrade: quality 1 → reconfirmQueue に再追加 → 再確認モードに遷移
       await user.click(screen.getByRole('button', { name: /カード表面を表示中/ }));
       await user.click(screen.getByLabelText('1 - 間違えた'));
 
       await waitFor(() => {
         expect(mockSubmitReview).toHaveBeenCalledTimes(2);
         expect(mockSubmitReview).toHaveBeenLastCalledWith('card-1', 1);
+      });
+
+      // 再確認モードに遷移（完了画面ではない）
+      await waitFor(() => {
+        expect(screen.queryByText('復習完了!')).not.toBeInTheDocument();
+        expect(screen.getByText('再確認')).toBeInTheDocument();
+      });
+
+      // 「覚えた」でセッション完了
+      const rememberedButton = screen.getByRole('button', { name: '覚えた' });
+      await user.click(rememberedButton);
+
+      await waitFor(() => {
+        expect(screen.getByText('復習完了!')).toBeInTheDocument();
       });
     });
 
@@ -1505,7 +1525,7 @@ describe('ReviewPage', () => {
     });
 
     // TC-TDD-INT-04
-    it('Undo後のregradeでquality 1を選択すると再確認キューに追加される', async () => {
+    it('Undo後のregradeでquality 1を選択すると再確認モードに遷移し、「覚えた」で完了する', async () => {
       const user = userEvent.setup();
       mockGetDueCards.mockResolvedValue({
         due_cards: [mockDueCards[0]],
@@ -1534,7 +1554,7 @@ describe('ReviewPage', () => {
         expect(screen.getByText('再採点')).toBeInTheDocument();
       });
 
-      // regrade: quality 1 → reconfirmQueue に追加
+      // regrade: quality 1 → reconfirmQueue に追加 → 再確認モードに遷移
       await user.click(screen.getByRole('button', { name: /カード表面を表示中/ }));
       await user.click(screen.getByLabelText('1 - 間違えた'));
 
@@ -1543,6 +1563,20 @@ describe('ReviewPage', () => {
         expect(mockUndoReview).toHaveBeenCalledTimes(1);
         expect(mockSubmitReview).toHaveBeenCalledTimes(2);
         expect(mockSubmitReview).toHaveBeenLastCalledWith('card-1', 1);
+      });
+
+      // 再確認モードに遷移（完了画面ではない）
+      await waitFor(() => {
+        expect(screen.queryByText('復習完了!')).not.toBeInTheDocument();
+        expect(screen.getByText('再確認')).toBeInTheDocument();
+      });
+
+      // 「覚えた」でセッション完了
+      const rememberedButton = screen.getByRole('button', { name: '覚えた' });
+      await user.click(rememberedButton);
+
+      await waitFor(() => {
+        expect(screen.getByText('復習完了!')).toBeInTheDocument();
       });
     });
   });

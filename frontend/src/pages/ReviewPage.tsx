@@ -4,7 +4,6 @@ import { FlipCard } from '@/components/FlipCard';
 import { GradeButtons } from '@/components/GradeButtons';
 import { ReviewProgress } from '@/components/ReviewProgress';
 import { ReviewComplete } from '@/components/ReviewComplete';
-import { ReconfirmBadge } from '@/components/ReconfirmBadge';
 import { Loading } from '@/components/common/Loading';
 import { Error } from '@/components/common/Error';
 import { cardsApi, reviewsApi } from '@/services/api';
@@ -124,12 +123,21 @@ export const ReviewPage = () => {
           )
         );
         setReviewedCount((prev) => prev + 1);
+
+        // 【再採点後の遷移判定】: grade < 3 → 再確認モードに遷移、grade >= 3 → 完了画面に遷移
+        setRegradeCardIndex(null);
+        if (grade < 3) {
+          setIsFlipped(false);
+          setIsReconfirmMode(true);
+        } else {
+          setIsComplete(true);
+        }
       } catch {
         setError('再採点の送信に失敗しました');
-      } finally {
-        setIsSubmitting(false);
         setRegradeCardIndex(null);
         setIsComplete(true);
+      } finally {
+        setIsSubmitting(false);
       }
       return;
     }
@@ -205,9 +213,10 @@ export const ReviewPage = () => {
     setReconfirmQueue(rest);
 
     // 【結果を「再確認済み＝覚えた」に更新】: API 呼び出しなし
+    // 【ガード条件】: type === 'graded' のカードのみ更新対象とし、undone 等の誤更新を防止
     setReviewResults((results) =>
       results.map((r) =>
-        r.cardId === current.cardId
+        r.cardId === current.cardId && r.type === 'graded'
           ? { ...r, type: 'reconfirmed' as const, reconfirmResult: 'remembered' as const }
           : r
       )
@@ -260,7 +269,7 @@ export const ReviewPage = () => {
 
       setReviewResults((prev) =>
         prev.map((r, i) =>
-          i === index ? { ...r, type: 'undone' as const } : r
+          i === index ? { ...r, type: 'undone' as const, reconfirmResult: undefined } : r
         )
       );
       setReviewedCount((prev) => Math.max(0, prev - 1));
@@ -368,41 +377,7 @@ export const ReviewPage = () => {
     );
   }
 
-  // 【再確認モード】: reconfirmQueue の先頭カードを再確認UI で表示する
-  if (isReconfirmMode && reconfirmQueue.length > 0) {
-    const reconfirmCard = reconfirmQueue[0];
-    return (
-      <div className="flex flex-col min-h-screen bg-gray-50">
-        <header className="p-4 flex items-center">
-          <ReconfirmBadge />
-        </header>
-        <main className="flex-1 flex flex-col px-4">
-          <div className="flex-1 flex items-center justify-center">
-            <div className="w-full max-w-md">
-              <FlipCard
-                front={reconfirmCard.front}
-                back={reconfirmCard.back}
-                isFlipped={isFlipped}
-                onFlip={handleFlip}
-              />
-            </div>
-          </div>
-
-          <div className="pb-6 min-h-[200px]">
-            <GradeButtons
-              onGrade={handleGrade}
-              disabled={isSubmitting}
-              isReconfirmMode={true}
-              onReconfirmRemembered={handleReconfirmRemembered}
-              onReconfirmForgotten={handleReconfirmForgotten}
-            />
-          </div>
-        </main>
-      </div>
-    );
-  }
-
-  // 【再採点モード】: Undo されたカードを再採点UI で表示する
+  // 【再採点モード】: Undo されたカードを再採点UI で表示する（再確認モードより優先）
   if (regradeCardIndex !== null) {
     const regradeResult = reviewResults[regradeCardIndex];
     const regradeCard = cards.find((c) => c.card_id === regradeResult.cardId);
@@ -442,6 +417,53 @@ export const ReviewPage = () => {
                 disabled={isSubmitting}
               />
             )}
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  // 【再確認モード】: reconfirmQueue の先頭カードを再確認UI で表示する
+  if (isReconfirmMode && reconfirmQueue.length > 0) {
+    const reconfirmCard = reconfirmQueue[0];
+    return (
+      <div className="flex flex-col min-h-screen bg-gray-50">
+        <header className="p-4 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={handleBack}
+            className="text-gray-600 min-h-[44px] min-w-[44px] flex items-center"
+            aria-label="戻る"
+          >
+            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
+          <span className="inline-flex items-center bg-amber-100 text-amber-700 rounded-full px-2 py-0.5 text-xs font-medium">
+            再確認
+          </span>
+          <span className="text-xs text-gray-500">残り {reconfirmQueue.length} 枚</span>
+        </header>
+        <main className="flex-1 flex flex-col px-4">
+          <div className="flex-1 flex items-center justify-center">
+            <div className="w-full max-w-md">
+              <FlipCard
+                front={reconfirmCard.front}
+                back={reconfirmCard.back}
+                isFlipped={isFlipped}
+                onFlip={handleFlip}
+              />
+            </div>
+          </div>
+
+          <div className="pb-6 min-h-[200px]">
+            <GradeButtons
+              onGrade={handleGrade}
+              disabled={isSubmitting}
+              isReconfirmMode={true}
+              onReconfirmRemembered={handleReconfirmRemembered}
+              onReconfirmForgotten={handleReconfirmForgotten}
+            />
           </div>
         </main>
       </div>
