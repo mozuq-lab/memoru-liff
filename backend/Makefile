@@ -55,6 +55,8 @@ local-all: local-db local-keycloak local-ollama ## Start all local services
 	@echo "All local services started"
 
 local-all-stop: ## Stop all local services
+	@echo "Stopping SAM local containers on memoru-network..."
+	@docker ps --filter "network=memoru-network" --format '{{.ID}}' | xargs -r docker stop 2>/dev/null || true
 	docker compose down
 
 local-db-stop: ## Stop local DynamoDB
