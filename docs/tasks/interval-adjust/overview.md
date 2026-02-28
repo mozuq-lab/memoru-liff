@@ -41,7 +41,7 @@
 
 ### タスク一覧
 
-- [ ] [TASK-0078: バックエンド interval更新サポート](TASK-0078.md) - 4h (TDD) 🔵
+- [x] [TASK-0078: バックエンド interval更新サポート](TASK-0078.md) - 4h (TDD) 🔵
 - [ ] [TASK-0079: フロントエンド プリセットボタンUI](TASK-0079.md) - 4h (TDD) 🔵
 - [ ] [TASK-0080: 統合テスト・動作確認](TASK-0080.md) - 2h (TDD) 🔵
 

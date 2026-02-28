@@ -31,6 +31,11 @@ class UpdateCardRequest(BaseModel):
     back: Optional[str] = Field(None, min_length=1, max_length=2000)
     deck_id: Optional[str] = None
     tags: Optional[List[str]] = None
+    # 【interval フィールド】: 手動で復習間隔（日数）を設定するオプションフィールド
+    # 【バリデーション】: ge=1（最小1日）, le=365（最大1年）の制約を適用
+    # 【Optional の理由】: 未指定時は既存の interval/next_review_at を変更しない（後方互換性）
+    # 🔵 信頼性レベル: 要件定義 REQ-101, REQ-102 より
+    interval: Optional[int] = Field(None, ge=1, le=365, description="Review interval in days (1-365)")
 
     @field_validator("tags")
     @classmethod

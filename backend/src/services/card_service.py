@@ -1,7 +1,7 @@
 """Card service for DynamoDB operations."""
 
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Tuple
 
 import boto3
@@ -215,6 +215,7 @@ class CardService:
         back: Optional[str] = None,
         deck_id: Optional[str] = None,
         tags: Optional[List[str]] = None,
+        interval: Optional[int] = None,
     ) -> Card:
         """Update a card.
 
@@ -225,12 +226,21 @@ class CardService:
             back: Optional new back text.
             deck_id: Optional new deck ID.
             tags: Optional new tags.
+            interval: Optional new review interval in days (1-365).
+                      When specified, next_review_at is recalculated as now + interval days.
 
         Returns:
             Updated Card object.
 
         Raises:
             CardNotFoundError: If card does not exist.
+
+        【interval 指定時の動作】:
+          - interval と next_review_at を同一 UpdateExpression でまとめて更新する
+          - next_review_at = 現在日時 (UTC) + interval 日 で自動再計算する
+          - ease_factor, repetitions は変更しない（REQ-004）
+          - review_history には記録しない（復習操作ではないため。REQ-403）
+        🔵 信頼性レベル: 要件定義 REQ-002〜004, REQ-401〜403, architecture.md より
         """
         # Verify card exists
         card = self.get_card(user_id, card_id)
@@ -261,6 +271,25 @@ class CardService:
             update_parts.append("tags = :tags")
             expression_values[":tags"] = tags
             card.tags = tags
+
+        # 【interval 更新処理】: interval が指定された場合に interval と next_review_at を更新する
+        # 【実装方針】: DynamoDB の予約語 interval を ExpressionAttributeNames でエスケープ
+        # 【next_review_at 再計算】: 現在日時 + interval 日 で再計算する（REQ-003）
+        # 【不変条件】: ease_factor, repetitions は更新しない（REQ-004）
+        # 【review_history 非記録】: update_card は復習操作ではないため、review_history に記録しない（REQ-403）
+        # 🔵 信頼性レベル: 要件定義 REQ-002〜004, REQ-402〜403, architecture.md 技術的制約セクションより
+        if interval is not None:
+            # 【予約語エスケープ】: DynamoDB で "interval" は予約語のため #interval としてエスケープする
+            update_parts.append("#interval = :interval")
+            expression_values[":interval"] = interval
+            expression_names["#interval"] = "interval"
+            card.interval = interval
+
+            # 【next_review_at 再計算】: 現在日時 + interval 日で next_review_at を計算する
+            next_review_at = datetime.now(timezone.utc) + timedelta(days=interval)
+            update_parts.append("next_review_at = :next_review_at")
+            expression_values[":next_review_at"] = next_review_at.isoformat()
+            card.next_review_at = next_review_at
 
         if not update_parts:
             return card

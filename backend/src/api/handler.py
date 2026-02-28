@@ -543,6 +543,9 @@ def update_card(card_id: str):
         )
 
     try:
+        # 【interval パラメータ追加】: リクエストの interval をサービス層に渡す
+        # 【実装方針】: request.interval が None の場合は interval 関連フィールドを更新しない（後方互換性）
+        # 🔵 信頼性レベル: 要件定義 REQ-002, REQ-401, architecture.md handler拡張セクションより
         card = card_service.update_card(
             user_id=user_id,
             card_id=card_id,
@@ -550,6 +553,7 @@ def update_card(card_id: str):
             back=request.back,
             deck_id=request.deck_id,
             tags=request.tags,
+            interval=request.interval,
         )
         return card.to_response().model_dump(mode="json")
     except CardNotFoundError:
