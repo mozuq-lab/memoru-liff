@@ -52,7 +52,14 @@ local-ollama-logs: ## Show Ollama logs
 	docker compose logs -f ollama
 
 local-all: local-db local-keycloak local-ollama ## Start all local services
+	@echo ""
 	@echo "All local services started"
+	@echo "  DynamoDB Local: http://localhost:8000"
+	@echo "  DynamoDB Admin: http://localhost:8001"
+	@echo "  Keycloak:       http://localhost:8180"
+	@echo "  Ollama:         http://localhost:11434"
+	@echo ""
+	@echo "Next: run 'make local-api' in a separate terminal to start the API server"
 
 local-all-stop: ## Stop all local services
 	@echo "Stopping SAM local containers on memoru-network..."
