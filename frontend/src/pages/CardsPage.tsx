@@ -12,6 +12,7 @@ import { Loading } from '@/components/common/Loading';
 import { Error } from '@/components/common/Error';
 import { SearchBar } from '@/components/SearchBar';
 import { FilterChips } from '@/components/FilterChips';
+import { SortSelect } from '@/components/SortSelect';
 import { useCardsContext } from '@/contexts/CardsContext';
 import { useCardSearch } from '@/hooks/useCardSearch';
 
@@ -31,7 +32,13 @@ export const CardsPage = () => {
   const activeTab: TabType = searchParams.get('tab') === 'due' ? 'due' : 'all';
 
   const tabCards = activeTab === 'due' ? dueCards : cards;
-  const { query, setQuery, reviewStatus, setReviewStatus, filteredCards } = useCardSearch({ cards: tabCards });
+  const {
+    query, setQuery,
+    reviewStatus, setReviewStatus,
+    sortBy, setSortBy,
+    sortOrder, setSortOrder,
+    filteredCards,
+  } = useCardSearch({ cards: tabCards });
 
   const setActiveTab = (tab: TabType) => {
     if (tab === 'due') {
@@ -107,6 +114,15 @@ export const CardsPage = () => {
         {/* 復習状態フィルター */}
         <div className="mt-2">
           <FilterChips value={reviewStatus} onChange={setReviewStatus} />
+        </div>
+        {/* ソート */}
+        <div className="mt-2">
+          <SortSelect
+            sortBy={sortBy}
+            sortOrder={sortOrder}
+            onSortByChange={setSortBy}
+            onSortOrderChange={setSortOrder}
+          />
         </div>
       </header>
 

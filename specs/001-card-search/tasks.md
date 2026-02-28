@@ -107,14 +107,14 @@ description: "Task list for 001-card-search feature implementation"
 
 ### TDD テスト（先に作成し FAIL を確認すること）⚠️
 
-- [ ] T019 [P] [US3] `frontend/src/components/__tests__/SortSelect.test.tsx` を作成する（SS-001〜SS-006 の 6 ケース: ドロップダウン表示, トグルボタン表示, data-testid, onSortByChange/onSortOrderChange 呼び出し）
-- [ ] T020 [P] [US3] `frontend/src/hooks/__tests__/useCardSearch.test.ts` にソートのテストケースを追記する（created_at 昇降順, next_review_at・null は末尾, ease_factor 昇降順, 安定ソート, フィルター後ソートの順序）
+- [X] T019 [P] [US3] `frontend/src/components/__tests__/SortSelect.test.tsx` を作成する（SS-001〜SS-006 の 6 ケース: ドロップダウン表示, トグルボタン表示, data-testid, onSortByChange/onSortOrderChange 呼び出し）
+- [X] T020 [P] [US3] `frontend/src/hooks/__tests__/useCardSearch.test.ts` にソートのテストケースを追記する（created_at 昇降順, next_review_at・ null は末尾, ease_factor 昇降順, 安定ソート, フィルター後ソートの順序）
 
 ### 実装
 
-- [ ] T021 [P] [US3] `frontend/src/components/SortSelect.tsx` を新規作成する（`<select>` で sortBy 選択, `data-testid="sort-by-select"`, `data-testid="sort-order-toggle"`, Tailwind スタイル）
-- [ ] T022 [US3] `frontend/src/hooks/useCardSearch.ts` にソートロジックを追加する（`Array.sort` コンパレーター, `next_review_at` null 末尾処理, `useMemo` 依存配列に `sortBy`, `sortOrder` を追加）
-- [ ] T023 [US3] `frontend/src/pages/CardsPage.tsx` に `SortSelect` を組み込む（`sortBy`, `sortOrder`, `setSortBy`, `setSortOrder` を渡す）
+- [X] T021 [P] [US3] `frontend/src/components/SortSelect.tsx` を新規作成する（`<select>` で sortBy 選択, `data-testid="sort-by-select"`, `data-testid="sort-order-toggle"`, Tailwind スタイル）
+- [X] T022 [US3] `frontend/src/hooks/useCardSearch.ts` にソートロジックを追加する（`Array.sort` コンパレーター, `next_review_at` null 末尾処理, `useMemo` 依存配列に `sortBy`, `sortOrder` を追加）
+- [X] T023 [US3] `frontend/src/pages/CardsPage.tsx` に `SortSelect` を組み込む（`sortBy`, `sortOrder`, `setSortBy`, `setSortOrder` を渡す）
 
 **Checkpoint**: この時点で US1 + US2 + US3 すべてが動作可能であること
 
