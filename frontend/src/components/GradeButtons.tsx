@@ -1,6 +1,6 @@
 interface GradeButtonsProps {
   onGrade: (grade: number) => void;
-  onSkip: () => void;
+  onSkip?: () => void;
   disabled: boolean;
 }
 
@@ -33,17 +33,19 @@ export const GradeButtons = ({ onGrade, onSkip, disabled }: GradeButtonsProps) =
           </button>
         ))}
       </div>
-      <button
-        type="button"
-        onClick={onSkip}
-        disabled={disabled}
-        aria-label="スキップ"
-        className={`w-full min-h-[44px] py-2 px-4 rounded-lg border border-gray-300 text-gray-600 text-sm font-medium transition-colors hover:bg-gray-100 active:bg-gray-200 ${
-          disabled ? 'opacity-50 cursor-not-allowed' : ''
-        }`}
-      >
-        スキップ
-      </button>
+      {onSkip && (
+        <button
+          type="button"
+          onClick={onSkip}
+          disabled={disabled}
+          aria-label="スキップ"
+          className={`w-full min-h-[44px] py-2 px-4 rounded-lg border border-gray-300 text-gray-600 text-sm font-medium transition-colors hover:bg-gray-100 active:bg-gray-200 ${
+            disabled ? 'opacity-50 cursor-not-allowed' : ''
+          }`}
+        >
+          スキップ
+        </button>
+      )}
     </div>
   );
 };

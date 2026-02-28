@@ -16,6 +16,7 @@ vi.mock('react-router-dom', async () => {
 
 const mockGetDueCards = vi.fn();
 const mockSubmitReview = vi.fn();
+const mockUndoReview = vi.fn();
 
 vi.mock('@/services/api', () => ({
   cardsApi: {
@@ -23,6 +24,7 @@ vi.mock('@/services/api', () => ({
   },
   reviewsApi: {
     submitReview: (...args: unknown[]) => mockSubmitReview(...args),
+    undoReview: (...args: unknown[]) => mockUndoReview(...args),
   },
 }));
 
@@ -41,6 +43,14 @@ const renderReviewPage = () => {
 };
 
 describe('ReviewPage', () => {
+  const mockReviewResponse = (cardId: string, grade: number) => ({
+    card_id: cardId,
+    grade,
+    previous: { ease_factor: 2.5, interval: 1, repetitions: 0, due_date: null },
+    updated: { ease_factor: 2.6, interval: 1, repetitions: 1, due_date: '2026-03-01' },
+    reviewed_at: '2026-02-28T10:00:00Z',
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetDueCards.mockResolvedValue({
@@ -48,7 +58,14 @@ describe('ReviewPage', () => {
       total_due_count: 3,
       next_due_date: null,
     });
-    mockSubmitReview.mockResolvedValue(undefined);
+    mockSubmitReview.mockImplementation((cardId: string, grade: number) =>
+      Promise.resolve(mockReviewResponse(cardId, grade))
+    );
+    mockUndoReview.mockResolvedValue({
+      card_id: 'card-1',
+      restored: { ease_factor: 2.5, interval: 1, repetitions: 0, due_date: '2026-02-28' },
+      undone_at: '2026-02-28T10:01:00Z',
+    });
   });
 
   describe('テストケース1: ローディング表示', () => {
@@ -523,6 +540,164 @@ describe('ReviewPage', () => {
       await waitFor(() => {
         expect(screen.getByRole('alert')).toHaveTextContent('採点の送信に失敗しました');
       });
+    });
+  });
+
+  // --- TASK-0077: Undo/再採点フロー統合 ---
+
+  describe('Undoフロー: 正常系', () => {
+    const gradeAndComplete = async (user: ReturnType<typeof userEvent.setup>) => {
+      mockGetDueCards.mockResolvedValue({
+        due_cards: [mockDueCards[0]],
+        total_due_count: 1,
+        next_due_date: null,
+      });
+      renderReviewPage();
+
+      await waitFor(() => {
+        expect(screen.getByText('質問1')).toBeInTheDocument();
+      });
+
+      // Flip and grade
+      await user.click(screen.getByRole('button', { name: /カード表面を表示中/ }));
+      await user.click(screen.getByLabelText('4 - やや迷ったが正解'));
+
+      await waitFor(() => {
+        expect(screen.getByText('復習完了!')).toBeInTheDocument();
+      });
+    };
+
+    it('取り消しボタン押下でUndo APIが呼ばれる', async () => {
+      const user = userEvent.setup();
+      await gradeAndComplete(user);
+
+      // Click undo button
+      const undoButton = screen.getByLabelText('質問1 の採点を取り消す');
+      await user.click(undoButton);
+
+      expect(mockUndoReview).toHaveBeenCalledWith('card-1');
+    });
+
+    it('Undo成功後に再採点モードに遷移する', async () => {
+      const user = userEvent.setup();
+      await gradeAndComplete(user);
+
+      // Click undo button
+      const undoButton = screen.getByLabelText('質問1 の採点を取り消す');
+      await user.click(undoButton);
+
+      // Should show regrade mode with the card
+      await waitFor(() => {
+        expect(screen.getByText('再採点')).toBeInTheDocument();
+        expect(screen.getByText('質問1')).toBeInTheDocument();
+      });
+    });
+
+    it('再採点モードではスキップボタンが表示されない', async () => {
+      const user = userEvent.setup();
+      await gradeAndComplete(user);
+
+      const undoButton = screen.getByLabelText('質問1 の採点を取り消す');
+      await user.click(undoButton);
+
+      await waitFor(() => {
+        expect(screen.getByText('再採点')).toBeInTheDocument();
+      });
+
+      // Flip the card
+      await user.click(screen.getByRole('button', { name: /カード表面を表示中/ }));
+
+      // Skip button should not be visible in regrade mode
+      expect(screen.queryByLabelText('スキップ')).not.toBeInTheDocument();
+    });
+
+    it('再採点完了後に結果が更新されて完了画面に戻る', async () => {
+      const user = userEvent.setup();
+      await gradeAndComplete(user);
+
+      // Undo
+      const undoButton = screen.getByLabelText('質問1 の採点を取り消す');
+      await user.click(undoButton);
+
+      await waitFor(() => {
+        expect(screen.getByText('再採点')).toBeInTheDocument();
+      });
+
+      // Flip and regrade
+      await user.click(screen.getByRole('button', { name: /カード表面を表示中/ }));
+      await user.click(screen.getByLabelText('5 - 完璧'));
+
+      // Should return to complete screen
+      await waitFor(() => {
+        expect(screen.getByText('復習完了!')).toBeInTheDocument();
+      });
+
+      // submitReview should have been called twice (original + regrade)
+      expect(mockSubmitReview).toHaveBeenCalledTimes(2);
+      expect(mockSubmitReview).toHaveBeenLastCalledWith('card-1', 5);
+    });
+  });
+
+  describe('Undoフロー: エラー系', () => {
+    const gradeAndComplete = async (user: ReturnType<typeof userEvent.setup>) => {
+      mockGetDueCards.mockResolvedValue({
+        due_cards: [mockDueCards[0]],
+        total_due_count: 1,
+        next_due_date: null,
+      });
+      renderReviewPage();
+
+      await waitFor(() => {
+        expect(screen.getByText('質問1')).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByRole('button', { name: /カード表面を表示中/ }));
+      await user.click(screen.getByLabelText('4 - やや迷ったが正解'));
+
+      await waitFor(() => {
+        expect(screen.getByText('復習完了!')).toBeInTheDocument();
+      });
+    };
+
+    it('Undo APIエラー時に完了画面に留まる', async () => {
+      const user = userEvent.setup();
+      mockUndoReview.mockRejectedValue(new Error('Undo failed'));
+      await gradeAndComplete(user);
+
+      const undoButton = screen.getByLabelText('質問1 の採点を取り消す');
+      await user.click(undoButton);
+
+      // Should stay on complete screen with error
+      await waitFor(() => {
+        expect(screen.getByText('復習完了!')).toBeInTheDocument();
+        expect(screen.getByRole('alert')).toHaveTextContent('取り消しに失敗しました');
+      });
+    });
+
+    it('再採点APIエラー時にundone状態のまま完了画面に戻る', async () => {
+      const user = userEvent.setup();
+      await gradeAndComplete(user);
+
+      // Undo succeeds
+      const undoButton = screen.getByLabelText('質問1 の採点を取り消す');
+      await user.click(undoButton);
+
+      await waitFor(() => {
+        expect(screen.getByText('再採点')).toBeInTheDocument();
+      });
+
+      // Regrade fails
+      mockSubmitReview.mockRejectedValueOnce(new Error('Regrade failed'));
+      await user.click(screen.getByRole('button', { name: /カード表面を表示中/ }));
+      await user.click(screen.getByLabelText('3 - 難しかったが正解'));
+
+      // Should return to complete screen with undone status
+      await waitFor(() => {
+        expect(screen.getByText('復習完了!')).toBeInTheDocument();
+      });
+
+      // The card should show as undone (取り消し済み)
+      expect(screen.getByText('取り消し済み')).toBeInTheDocument();
     });
   });
 });

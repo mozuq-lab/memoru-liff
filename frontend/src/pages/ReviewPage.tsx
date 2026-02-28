@@ -21,6 +21,9 @@ export const ReviewPage = () => {
   const [reviewResults, setReviewResults] = useState<SessionCardResult[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [regradeCardIndex, setRegradeCardIndex] = useState<number | null>(null);
+  const [isUndoing, setIsUndoing] = useState(false);
+  const [undoingIndex, setUndoingIndex] = useState<number | null>(null);
 
   const fetchCards = useCallback(async () => {
     setIsLoading(true);
@@ -49,6 +52,32 @@ export const ReviewPage = () => {
   }, [currentIndex, cards.length]);
 
   const handleGrade = useCallback(async (grade: number) => {
+    // Regrade mode: re-submit for the undone card
+    if (regradeCardIndex !== null) {
+      const result = reviewResults[regradeCardIndex];
+      setIsSubmitting(true);
+      setError(null);
+      try {
+        const response = await reviewsApi.submitReview(result.cardId, grade);
+        setReviewResults((prev) =>
+          prev.map((r, i) =>
+            i === regradeCardIndex
+              ? { ...r, grade, nextReviewDate: response.updated.due_date, type: 'graded' as const }
+              : r
+          )
+        );
+        setReviewedCount((prev) => prev + 1);
+      } catch {
+        setError('再採点の送信に失敗しました');
+      } finally {
+        setIsSubmitting(false);
+        setRegradeCardIndex(null);
+        setIsComplete(true);
+      }
+      return;
+    }
+
+    // Normal mode
     const currentCard = cards[currentIndex];
     setIsSubmitting(true);
     setError(null);
@@ -71,7 +100,7 @@ export const ReviewPage = () => {
     } finally {
       setIsSubmitting(false);
     }
-  }, [cards, currentIndex, moveToNext]);
+  }, [cards, currentIndex, moveToNext, regradeCardIndex, reviewResults]);
 
   const handleSkip = useCallback(() => {
     const currentCard = cards[currentIndex];
@@ -85,6 +114,30 @@ export const ReviewPage = () => {
     ]);
     moveToNext();
   }, [cards, currentIndex, moveToNext]);
+
+  const handleUndo = useCallback(async (index: number) => {
+    const result = reviewResults[index];
+    setIsUndoing(true);
+    setUndoingIndex(index);
+    setError(null);
+    try {
+      await reviewsApi.undoReview(result.cardId);
+      setReviewResults((prev) =>
+        prev.map((r, i) =>
+          i === index ? { ...r, type: 'undone' as const } : r
+        )
+      );
+      setReviewedCount((prev) => Math.max(0, prev - 1));
+      setRegradeCardIndex(index);
+      setIsComplete(false);
+      setIsFlipped(false);
+    } catch {
+      setError('取り消しに失敗しました');
+    } finally {
+      setIsUndoing(false);
+      setUndoingIndex(null);
+    }
+  }, [reviewResults]);
 
   const handleFlip = useCallback(() => {
     setIsFlipped((prev) => !prev);
@@ -160,7 +213,64 @@ export const ReviewPage = () => {
   if (isComplete) {
     return (
       <div className="flex flex-col min-h-screen bg-gray-50">
-        <ReviewComplete reviewedCount={reviewedCount} results={reviewResults} />
+        {error && (
+          <p className="text-red-500 text-sm text-center mt-4 px-4" role="alert">
+            {error}
+          </p>
+        )}
+        <ReviewComplete
+          reviewedCount={reviewedCount}
+          results={reviewResults}
+          onUndo={handleUndo}
+          isUndoing={isUndoing}
+          undoingIndex={undoingIndex}
+        />
+      </div>
+    );
+  }
+
+  // Regrade mode: show the undone card for re-grading
+  if (regradeCardIndex !== null) {
+    const regradeResult = reviewResults[regradeCardIndex];
+    const regradeCard = cards.find((c) => c.card_id === regradeResult.cardId);
+    if (!regradeCard) {
+      setRegradeCardIndex(null);
+      setIsComplete(true);
+      return null;
+    }
+    return (
+      <div className="flex flex-col min-h-screen bg-gray-50">
+        <header className="p-4 flex items-center">
+          <p className="text-sm text-gray-600">再採点</p>
+        </header>
+
+        <main className="flex-1 flex flex-col px-4">
+          <div className="flex-1 flex items-center justify-center">
+            <div className="w-full max-w-md">
+              <FlipCard
+                front={regradeCard.front}
+                back={regradeCard.back}
+                isFlipped={isFlipped}
+                onFlip={handleFlip}
+              />
+            </div>
+          </div>
+
+          {error && (
+            <p className="text-red-500 text-sm text-center mb-2" role="alert">
+              {error}
+            </p>
+          )}
+
+          <div className="pb-6 min-h-[200px]">
+            {isFlipped && (
+              <GradeButtons
+                onGrade={handleGrade}
+                disabled={isSubmitting}
+              />
+            )}
+          </div>
+        </main>
       </div>
     );
   }
