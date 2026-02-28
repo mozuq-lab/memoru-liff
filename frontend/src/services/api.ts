@@ -5,6 +5,8 @@ import type {
   GenerateCardsRequest,
   GenerateCardsResponse,
   DueCardsResponse,
+  ReviewResponse,
+  UndoReviewResponse,
   User,
   UpdateUserRequest,
   LinkLineRequest,
@@ -127,10 +129,16 @@ class ApiClient {
   }
 
   // レビュー API
-  async submitReview(cardId: string, grade: number): Promise<void> {
-    await this.request<void>(`/reviews/${cardId}`, {
+  async submitReview(cardId: string, grade: number): Promise<ReviewResponse> {
+    return this.request<ReviewResponse>(`/reviews/${cardId}`, {
       method: 'POST',
       body: JSON.stringify({ grade }),
+    });
+  }
+
+  async undoReview(cardId: string): Promise<UndoReviewResponse> {
+    return this.request<UndoReviewResponse>(`/reviews/${cardId}/undo`, {
+      method: 'POST',
     });
   }
 
@@ -175,6 +183,7 @@ export const cardsApi = {
 
 export const reviewsApi = {
   submitReview: (cardId: string, grade: number) => apiClient.submitReview(cardId, grade),
+  undoReview: (cardId: string) => apiClient.undoReview(cardId),
 };
 
 export const usersApi = {

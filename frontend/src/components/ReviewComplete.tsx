@@ -1,7 +1,9 @@
 import { Link } from 'react-router-dom';
+import type { SessionCardResult } from '@/types';
 
 interface ReviewCompleteProps {
   reviewedCount: number;
+  results?: SessionCardResult[];
 }
 
 export const ReviewComplete = ({ reviewedCount }: ReviewCompleteProps) => {

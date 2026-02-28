@@ -7,7 +7,7 @@ import { ReviewComplete } from '@/components/ReviewComplete';
 import { Loading } from '@/components/common/Loading';
 import { Error } from '@/components/common/Error';
 import { cardsApi, reviewsApi } from '@/services/api';
-import type { DueCard } from '@/types';
+import type { DueCard, SessionCardResult } from '@/types';
 
 export const ReviewPage = () => {
   const navigate = useNavigate();
@@ -18,6 +18,7 @@ export const ReviewPage = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [reviewedCount, setReviewedCount] = useState(0);
   const [isComplete, setIsComplete] = useState(false);
+  const [reviewResults, setReviewResults] = useState<SessionCardResult[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,7 +53,17 @@ export const ReviewPage = () => {
     setIsSubmitting(true);
     setError(null);
     try {
-      await reviewsApi.submitReview(currentCard.card_id, grade);
+      const response = await reviewsApi.submitReview(currentCard.card_id, grade);
+      setReviewResults((prev) => [
+        ...prev,
+        {
+          cardId: currentCard.card_id,
+          front: currentCard.front,
+          grade,
+          nextReviewDate: response.updated.due_date,
+          type: 'graded' as const,
+        },
+      ]);
       setReviewedCount((prev) => prev + 1);
       moveToNext();
     } catch {
@@ -63,8 +74,17 @@ export const ReviewPage = () => {
   }, [cards, currentIndex, moveToNext]);
 
   const handleSkip = useCallback(() => {
+    const currentCard = cards[currentIndex];
+    setReviewResults((prev) => [
+      ...prev,
+      {
+        cardId: currentCard.card_id,
+        front: currentCard.front,
+        type: 'skipped' as const,
+      },
+    ]);
     moveToNext();
-  }, [moveToNext]);
+  }, [cards, currentIndex, moveToNext]);
 
   const handleFlip = useCallback(() => {
     setIsFlipped((prev) => !prev);
@@ -140,7 +160,7 @@ export const ReviewPage = () => {
   if (isComplete) {
     return (
       <div className="flex flex-col min-h-screen bg-gray-50">
-        <ReviewComplete reviewedCount={reviewedCount} />
+        <ReviewComplete reviewedCount={reviewedCount} results={reviewResults} />
       </div>
     );
   }

@@ -44,7 +44,7 @@
 
 - [x] [TASK-0073: ReviewHistoryEntry拡張 + submit_review保存値追加](TASK-0073.md) - 4h (TDD) 🔵
 - [x] [TASK-0074: Undo API実装](TASK-0074.md) - 6h (TDD) 🔵
-- [ ] [TASK-0075: 型定義・API関数・ReviewPage結果蓄積](TASK-0075.md) - 4h (TDD) 🔵
+- [x] [TASK-0075: 型定義・API関数・ReviewPage結果蓄積](TASK-0075.md) - 4h (TDD) 🔵
 - [ ] [TASK-0076: ReviewComplete・ReviewResultItem UI実装](TASK-0076.md) - 6h (TDD) 🔵
 - [ ] [TASK-0077: Undo/再採点フロー統合](TASK-0077.md) - 6h (TDD) 🔵
 

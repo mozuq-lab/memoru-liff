@@ -54,6 +54,54 @@ export interface GenerateCardsResponse {
   };
 }
 
+// Review types
+export interface ReviewPreviousState {
+  ease_factor: number;
+  interval: number;
+  repetitions: number;
+  due_date: string | null;
+}
+
+export interface ReviewUpdatedState {
+  ease_factor: number;
+  interval: number;
+  repetitions: number;
+  due_date: string;
+}
+
+export interface ReviewResponse {
+  card_id: string;
+  grade: number;
+  previous: ReviewPreviousState;
+  updated: ReviewUpdatedState;
+  reviewed_at: string;
+}
+
+// Undo types
+export interface UndoRestoredState {
+  ease_factor: number;
+  interval: number;
+  repetitions: number;
+  due_date: string;
+}
+
+export interface UndoReviewResponse {
+  card_id: string;
+  restored: UndoRestoredState;
+  undone_at: string;
+}
+
+// Session result types
+export type SessionCardResultType = 'graded' | 'skipped' | 'undone';
+
+export interface SessionCardResult {
+  cardId: string;
+  front: string;
+  grade?: number;
+  nextReviewDate?: string;
+  type: SessionCardResultType;
+}
+
 export interface DueCard {
   card_id: string;
   front: string;
