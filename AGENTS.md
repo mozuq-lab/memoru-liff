@@ -52,21 +52,26 @@ LINE ベースの暗記カードアプリケーション。SRS (Spaced Repetitio
 ## 現在の進捗
 
 ### memoru-liff（初期実装）
+
 - [~] Phase 1: 基盤インフラ構築 (TASK-0001 ~ TASK-0005) - IaCテンプレート作成完了、デプロイ待ち
 - [x] Phase 2: バックエンド実装 (TASK-0006 ~ TASK-0011)
 - [x] Phase 3: フロントエンド実装 (TASK-0012 ~ TASK-0019)
 - [x] Phase 4: 統合テスト (TASK-0020 ~ TASK-0022)
 
 ### code-review-remediation（コードレビュー修正 第1弾）
+
 - [x] Phase 1: Critical修正 (TASK-0023 ~ TASK-0029)
 - [x] Phase 2: High修正 (TASK-0030 ~ TASK-0041)
 
 ### code-review-fixes-v2（コードレビュー修正 第2弾）
+
 - [x] Phase 1: Critical修正 (TASK-0042 ~ TASK-0043)
 - [x] Phase 2: High修正 (TASK-0044 ~ TASK-0047)
 
 ### local-dev-environment（ローカル開発環境構築）
+
 - [x] Phase 1: 残タスク解決 (TASK-0049 ~ TASK-0051)
 
 ### ai-strands-migration（AI Strands SDK 移行）
+
 - [x] Phase 1 ~ Phase 4: 完了（784テスト全通過、カバレッジ 80.04%）
