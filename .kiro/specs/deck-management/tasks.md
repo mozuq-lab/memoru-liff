@@ -2,8 +2,8 @@
 
 ## Phase 1: バックエンド基盤
 
-- [ ] 1. インフラストラクチャ: DecksTable 定義と環境変数追加
-- [ ] 1.1 SAM テンプレート（template.yaml）に DecksTable リソースを追加 (P)
+- [x] 1. インフラストラクチャ: DecksTable 定義と環境変数追加
+- [x] 1.1 SAM テンプレート（template.yaml）に DecksTable リソースを追加 (P)
   - `DecksTable` DynamoDB テーブル定義: PK=`user_id` (S), SK=`deck_id` (S)
   - PAY_PER_REQUEST, PointInTimeRecovery, SSE (KMS), DeletionProtection (prod のみ)
   - テーブル名: `memoru-decks-${Environment}`
@@ -12,13 +12,13 @@
   - `ApiFunction` Events に Deck CRUD エンドポイント（ListDecks, CreateDeck, UpdateDeck, DeleteDeck）を追加
   - `LineWebhookFunction`, `DuePushJobFunction` のポリシーに DecksTable の Read 権限を追加（将来対応用、任意）
   - _Requirements: 2.1, 2.4_
-- [ ] 1.2 docker-compose.yaml にローカル DecksTable 作成コマンドを追加 (P)
+- [x] 1.2 docker-compose.yaml にローカル DecksTable 作成コマンドを追加 (P)
   - `dynamodb-init` サービスの command に `aws dynamodb create-table` を追加
   - `--table-name memoru-decks-dev`, PK=`user_id` (S), SK=`deck_id` (S), `--billing-mode PAY_PER_REQUEST`
   - _Requirements: 2.5_
 
-- [ ] 2. バックエンドモデル: Deck Pydantic モデル定義
-- [ ] 2.1 `backend/src/models/deck.py` を作成 (P)
+- [x] 2. バックエンドモデル: Deck Pydantic モデル定義
+- [x] 2.1 `backend/src/models/deck.py` を作成 (P)
   - `Deck` クラス: `deck_id` (UUID v4 自動生成), `user_id`, `name`, `description` (Optional), `color` (Optional), `created_at`, `updated_at` (Optional)
   - `to_dynamodb_item()` / `from_dynamodb_item()` メソッド（既存 Card モデルのパターンに準拠）
   - `to_response(card_count, due_count)` メソッド
