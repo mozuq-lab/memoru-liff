@@ -15,6 +15,13 @@ import type { Card } from '@/types';
 import { formatDueDate, getDueStatus } from '@/utils/date';
 
 /**
+ * 【設定定数】: 復習間隔のプリセット値（日数）
+ * 【調整可能性】: 要件変更時はこの定数を変更するだけでUIに反映される
+ * 🔵 青信号: タスクノートのUI設計・要件定義 REQ-001 に明記されたプリセット値
+ */
+const INTERVAL_PRESET_DAYS = [1, 3, 7, 14, 30] as const;
+
+/**
  * 【機能概要】: カード詳細ページコンポーネント
  */
 export const CardDetailPage = () => {
@@ -28,6 +35,8 @@ export const CardDetailPage = () => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  // 【状態追加】: 復習間隔調整APIの呼び出し中かどうかを管理する。プリセットボタンの disabled 制御に使用 🔵
+  const [isAdjusting, setIsAdjusting] = useState(false);
 
   // 【カード取得】
   const fetchCard = useCallback(async () => {
@@ -94,6 +103,37 @@ export const CardDetailPage = () => {
       setIsDeleting(false);
     }
   };
+
+  /**
+   * 【機能概要】: 復習間隔プリセットボタンのタップハンドラ
+   * 【改善内容】: useCallback でメモ化し、不要な再生成を防止
+   * 【実装方針】: 既存の handleSave パターンに倣い、isAdjusting で処理中状態を管理する
+   * 【保守性】: INTERVAL_PRESET_DAYS 定数と合わせて、プリセット値の管理を一元化
+   * 🔵 青信号: タスクノートの「データフロー（正常系）」「データフロー（エラー系）」に基づく実装
+   * @param interval - 設定する復習間隔（日数）。INTERVAL_PRESET_DAYS の値から呼び出される
+   */
+  const handleIntervalAdjust = useCallback(async (interval: number) => {
+    // 【ガード処理】: カードIDが取得できない場合は処理を中断する
+    if (!id) return;
+
+    // 【処理開始】: API呼び出し中状態に設定し、前回のエラーをクリアする 🔵
+    setIsAdjusting(true);
+    setError(null);
+
+    try {
+      // 【API呼び出し】: interval フィールドのみを送信してカードを更新する 🔵
+      const updatedCard = await cardsApi.updateCard(id, { interval });
+      // 【成功処理】: 更新後のカードデータで画面を更新し、成功メッセージを表示する 🔵
+      setCard(updatedCard);
+      setSuccessMessage('復習間隔を更新しました');
+    } catch (_err) {
+      // 【エラー処理】: 更新失敗時はカードデータを変更せず、エラーメッセージのみ表示する 🔵
+      setError('復習間隔の更新に失敗しました');
+    } finally {
+      // 【状態復帰】: 成功・失敗いずれの場合も isAdjusting を false に戻してボタンを再有効化する 🔵
+      setIsAdjusting(false);
+    }
+  }, [id]);
 
   // 【戻るハンドラ】
   const handleBack = () => {
@@ -238,6 +278,32 @@ export const CardDetailPage = () => {
                 <span className="text-sm text-gray-800" data-testid="interval">
                   {card.interval}日
                 </span>
+              </div>
+            </div>
+
+            {/* 復習間隔プリセットボタンセクション */}
+            {/* 【配置理由】: タスクノートのUI設計に従い card-meta の下、削除ボタンの上に配置 🔵 */}
+            <div className="bg-white rounded-lg shadow p-4 mb-4">
+              {/* 【セクションタイトル】: TC-F03 が期待する「復習間隔を調整」テキスト 🟡 */}
+              <p className="text-sm text-gray-600 mb-3">復習間隔を調整</p>
+              <div className="flex gap-2 flex-wrap">
+                {/* 【プリセットボタン】: INTERVAL_PRESET_DAYS 定数から生成。TC-F01〜F02, TC-F04〜F17 が期待するボタン 🔵 */}
+                {INTERVAL_PRESET_DAYS.map((days) => (
+                  <button
+                    key={days}
+                    onClick={() => handleIntervalAdjust(days)}
+                    // 【無効化制御】: isAdjusting=true の間は全ボタンを disabled にして二重送信を防ぐ 🔵
+                    disabled={isAdjusting}
+                    // 【アクセシビリティ】: TC-F10 が期待する「復習間隔を{N}日に設定」形式の aria-label 🔵
+                    aria-label={`復習間隔を${days}日に設定`}
+                    // 【テスト識別子】: TC-F01〜F17 がボタンを特定するための data-testid 🔵
+                    data-testid={`preset-button-${days}`}
+                    className="flex-1 min-h-[44px] py-2 px-3 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {/* 【ボタンテキスト】: TC-F02 が期待する「{N}日」形式 🔵 */}
+                    {days}日
+                  </button>
+                ))}
               </div>
             </div>
 

@@ -4,7 +4,7 @@
  * 【テスト対応】: TASK-0017 テストケース1〜9
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { CardDetailPage } from '../CardDetailPage';
@@ -361,6 +361,519 @@ describe('CardDetailPage', () => {
       await user.click(screen.getByTestId('back-button'));
 
       expect(mockNavigate).toHaveBeenCalledWith(-1);
+    });
+  });
+
+  // ============================================================
+  // TASK-0079: フロントエンド プリセットボタンUI テストケース
+  // ============================================================
+  describe('復習間隔プリセットボタン', () => {
+    // 【テスト前準備】: 各テスト実行前にモックを初期化し、標準的なカードデータを返すよう設定
+    // 【環境初期化】: vi.clearAllMocks() は外側の beforeEach で実行済みのため省略
+
+    // ----------------------------------------------------------------
+    // TC-F01: プリセットボタン5つが表示される
+    // ----------------------------------------------------------------
+    it('プリセットボタン5つが表示される', async () => {
+      // 【テスト目的】: カード詳細画面の表示モードでプリセットボタンが5つレンダリングされること
+      // 【テスト内容】: 表示モードでプリセットボタンのDOM要素が存在するかを検証
+      // 【期待される動作】: 5つのプリセットボタンがレンダリングされる
+      // 🔵 要件定義 REQ-001・受け入れ基準 TC-001-01 より
+
+      // 【テストデータ準備】: 標準的なカードデータでページをレンダリング
+      renderCardDetailPage();
+
+      // 【実際の処理実行】: カード取得完了を待機
+      await waitFor(() => {
+        expect(screen.getByTestId('card-detail')).toBeInTheDocument();
+      });
+
+      // 【結果検証】: 5つのプリセットボタンが表示されること
+      expect(screen.getByTestId('preset-button-1')).toBeInTheDocument(); // 【確認内容】: 1日ボタンが存在する 🔵
+      expect(screen.getByTestId('preset-button-3')).toBeInTheDocument(); // 【確認内容】: 3日ボタンが存在する 🔵
+      expect(screen.getByTestId('preset-button-7')).toBeInTheDocument(); // 【確認内容】: 7日ボタンが存在する 🔵
+      expect(screen.getByTestId('preset-button-14')).toBeInTheDocument(); // 【確認内容】: 14日ボタンが存在する 🔵
+      expect(screen.getByTestId('preset-button-30')).toBeInTheDocument(); // 【確認内容】: 30日ボタンが存在する 🔵
+    });
+
+    // ----------------------------------------------------------------
+    // TC-F02: プリセットボタンのテキストが正しい
+    // ----------------------------------------------------------------
+    it('プリセットボタンに正しいテキストが表示される', async () => {
+      // 【テスト目的】: 各プリセットボタンに「N日」形式の正しいテキストが表示されること
+      // 【テスト内容】: ボタンテキストがプリセット値に応じた日数で表示されるかを検証
+      // 【期待される動作】: ボタンテキストが「1日」「3日」「7日」「14日」「30日」
+      // 🔵 設計文書 architecture.md・要件定義 REQ-001 より
+
+      // 【テストデータ準備】: 標準的なカードデータでページをレンダリング
+      renderCardDetailPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('card-detail')).toBeInTheDocument();
+      });
+
+      // 【結果検証】: 各ボタンのテキストが正しいN日形式であること
+      expect(screen.getByTestId('preset-button-1')).toHaveTextContent('1日'); // 【確認内容】: 1日ボタンのテキストが「1日」 🔵
+      expect(screen.getByTestId('preset-button-3')).toHaveTextContent('3日'); // 【確認内容】: 3日ボタンのテキストが「3日」 🔵
+      expect(screen.getByTestId('preset-button-7')).toHaveTextContent('7日'); // 【確認内容】: 7日ボタンのテキストが「7日」 🔵
+      expect(screen.getByTestId('preset-button-14')).toHaveTextContent('14日'); // 【確認内容】: 14日ボタンのテキストが「14日」 🔵
+      expect(screen.getByTestId('preset-button-30')).toHaveTextContent('30日'); // 【確認内容】: 30日ボタンのテキストが「30日」 🔵
+    });
+
+    // ----------------------------------------------------------------
+    // TC-F03: 「復習間隔を調整」セクションタイトルが表示される
+    // ----------------------------------------------------------------
+    it('プリセットボタンセクションのタイトルが表示される', async () => {
+      // 【テスト目的】: プリセットボタンの上に「復習間隔を調整」というタイトルが表示されること
+      // 【テスト内容】: セクションタイトルが正しいテキストでレンダリングされるかを検証
+      // 【期待される動作】: 「復習間隔を調整」テキストがDOMに存在する
+      // 🟡 設計文書 architecture.md のUI構成図から妥当な推測
+
+      // 【テストデータ準備】: 標準的なカードデータでページをレンダリング
+      renderCardDetailPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('card-detail')).toBeInTheDocument();
+      });
+
+      // 【結果検証】: セクションタイトルが存在すること
+      expect(screen.getByText('復習間隔を調整')).toBeInTheDocument(); // 【確認内容】: セクションタイトルが表示されている 🟡
+    });
+
+    // ----------------------------------------------------------------
+    // TC-F04: プリセットボタン「1日」タップでAPIが呼ばれる
+    // ----------------------------------------------------------------
+    it('プリセットボタン「1日」タップで updateCard API が interval=1 で呼ばれる', async () => {
+      // 【テスト目的】: 「1日」ボタンをクリックした時に正しいAPI呼び出しが行われること
+      // 【テスト内容】: ボタンクリック後にmockUpdateCardの呼び出し引数を検証
+      // 【期待される動作】: cardsApi.updateCard(cardId, { interval: 1 }) が呼び出される
+      // 🔵 要件定義 REQ-002・受け入れ基準 TC-002-01 より
+
+      const user = userEvent.setup();
+
+      // 【テストデータ準備】: interval=1 で更新されたカードを返すよう設定
+      const updatedCard = { ...mockCard, interval: 1 };
+      mockUpdateCard.mockResolvedValue(updatedCard);
+
+      renderCardDetailPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('card-detail')).toBeInTheDocument();
+      });
+
+      // 【実際の処理実行】: 「1日」ボタンをクリック
+      await user.click(screen.getByTestId('preset-button-1'));
+
+      // 【結果検証】: updateCard APIが正しい引数で呼ばれること
+      await waitFor(() => {
+        expect(mockUpdateCard).toHaveBeenCalledWith('card-1', { interval: 1 }); // 【確認内容】: 第1引数がcard_id、第2引数に interval: 1 が含まれる 🔵
+      });
+    });
+
+    // ----------------------------------------------------------------
+    // TC-F05: プリセットボタン「30日」タップでAPIが呼ばれる
+    // ----------------------------------------------------------------
+    it('プリセットボタン「30日」タップで updateCard API が interval=30 で呼ばれる', async () => {
+      // 【テスト目的】: 「30日」ボタンをクリックした時に正しいAPI呼び出しが行われること
+      // 【テスト内容】: ボタンクリック後にmockUpdateCardの呼び出し引数を検証
+      // 【期待される動作】: cardsApi.updateCard(cardId, { interval: 30 }) が呼び出される
+      // 🔵 要件定義 REQ-002・受け入れ基準 TC-002-02 より
+
+      const user = userEvent.setup();
+
+      // 【テストデータ準備】: interval=30 で更新されたカードを返すよう設定
+      const updatedCard = { ...mockCard, interval: 30 };
+      mockUpdateCard.mockResolvedValue(updatedCard);
+
+      renderCardDetailPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('card-detail')).toBeInTheDocument();
+      });
+
+      // 【実際の処理実行】: 「30日」ボタンをクリック
+      await user.click(screen.getByTestId('preset-button-30'));
+
+      // 【結果検証】: updateCard APIが正しい引数で呼ばれること
+      await waitFor(() => {
+        expect(mockUpdateCard).toHaveBeenCalledWith('card-1', { interval: 30 }); // 【確認内容】: 第1引数がcard_id、第2引数に interval: 30 が含まれる 🔵
+      });
+    });
+
+    // ----------------------------------------------------------------
+    // TC-F06: 「7日」ボタンが正しいinterval値でAPIを呼ぶ
+    // ----------------------------------------------------------------
+    it('プリセットボタン「7日」タップで updateCard API が interval=7 で呼ばれる', async () => {
+      // 【テスト目的】: 「7日」ボタンをクリックした時に正しいAPI呼び出しが行われること
+      // 【テスト内容】: 中間値プリセットのAPI呼び出し引数を検証
+      // 【期待される動作】: cardsApi.updateCard(cardId, { interval: 7 }) が呼び出される
+      // 🟡 要件定義 REQ-002 から各値が同じロジックで処理されることの妥当な推測
+
+      const user = userEvent.setup();
+
+      // 【テストデータ準備】: interval=7 で更新されたカードを返すよう設定
+      const updatedCard = { ...mockCard, interval: 7 };
+      mockUpdateCard.mockResolvedValue(updatedCard);
+
+      renderCardDetailPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('card-detail')).toBeInTheDocument();
+      });
+
+      // 【実際の処理実行】: 「7日」ボタンをクリック
+      await user.click(screen.getByTestId('preset-button-7'));
+
+      // 【結果検証】: updateCard APIが正しい引数で呼ばれること
+      await waitFor(() => {
+        expect(mockUpdateCard).toHaveBeenCalledWith('card-1', { interval: 7 }); // 【確認内容】: 第2引数に interval: 7 が含まれる 🟡
+      });
+    });
+
+    // ----------------------------------------------------------------
+    // TC-F07: API成功時にカードデータが更新される
+    // ----------------------------------------------------------------
+    it('API成功時にカード詳細のメタ情報（復習間隔）が更新される', async () => {
+      // 【テスト目的】: API成功後、画面上のメタ情報（復習間隔）が新しい値に更新されること
+      // 【テスト内容】: API成功後にinterval表示が更新されるかを検証
+      // 【期待される動作】: setCard(updatedCard) により、表示が更新後のデータに切り替わる
+      // 🔵 要件定義 REQ-203・受け入れ基準 TC-002-03 より
+
+      const user = userEvent.setup();
+
+      // 【テストデータ準備】: interval=7→14 への更新成功を模擬
+      const updatedCard = { ...mockCard, interval: 14, next_review_at: '2024-01-29' };
+      mockUpdateCard.mockResolvedValue(updatedCard);
+
+      renderCardDetailPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('card-detail')).toBeInTheDocument();
+      });
+
+      // 【初期状態確認】: 元の interval が 7日 であること
+      expect(screen.getByTestId('interval')).toHaveTextContent('7日'); // 【確認内容】: 初期値が7日 🔵
+
+      // 【実際の処理実行】: 「14日」ボタンをクリック
+      await user.click(screen.getByTestId('preset-button-14'));
+
+      // 【結果検証】: 画面上の復習間隔表示が「14日」に更新されること
+      await waitFor(() => {
+        expect(screen.getByTestId('interval')).toHaveTextContent('14日'); // 【確認内容】: API成功後に interval 表示が14日に更新される 🔵
+      });
+    });
+
+    // ----------------------------------------------------------------
+    // TC-F08: API成功時に成功メッセージが表示される
+    // ----------------------------------------------------------------
+    it('API成功時に「復習間隔を更新しました」メッセージが表示される', async () => {
+      // 【テスト目的】: 間隔調整成功後に成功メッセージが表示されること
+      // 【テスト内容】: setSuccessMessage('復習間隔を更新しました') が呼ばれDOMに表示されるかを検証
+      // 【期待される動作】: data-testid="success-message" に「復習間隔を更新しました」が表示される
+      // 🔵 設計文書 architecture.md・NFR-203・既存テストパターン（テストケース4）より
+
+      const user = userEvent.setup();
+
+      // 【テストデータ準備】: 正常レスポンスを返すよう設定
+      mockUpdateCard.mockResolvedValue(mockCard);
+
+      renderCardDetailPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('card-detail')).toBeInTheDocument();
+      });
+
+      // 【実際の処理実行】: プリセットボタンをクリック
+      await user.click(screen.getByTestId('preset-button-7'));
+
+      // 【結果検証】: 成功メッセージが表示されること
+      await waitFor(() => {
+        expect(screen.getByTestId('success-message')).toHaveTextContent('復習間隔を更新しました'); // 【確認内容】: 成功メッセージのテキストが正しい 🔵
+      });
+    });
+
+    // ----------------------------------------------------------------
+    // TC-F09: API成功後にボタンが再度有効化される
+    // ----------------------------------------------------------------
+    it('API成功後にプリセットボタンが再度有効になる', async () => {
+      // 【テスト目的】: API呼び出し完了後に isAdjusting が false に戻り、ボタンが操作可能になること
+      // 【テスト内容】: API完了後のボタン状態を検証
+      // 【期待される動作】: finally { setIsAdjusting(false) } によりボタンのdisabled属性が解除される
+      // 🟡 データフロー図の正常フロー・既存 isSaving パターンから妥当な推測
+
+      const user = userEvent.setup();
+
+      // 【テストデータ準備】: 正常レスポンスを返すよう設定
+      mockUpdateCard.mockResolvedValue(mockCard);
+
+      renderCardDetailPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('card-detail')).toBeInTheDocument();
+      });
+
+      // 【実際の処理実行】: プリセットボタンをクリックし、API完了を待機
+      await user.click(screen.getByTestId('preset-button-7'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('success-message')).toBeInTheDocument();
+      });
+
+      // 【結果検証】: 全プリセットボタンが disabled ではない状態になること
+      expect(screen.getByTestId('preset-button-1')).not.toBeDisabled(); // 【確認内容】: 1日ボタンが有効状態 🟡
+      expect(screen.getByTestId('preset-button-7')).not.toBeDisabled(); // 【確認内容】: 7日ボタンが有効状態 🟡
+      expect(screen.getByTestId('preset-button-30')).not.toBeDisabled(); // 【確認内容】: 30日ボタンが有効状態 🟡
+    });
+
+    // ----------------------------------------------------------------
+    // TC-F10: プリセットボタンに適切な aria-label が設定されている
+    // ----------------------------------------------------------------
+    it('プリセットボタンに正しい aria-label が設定される', async () => {
+      // 【テスト目的】: 各ボタンに「復習間隔を{N}日に設定」形式の aria-label が設定されていること
+      // 【テスト内容】: アクセシビリティ属性が正しく設定されているかを検証
+      // 【期待される動作】: アクセシビリティ情報が正しく設定される
+      // 🔵 要件定義 NFR-301・タスクノートより
+
+      // 【テストデータ準備】: 標準的なカードデータでページをレンダリング
+      renderCardDetailPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('card-detail')).toBeInTheDocument();
+      });
+
+      // 【結果検証】: aria-label によるボタン取得ができること
+      expect(screen.getByRole('button', { name: '復習間隔を1日に設定' })).toBeInTheDocument(); // 【確認内容】: 1日ボタンの aria-label が正しい 🔵
+      expect(screen.getByRole('button', { name: '復習間隔を3日に設定' })).toBeInTheDocument(); // 【確認内容】: 3日ボタンの aria-label が正しい 🔵
+      expect(screen.getByRole('button', { name: '復習間隔を7日に設定' })).toBeInTheDocument(); // 【確認内容】: 7日ボタンの aria-label が正しい 🔵
+      expect(screen.getByRole('button', { name: '復習間隔を14日に設定' })).toBeInTheDocument(); // 【確認内容】: 14日ボタンの aria-label が正しい 🔵
+      expect(screen.getByRole('button', { name: '復習間隔を30日に設定' })).toBeInTheDocument(); // 【確認内容】: 30日ボタンの aria-label が正しい 🔵
+    });
+
+    // ----------------------------------------------------------------
+    // TC-F11: API失敗時にエラーメッセージが表示される
+    // ----------------------------------------------------------------
+    it('API失敗時に「復習間隔の更新に失敗しました」エラーメッセージが表示される', async () => {
+      // 【テスト目的】: API呼び出しが失敗した場合のUI挙動を確認
+      // 【テスト内容】: mockUpdateCardをRejectさせた後のエラーメッセージ表示を検証
+      // 【期待される動作】: data-testid="error-message" に「復習間隔の更新に失敗しました」が表示される
+      // 🟡 要件定義 REQ-103・受け入れ基準 TC-103-01・既存テストパターン（テストケース4）から妥当な推測
+
+      const user = userEvent.setup();
+
+      // 【テストデータ準備】: ネットワークエラーを模擬
+      mockUpdateCard.mockRejectedValue(new Error('Network Error'));
+
+      renderCardDetailPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('card-detail')).toBeInTheDocument();
+      });
+
+      // 【実際の処理実行】: プリセットボタンをクリック
+      await user.click(screen.getByTestId('preset-button-7'));
+
+      // 【結果検証】: エラーメッセージが表示されること
+      await waitFor(() => {
+        expect(screen.getByTestId('error-message')).toHaveTextContent('復習間隔の更新に失敗しました'); // 【確認内容】: エラーメッセージのテキストが正しい 🟡
+      });
+    });
+
+    // ----------------------------------------------------------------
+    // TC-F12: API失敗時に元のカードデータが保持される
+    // ----------------------------------------------------------------
+    it('API失敗時にカードのメタ情報が変更前の値のまま保持される', async () => {
+      // 【テスト目的】: API失敗時にUIが変更前のデータを維持し、不整合を防ぐ
+      // 【テスト内容】: API失敗後のinterval表示が元の値のまま保持されるかを検証
+      // 【期待される動作】: data-testid="interval" のテキストが「7日」のまま変わらない
+      // 🟡 要件定義 REQ-103・受け入れ基準 TC-103-02・データフロー図エラーフローから妥当な推測
+
+      const user = userEvent.setup();
+
+      // 【テストデータ準備】: API失敗を模擬（interval=14ボタンタップするが失敗する）
+      mockUpdateCard.mockRejectedValue(new Error('Server Error'));
+
+      renderCardDetailPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('card-detail')).toBeInTheDocument();
+      });
+
+      // 【初期状態確認】: 元の interval が 7日 であること
+      expect(screen.getByTestId('interval')).toHaveTextContent('7日'); // 【確認内容】: 初期値が7日 🟡
+
+      // 【実際の処理実行】: 「14日」ボタンをクリック（API失敗）
+      await user.click(screen.getByTestId('preset-button-14'));
+
+      // 【結果検証】: エラー後も interval 表示が「7日」のまま
+      await waitFor(() => {
+        expect(screen.getByTestId('error-message')).toBeInTheDocument();
+      });
+      expect(screen.getByTestId('interval')).toHaveTextContent('7日'); // 【確認内容】: API失敗後も元の7日が表示されている 🟡
+    });
+
+    // ----------------------------------------------------------------
+    // TC-F13: API失敗時にボタンが再度有効化される
+    // ----------------------------------------------------------------
+    it('API失敗後にプリセットボタンが再度有効になる', async () => {
+      // 【テスト目的】: API失敗後も isAdjusting が false に戻り、再試行が可能であること
+      // 【テスト内容】: API失敗後のボタン状態を検証
+      // 【期待される動作】: finally ブロックで確実に状態復帰され、ボタンが操作可能に戻る
+      // 🟡 データフロー図エラーフロー・既存 isSaving パターンから妥当な推測
+
+      const user = userEvent.setup();
+
+      // 【テストデータ準備】: API失敗を模擬
+      mockUpdateCard.mockRejectedValue(new Error('Error'));
+
+      renderCardDetailPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('card-detail')).toBeInTheDocument();
+      });
+
+      // 【実際の処理実行】: プリセットボタンをクリックし、エラーを待機
+      await user.click(screen.getByTestId('preset-button-7'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('error-message')).toBeInTheDocument();
+      });
+
+      // 【結果検証】: 全プリセットボタンが disabled ではない状態に戻ること
+      expect(screen.getByTestId('preset-button-1')).not.toBeDisabled(); // 【確認内容】: 1日ボタンが有効状態に復帰 🟡
+      expect(screen.getByTestId('preset-button-7')).not.toBeDisabled(); // 【確認内容】: 7日ボタンが有効状態に復帰 🟡
+      expect(screen.getByTestId('preset-button-30')).not.toBeDisabled(); // 【確認内容】: 30日ボタンが有効状態に復帰 🟡
+    });
+
+    // ----------------------------------------------------------------
+    // TC-F14: 編集モード時にプリセットボタンが非表示になる
+    // ----------------------------------------------------------------
+    it('編集モード時にプリセットボタンセクションが非表示になる', async () => {
+      // 【テスト目的】: 表示モード/編集モードの状態境界でプリセットボタンの表示制御を確認
+      // 【テスト内容】: isEditing=true の状態でプリセットボタンがDOMに存在しないことを検証
+      // 【期待される動作】: プリセットボタンがレンダリングされない
+      // 🔵 要件定義 REQ-201・受け入れ基準 TC-001-02・タスクノート（編集モードとの排他制御）より
+
+      const user = userEvent.setup();
+
+      renderCardDetailPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('card-detail')).toBeInTheDocument();
+      });
+
+      // 【実際の処理実行】: 編集ボタンをクリックして編集モードに遷移
+      await user.click(screen.getByTestId('edit-button'));
+
+      // 【結果検証】: プリセットボタンが非表示であること
+      expect(screen.queryByTestId('preset-button-1')).not.toBeInTheDocument(); // 【確認内容】: 1日ボタンが非表示 🔵
+      expect(screen.queryByTestId('preset-button-30')).not.toBeInTheDocument(); // 【確認内容】: 30日ボタンが非表示 🔵
+    });
+
+    // ----------------------------------------------------------------
+    // TC-F15: API呼び出し中にプリセットボタンが無効化される
+    // ----------------------------------------------------------------
+    it('API呼び出し中に全プリセットボタンが disabled になる', async () => {
+      // 【テスト目的】: isAdjusting の true/false 境界でのボタン状態変化を確認
+      // 【テスト内容】: API保留中のボタン無効化状態を検証
+      // 【期待される動作】: 全5つのプリセットボタンが disabled 属性を持つ
+      // 🟡 要件定義 REQ-202・受け入れ基準 TC-202-01・既存 isSaving パターンから妥当な推測
+
+      const user = userEvent.setup();
+
+      // 【テストデータ準備】: API応答を永続保留させることで「処理中」状態を維持
+      mockUpdateCard.mockImplementation(() => new Promise(() => {}));
+
+      renderCardDetailPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('card-detail')).toBeInTheDocument();
+      });
+
+      // 【実際の処理実行】: プリセットボタンをクリック（APIは保留中）
+      await user.click(screen.getByTestId('preset-button-7'));
+
+      // 【結果検証】: 全5つのプリセットボタンが disabled であること
+      await waitFor(() => {
+        expect(screen.getByTestId('preset-button-1')).toBeDisabled(); // 【確認内容】: 1日ボタンが無効化されている 🟡
+      });
+      expect(screen.getByTestId('preset-button-3')).toBeDisabled(); // 【確認内容】: 3日ボタンが無効化されている 🟡
+      expect(screen.getByTestId('preset-button-7')).toBeDisabled(); // 【確認内容】: 7日ボタンが無効化されている 🟡
+      expect(screen.getByTestId('preset-button-14')).toBeDisabled(); // 【確認内容】: 14日ボタンが無効化されている 🟡
+      expect(screen.getByTestId('preset-button-30')).toBeDisabled(); // 【確認内容】: 30日ボタンが無効化されている 🟡
+    });
+
+    // ----------------------------------------------------------------
+    // TC-F16: 編集モードから戻った後にプリセットボタンが再表示される
+    // ----------------------------------------------------------------
+    it('編集キャンセル後にプリセットボタンが再表示される', async () => {
+      // 【テスト目的】: 編集モード → 表示モード の状態遷移境界で表示復帰を確認
+      // 【テスト内容】: 編集キャンセル後にプリセットボタンが再度表示されるかを検証
+      // 【期待される動作】: プリセットボタン5つが再度表示される
+      // 🟡 既存テストパターン（テストケース3）と要件定義 REQ-201 から妥当な推測
+
+      const user = userEvent.setup();
+
+      renderCardDetailPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('card-detail')).toBeInTheDocument();
+      });
+
+      // 【実際の処理実行】: 編集ボタン → キャンセルボタンの順でクリック
+      await user.click(screen.getByTestId('edit-button'));
+      expect(screen.queryByTestId('preset-button-1')).not.toBeInTheDocument(); // 編集モード中は非表示
+
+      await user.click(screen.getByTestId('cancel-button'));
+
+      // 【結果検証】: プリセットボタンが再表示されること
+      expect(screen.getByTestId('preset-button-1')).toBeInTheDocument(); // 【確認内容】: キャンセル後に1日ボタンが再表示 🟡
+      expect(screen.getByTestId('preset-button-30')).toBeInTheDocument(); // 【確認内容】: キャンセル後に30日ボタンが再表示 🟡
+    });
+
+    // ----------------------------------------------------------------
+    // TC-F17: 連続でプリセットボタンを押した場合の挙動
+    // ----------------------------------------------------------------
+    it('API呼び出し中は2回目のプリセットボタンクリックが disabled でブロックされる', async () => {
+      // 【テスト目的】: 高速連続操作時のUI制御の一貫性を確認
+      // 【テスト内容】: ボタン無効化によるガードで二重送信が防止されることを検証
+      // 【期待される動作】: API完了前の2回目クリックは disabled により無視され、updateCard は1回だけ呼ばれる
+      // 🟡 要件定義 REQ-202・EDGE-002・データフロー図から妥当な推測
+
+      const user = userEvent.setup();
+
+      // 【テストデータ準備】: 1回目は保留、2回目の解消のために後から完了させる
+      let resolveFirst!: (value: Card) => void;
+      const firstCallPromise = new Promise<Card>((resolve) => {
+        resolveFirst = resolve;
+      });
+      mockUpdateCard.mockReturnValueOnce(firstCallPromise).mockResolvedValue(mockCard);
+
+      renderCardDetailPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('card-detail')).toBeInTheDocument();
+      });
+
+      // 【実際の処理実行】: 「1日」ボタンをクリック（API保留中）
+      await user.click(screen.getByTestId('preset-button-1'));
+
+      // 【結果検証の前提】: 1回目の API 呼び出し中はボタンが disabled になっている
+      await waitFor(() => {
+        expect(screen.getByTestId('preset-button-30')).toBeDisabled();
+      });
+
+      // 「30日」ボタンをクリックしようとする（disabled なので無視される）
+      await user.click(screen.getByTestId('preset-button-30'));
+
+      // 【結果検証】: updateCard は1回だけ呼ばれること（2回目は disabled でブロック）
+      expect(mockUpdateCard).toHaveBeenCalledTimes(1); // 【確認内容】: updateCard が1回だけ呼ばれている 🟡
+
+      // 【クリーンアップ】: API を完了させ、React 状態更新を act() でラップして警告を防ぐ
+      // 【act() の理由】: resolveFirst() により handleIntervalAdjust の finally が実行されて
+      //   setIsAdjusting(false), setCard(), setSuccessMessage() が呼ばれるため 🔵
+      await act(async () => {
+        resolveFirst(mockCard);
+      });
     });
   });
 });
