@@ -13,7 +13,7 @@ import { Error } from '@/components/common/Error';
 import { cardsApi } from '@/services/api';
 import type { GeneratedCardWithId, GenerateCardsRequest, CreateCardRequest } from '@/types';
 
-const MIN_CHARS = 10;
+const MIN_CHARS = 5;
 const MAX_CHARS = 2000;
 const MAX_GENERATION_TIME = 30000; // 30秒
 

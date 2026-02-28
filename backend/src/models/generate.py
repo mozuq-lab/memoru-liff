@@ -10,7 +10,7 @@ class GenerateCardsRequest(BaseModel):
 
     input_text: str = Field(
         ...,
-        min_length=10,
+        min_length=5,
         max_length=2000,
         description="Source text to generate cards from",
     )
@@ -36,8 +36,8 @@ class GenerateCardsRequest(BaseModel):
         stripped = v.strip()
         if not stripped:
             raise ValueError("Input text cannot be empty or whitespace only")
-        if len(stripped) < 10:
-            raise ValueError("Input text must be at least 10 characters")
+        if len(stripped) < 5:
+            raise ValueError("Input text must be at least 5 characters")
         return v
 
 
