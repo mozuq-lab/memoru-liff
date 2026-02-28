@@ -7,6 +7,9 @@ interface GradeButtonsProps {
   onReconfirmForgotten?: () => void;
 }
 
+/** 【設定定数】: disabled 状態のボタンに適用する共通スタイル 🔵 */
+const DISABLED_BUTTON_CLASSES = 'opacity-50 cursor-not-allowed';
+
 const GRADE_CONFIGS = [
   { grade: 0, bgClass: 'bg-red-50 hover:bg-red-100 active:bg-red-200 border-red-300', textClass: 'text-red-700', descClass: 'text-red-600', description: '全く覚えていない' },
   { grade: 1, bgClass: 'bg-orange-50 hover:bg-orange-100 active:bg-orange-200 border-orange-300', textClass: 'text-orange-700', descClass: 'text-orange-600', description: '間違えた' },
@@ -26,7 +29,7 @@ export const GradeButtons = ({ onGrade, onSkip, disabled, isReconfirmMode, onRec
             onClick={onReconfirmRemembered}
             disabled={disabled}
             className={`min-h-[44px] py-2 px-4 rounded-lg border border-green-300 bg-green-50 text-green-700 font-medium transition-colors hover:bg-green-100 active:bg-green-200 ${
-              disabled ? 'opacity-50 cursor-not-allowed' : ''
+              disabled ? DISABLED_BUTTON_CLASSES : ''
             }`}
           >
             覚えた
@@ -36,7 +39,7 @@ export const GradeButtons = ({ onGrade, onSkip, disabled, isReconfirmMode, onRec
             onClick={onReconfirmForgotten}
             disabled={disabled}
             className={`min-h-[44px] py-2 px-4 rounded-lg border border-red-300 bg-red-50 text-red-700 font-medium transition-colors hover:bg-red-100 active:bg-red-200 ${
-              disabled ? 'opacity-50 cursor-not-allowed' : ''
+              disabled ? DISABLED_BUTTON_CLASSES : ''
             }`}
           >
             覚えていない
@@ -57,7 +60,7 @@ export const GradeButtons = ({ onGrade, onSkip, disabled, isReconfirmMode, onRec
             disabled={disabled}
             aria-label={`${grade} - ${description}`}
             className={`flex flex-col items-center justify-center min-h-[44px] py-2 px-3 rounded-lg border transition-colors ${bgClass} ${
-              disabled ? 'opacity-50 cursor-not-allowed' : ''
+              disabled ? DISABLED_BUTTON_CLASSES : ''
             }`}
           >
             <span className={`font-bold text-lg ${textClass}`}>{grade}</span>
@@ -72,7 +75,7 @@ export const GradeButtons = ({ onGrade, onSkip, disabled, isReconfirmMode, onRec
           disabled={disabled}
           aria-label="スキップ"
           className={`w-full min-h-[44px] py-2 px-4 rounded-lg border border-gray-300 text-gray-600 text-sm font-medium transition-colors hover:bg-gray-100 active:bg-gray-200 ${
-            disabled ? 'opacity-50 cursor-not-allowed' : ''
+            disabled ? DISABLED_BUTTON_CLASSES : ''
           }`}
         >
           スキップ

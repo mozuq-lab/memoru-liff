@@ -4,6 +4,7 @@ import { FlipCard } from '@/components/FlipCard';
 import { GradeButtons } from '@/components/GradeButtons';
 import { ReviewProgress } from '@/components/ReviewProgress';
 import { ReviewComplete } from '@/components/ReviewComplete';
+import { ReconfirmBadge } from '@/components/ReconfirmBadge';
 import { Loading } from '@/components/common/Loading';
 import { Error } from '@/components/common/Error';
 import { cardsApi, reviewsApi } from '@/services/api';
@@ -367,11 +368,14 @@ export const ReviewPage = () => {
     );
   }
 
-  // Reconfirm mode: show the first card in reconfirmQueue
+  // 【再確認モード】: reconfirmQueue の先頭カードを再確認UI で表示する
   if (isReconfirmMode && reconfirmQueue.length > 0) {
     const reconfirmCard = reconfirmQueue[0];
     return (
       <div className="flex flex-col min-h-screen bg-gray-50">
+        <header className="p-4 flex items-center">
+          <ReconfirmBadge />
+        </header>
         <main className="flex-1 flex flex-col px-4">
           <div className="flex-1 flex items-center justify-center">
             <div className="w-full max-w-md">
@@ -398,7 +402,7 @@ export const ReviewPage = () => {
     );
   }
 
-  // Regrade mode: show the undone card for re-grading
+  // 【再採点モード】: Undo されたカードを再採点UI で表示する
   if (regradeCardIndex !== null) {
     const regradeResult = reviewResults[regradeCardIndex];
     const regradeCard = cards.find((c) => c.card_id === regradeResult.cardId);
