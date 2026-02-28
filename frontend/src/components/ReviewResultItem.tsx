@@ -65,7 +65,7 @@ export const ReviewResultItem = ({
 
       {/* Undo button */}
       <div className="shrink-0">
-        {result.type === 'graded' && onUndo && (
+        {(result.type === 'graded' || result.type === 'reconfirmed') && onUndo && (
           <button
             type="button"
             onClick={() => onUndo(index)}

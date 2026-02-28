@@ -7,7 +7,25 @@ import { ReviewComplete } from '@/components/ReviewComplete';
 import { Loading } from '@/components/common/Loading';
 import { Error } from '@/components/common/Error';
 import { cardsApi, reviewsApi } from '@/services/api';
-import type { DueCard, SessionCardResult } from '@/types';
+import type { DueCard, SessionCardResult, ReconfirmCard } from '@/types';
+
+/**
+ * 【ヘルパー関数】: ReconfirmCard オブジェクトを生成する
+ * 【再利用性】: handleGrade の通常モードと再採点モードの両方で同一ロジックが必要なため共通化
+ * 【単一責任】: カードデータと評価グレードから ReconfirmCard を構築する責任のみを持つ
+ * 🔵 信頼性レベル: architecture.md の ReconfirmCard 型定義より
+ * @param cardId - カード ID
+ * @param front - カード表面テキスト
+ * @param back - カード裏面テキスト（見つからない場合は空文字）
+ * @param grade - quality 評価値（0, 1, or 2）
+ * @returns ReconfirmCard オブジェクト
+ */
+const buildReconfirmCard = (cardId: string, front: string, back: string, grade: number): ReconfirmCard => ({
+  cardId,
+  front,
+  back,
+  originalGrade: grade,
+});
 
 export const ReviewPage = () => {
   const navigate = useNavigate();
@@ -24,6 +42,8 @@ export const ReviewPage = () => {
   const [regradeCardIndex, setRegradeCardIndex] = useState<number | null>(null);
   const [isUndoing, setIsUndoing] = useState(false);
   const [undoingIndex, setUndoingIndex] = useState<number | null>(null);
+  const [reconfirmQueue, setReconfirmQueue] = useState<ReconfirmCard[]>([]);
+  const [isReconfirmMode, setIsReconfirmMode] = useState(false);
 
   const fetchCards = useCallback(async () => {
     setIsLoading(true);
@@ -42,23 +62,59 @@ export const ReviewPage = () => {
     fetchCards();
   }, [fetchCards]);
 
-  const moveToNext = useCallback(() => {
+  /**
+   * 【機能概要】: 採点またはスキップ後に次のカードへ進む、またはセッションを完了する
+   * 【設計方針】: 通常カードを優先して消化し、全消化後に再確認キューへ遷移する
+   *              引数として最新のキュー状態とインデックスを受け取ることで
+   *              setState の非同期性による古い値参照を回避する
+   * 【状態遷移】:
+   *   通常カードが残る → currentIndex をインクリメント
+   *   通常カード全消化 + キュー非空 → isReconfirmMode = true
+   *   通常カード全消化 + キュー空  → isComplete = true
+   * 🔵 信頼性レベル: 要件定義書 REQ-502・dataflow.md より
+   * @param currentReconfirmQueue - 最新の再確認キュー（setState の非同期性回避のため引数で受け取る）
+   * @param currentCardIndex - 現在のカードインデックス
+   * @param currentCardsLength - 通常カードの総数
+   */
+  const moveToNext = useCallback((currentReconfirmQueue: ReconfirmCard[], currentCardIndex: number, currentCardsLength: number) => {
     setIsFlipped(false);
-    if (currentIndex >= cards.length - 1) {
-      setIsComplete(true);
+    if (currentCardIndex >= currentCardsLength - 1) {
+      // 【通常カード全消化】: 再確認キューの有無でセッション継続か完了かを決定
+      if (currentReconfirmQueue.length > 0) {
+        setIsReconfirmMode(true);
+      } else {
+        setIsComplete(true);
+      }
     } else {
+      // 【次の通常カードへ】: インデックスをインクリメント
       setCurrentIndex((prev) => prev + 1);
     }
-  }, [currentIndex, cards.length]);
+  }, []);
 
+  /**
+   * 【機能概要】: カードの採点を送信し、結果に応じて次のカードへ進む
+   * 【設計方針】: 再採点モード (regradeCardIndex !== null) と通常モードで処理を分岐
+   * 【再確認キュー判定】: quality 0-2 の場合のみ reconfirmQueue にカードを追加する
+   *                       (SM-2 アルゴリズムで最も記憶定着が低い評価に対応)
+   * 【保守性】: ReconfirmCard 作成ロジックは buildReconfirmCard ヘルパーに集約
+   * 🔵 信頼性レベル: 要件定義書 REQ-001, REQ-103・dataflow.md より
+   * @param grade - quality 評価値（0-5）
+   */
   const handleGrade = useCallback(async (grade: number) => {
-    // Regrade mode: re-submit for the undone card
+    // 【再採点モード】: Undo された採点を再送信する
     if (regradeCardIndex !== null) {
       const result = reviewResults[regradeCardIndex];
       setIsSubmitting(true);
       setError(null);
       try {
         const response = await reviewsApi.submitReview(result.cardId, grade);
+
+        // 【再確認キュー追加判定】: quality 0-2 の場合のみキューに追加
+        if (grade < 3) {
+          const back = cards.find((c) => c.card_id === result.cardId)?.back ?? '';
+          setReconfirmQueue((prev) => [...prev, buildReconfirmCard(result.cardId, result.front, back, grade)]);
+        }
+
         setReviewResults((prev) =>
           prev.map((r, i) =>
             i === regradeCardIndex
@@ -77,12 +133,21 @@ export const ReviewPage = () => {
       return;
     }
 
-    // Normal mode
+    // 【通常モード】: 現在表示中のカードを採点する
     const currentCard = cards[currentIndex];
     setIsSubmitting(true);
     setError(null);
     try {
       const response = await reviewsApi.submitReview(currentCard.card_id, grade);
+
+      // 【再確認キュー追加判定】: quality 0-2 の場合のみキューに追加
+      let newReconfirmQueue = reconfirmQueue;
+      if (grade < 3) {
+        const newCard = buildReconfirmCard(currentCard.card_id, currentCard.front, currentCard.back, grade);
+        newReconfirmQueue = [...reconfirmQueue, newCard];
+        setReconfirmQueue(newReconfirmQueue);
+      }
+
       setReviewResults((prev) => [
         ...prev,
         {
@@ -94,14 +159,20 @@ export const ReviewPage = () => {
         },
       ]);
       setReviewedCount((prev) => prev + 1);
-      moveToNext();
+      moveToNext(newReconfirmQueue, currentIndex, cards.length);
     } catch {
       setError('採点の送信に失敗しました');
     } finally {
       setIsSubmitting(false);
     }
-  }, [cards, currentIndex, moveToNext, regradeCardIndex, reviewResults]);
+  }, [cards, currentIndex, moveToNext, regradeCardIndex, reviewResults, reconfirmQueue]);
 
+  /**
+   * 【機能概要】: 現在のカードをスキップして次のカードへ進む
+   * 【設計方針】: スキップカードは reconfirmQueue に追加しない（SM-2 評価なし）
+   *              結果には 'skipped' type で記録する
+   * 🔵 信頼性レベル: 既存実装パターンより
+   */
   const handleSkip = useCallback(() => {
     const currentCard = cards[currentIndex];
     setReviewResults((prev) => [
@@ -112,9 +183,69 @@ export const ReviewPage = () => {
         type: 'skipped' as const,
       },
     ]);
-    moveToNext();
-  }, [cards, currentIndex, moveToNext]);
+    moveToNext(reconfirmQueue, currentIndex, cards.length);
+  }, [cards, currentIndex, moveToNext, reconfirmQueue]);
 
+  /**
+   * 【機能概要】: 再確認モードで「覚えた」を選択したときの処理
+   * 【改善内容】: setState updater 関数内でのネストされた setState 呼び出しを分離し、
+   *              React の推奨パターンに沿った実装に変更
+   * 【設計方針】: currentReconfirmCard を先頭から取り出し、残りキューの状態に応じて
+   *              セッション完了 or 次の再確認カードへ遷移
+   * 【API呼び出し】: なし（フロントエンド state のみで管理）
+   * 🔵 信頼性レベル: 要件定義書 REQ-003・architecture.md より
+   */
+  const handleReconfirmRemembered = useCallback(() => {
+    if (reconfirmQueue.length === 0) return;
+
+    const [current, ...rest] = reconfirmQueue;
+
+    // 【先頭カードをキューから除外】: スライスした残りキューをセット
+    setReconfirmQueue(rest);
+
+    // 【結果を「再確認済み＝覚えた」に更新】: API 呼び出しなし
+    setReviewResults((results) =>
+      results.map((r) =>
+        r.cardId === current.cardId
+          ? { ...r, type: 'reconfirmed' as const, reconfirmResult: 'remembered' as const }
+          : r
+      )
+    );
+
+    // 【セッション進行判定】: 残りキューが空なら完了、まだあれば再確認モード継続
+    if (rest.length === 0) {
+      setIsReconfirmMode(false);
+      setIsComplete(true);
+    }
+
+    setIsFlipped(false);
+  }, [reconfirmQueue]);
+
+  /**
+   * 【機能概要】: 再確認モードで「覚えていない」を選択したときの処理
+   * 【設計方針】: 先頭カードをキュー末尾に再追加することで、他のカードを先に表示してから
+   *              再度このカードに戻るサイクルを実現する
+   * 【API呼び出し】: なし（SM-2 の next_review_at は最初の quality 0-2 評価時に設定済み）
+   * 🔵 信頼性レベル: 要件定義書 REQ-004・dataflow.md より
+   */
+  const handleReconfirmForgotten = useCallback(() => {
+    // 【キュー先頭カードを末尾に再追加】: slice(1) で先頭を除いた残りに末尾追加
+    setReconfirmQueue((prev) => {
+      const [current, ...rest] = prev;
+      return [...rest, current];
+    });
+    setIsFlipped(false);
+  }, []);
+
+  /**
+   * 【機能概要】: 完了画面から特定カードの採点を取り消す（Undo）
+   * 【設計方針】: Undo 後は再採点モードに移行し、評価のやり直しを可能にする
+   * 【再確認キュー連携】: Undo 対象カードが reconfirmQueue に存在する場合は除去する
+   *                       (quality 3-5 の Undo の場合はキューにないため filter が空振りするが安全)
+   * 【isReconfirmMode リセット】: 再採点は通常の6段階評価のため、再確認2択UI にしない
+   * 🔵 信頼性レベル: 要件定義書 REQ-404・ヒアリング Q4 回答より
+   * @param index - reviewResults 内の対象カードのインデックス
+   */
   const handleUndo = useCallback(async (index: number) => {
     const result = reviewResults[index];
     setIsUndoing(true);
@@ -122,14 +253,21 @@ export const ReviewPage = () => {
     setError(null);
     try {
       await reviewsApi.undoReview(result.cardId);
+
+      // 【再確認キューから除去】: 対象カードが存在しない場合も filter は安全に空振りする
+      setReconfirmQueue((prev) => prev.filter((c) => c.cardId !== result.cardId));
+
       setReviewResults((prev) =>
         prev.map((r, i) =>
           i === index ? { ...r, type: 'undone' as const } : r
         )
       );
       setReviewedCount((prev) => Math.max(0, prev - 1));
+
+      // 【再採点モードへ移行】: isReconfirmMode をリセットして通常の採点 UI を表示
       setRegradeCardIndex(index);
       setIsComplete(false);
+      setIsReconfirmMode(false);
       setIsFlipped(false);
     } catch {
       setError('取り消しに失敗しました');
@@ -225,6 +363,37 @@ export const ReviewPage = () => {
           isUndoing={isUndoing}
           undoingIndex={undoingIndex}
         />
+      </div>
+    );
+  }
+
+  // Reconfirm mode: show the first card in reconfirmQueue
+  if (isReconfirmMode && reconfirmQueue.length > 0) {
+    const reconfirmCard = reconfirmQueue[0];
+    return (
+      <div className="flex flex-col min-h-screen bg-gray-50">
+        <main className="flex-1 flex flex-col px-4">
+          <div className="flex-1 flex items-center justify-center">
+            <div className="w-full max-w-md">
+              <FlipCard
+                front={reconfirmCard.front}
+                back={reconfirmCard.back}
+                isFlipped={isFlipped}
+                onFlip={handleFlip}
+              />
+            </div>
+          </div>
+
+          <div className="pb-6 min-h-[200px]">
+            <GradeButtons
+              onGrade={handleGrade}
+              disabled={isSubmitting}
+              isReconfirmMode={true}
+              onReconfirmRemembered={handleReconfirmRemembered}
+              onReconfirmForgotten={handleReconfirmForgotten}
+            />
+          </div>
+        </main>
       </div>
     );
   }

@@ -93,15 +93,43 @@ export interface UndoReviewResponse {
   undone_at: string;
 }
 
-// Session result types
-export type SessionCardResultType = 'graded' | 'skipped' | 'undone';
+// セッション結果の型定義
+// 【SessionCardResultType】: 各カードの処理結果を表すユニオン型
+// - 'graded'     : SM-2 API で採点済み
+// - 'skipped'    : スキップされた（SM-2 評価なし）
+// - 'undone'     : 取り消し済み（再採点待ち）
+// - 'reconfirmed': 再確認ループで「覚えた」として確認済み（TASK-0081 追加）
+// 🔵 信頼性レベル: 要件定義書 REQ-001, REQ-501 より
+export type SessionCardResultType = 'graded' | 'skipped' | 'undone' | 'reconfirmed';
 
+/**
+ * 【SessionCardResult】: 1枚のカードのセッション処理結果を表すインターフェース
+ * - grade, nextReviewDate は 'graded' / 'reconfirmed' 時に設定
+ * - reconfirmResult は 'reconfirmed' 時に設定（現在は 'remembered' のみ）
+ * 🔵 信頼性レベル: 要件定義書 REQ-003, REQ-501 より
+ */
 export interface SessionCardResult {
   cardId: string;
   front: string;
   grade?: number;
   nextReviewDate?: string;
   type: SessionCardResultType;
+  // 【再確認結果】: 'reconfirmed' type のカードのみ設定される（TASK-0081 追加）
+  reconfirmResult?: 'remembered';
+}
+
+/**
+ * 【ReconfirmCard】: 再確認キューに入れるカードの型（TASK-0081 追加）
+ * quality 0-2 で評価されたカードを再確認ループで表示するために使用する
+ * セッション内フロントエンド state のみで管理（バックエンド API 呼び出しなし）
+ * 🔵 信頼性レベル: 要件定義書 REQ-001, REQ-201・architecture.md より
+ */
+export interface ReconfirmCard {
+  cardId: string;
+  front: string;
+  back: string;
+  // 【元の評価値】: quality 0, 1, or 2 のいずれか（SM-2 は初回評価時に設定済み）
+  originalGrade: number;
 }
 
 export interface DueCard {

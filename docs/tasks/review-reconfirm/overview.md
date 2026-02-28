@@ -41,7 +41,7 @@
 
 ### タスク一覧
 
-- [ ] [TASK-0081: 型定義拡張 + ReviewPageコアロジック実装](TASK-0081.md) - 4h (TDD) 🔵
+- [x] [TASK-0081: 型定義拡張 + ReviewPageコアロジック実装](TASK-0081.md) - 4h (TDD) 🔵
 - [ ] [TASK-0082: UIコンポーネント実装](TASK-0082.md) - 4h (TDD) 🔵
 - [ ] [TASK-0083: 統合テスト・動作確認](TASK-0083.md) - 2h (TDD) 🔵
 

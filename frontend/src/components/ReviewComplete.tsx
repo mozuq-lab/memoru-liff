@@ -17,7 +17,7 @@ export const ReviewComplete = ({
   isUndoing = false,
   undoingIndex = null,
 }: ReviewCompleteProps) => {
-  const gradedCount = results.filter((r) => r.type === 'graded').length;
+  const gradedCount = results.filter((r) => r.type === 'graded' || r.type === 'reconfirmed').length;
   const displayCount = gradedCount > 0 ? gradedCount : reviewedCount;
 
   return (

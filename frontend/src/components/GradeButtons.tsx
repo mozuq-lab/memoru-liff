@@ -2,6 +2,9 @@ interface GradeButtonsProps {
   onGrade: (grade: number) => void;
   onSkip?: () => void;
   disabled: boolean;
+  isReconfirmMode?: boolean;
+  onReconfirmRemembered?: () => void;
+  onReconfirmForgotten?: () => void;
 }
 
 const GRADE_CONFIGS = [
@@ -13,7 +16,36 @@ const GRADE_CONFIGS = [
   { grade: 5, bgClass: 'bg-green-50 hover:bg-green-100 active:bg-green-200 border-green-300', textClass: 'text-green-700', descClass: 'text-green-600', description: '完璧' },
 ] as const;
 
-export const GradeButtons = ({ onGrade, onSkip, disabled }: GradeButtonsProps) => {
+export const GradeButtons = ({ onGrade, onSkip, disabled, isReconfirmMode, onReconfirmRemembered, onReconfirmForgotten }: GradeButtonsProps) => {
+  if (isReconfirmMode) {
+    return (
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={onReconfirmRemembered}
+            disabled={disabled}
+            className={`min-h-[44px] py-2 px-4 rounded-lg border border-green-300 bg-green-50 text-green-700 font-medium transition-colors hover:bg-green-100 active:bg-green-200 ${
+              disabled ? 'opacity-50 cursor-not-allowed' : ''
+            }`}
+          >
+            覚えた
+          </button>
+          <button
+            type="button"
+            onClick={onReconfirmForgotten}
+            disabled={disabled}
+            className={`min-h-[44px] py-2 px-4 rounded-lg border border-red-300 bg-red-50 text-red-700 font-medium transition-colors hover:bg-red-100 active:bg-red-200 ${
+              disabled ? 'opacity-50 cursor-not-allowed' : ''
+            }`}
+          >
+            覚えていない
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-3 gap-2">
