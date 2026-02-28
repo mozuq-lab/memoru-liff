@@ -82,14 +82,14 @@ description: "Task list for 001-card-search feature implementation"
 
 ### TDD テスト（先に作成し FAIL を確認すること）⚠️
 
-- [ ] T014 [P] [US2] `frontend/src/components/__tests__/FilterChips.test.tsx` を作成する（FC-001〜FC-004 の 4 ケース: 4チップ表示, aria-pressed, onChange 呼び出し, 選択状態 UI）
-- [ ] T015 [P] [US2] `frontend/src/hooks/__tests__/useCardSearch.test.ts` に reviewStatus フィルターのテストケースを追記する（all=全件, new=repetitions===0, due=期日超過, learning=学習中, キーワードとの AND）
+- [X] T014 [P] [US2] `frontend/src/components/__tests__/FilterChips.test.tsx` を作成する（FC-001〜FC-004 の 4 ケース: 4チップ表示, aria-pressed, onChange 呼び出し, 選択状態 UI）
+- [X] T015 [P] [US2] `frontend/src/hooks/__tests__/useCardSearch.test.ts` に reviewStatus フィルターのテストケースを追記する（all=全件, new=repetitions===0, due=期日超過, learning=学習中, キーワードとの AND）
 
 ### 実装
 
-- [ ] T016 [P] [US2] `frontend/src/components/FilterChips.tsx` を新規作成する（`data-testid="filter-chip-all/due/learning/new"`, `aria-pressed`, Tailwind で選択状態スタイル）
-- [ ] T017 [US2] `frontend/src/hooks/useCardSearch.ts` に `reviewStatus` フィルターロジックを追加する（`repetitions === 0` → new, `next_review_at <= today` → due, それ以外 → learning, `useMemo` の依存配列に `reviewStatus` を追加）
-- [ ] T018 [US2] `frontend/src/pages/CardsPage.tsx` に `FilterChips` を組み込む（`reviewStatus`, `setReviewStatus` を useCardSearch から取得して渡す）
+- [X] T016 [P] [US2] `frontend/src/components/FilterChips.tsx` を新規作成する（`data-testid="filter-chip-all/due/learning/new"`, `aria-pressed`, Tailwind で選択状態スタイル）
+- [X] T017 [US2] `frontend/src/hooks/useCardSearch.ts` に `reviewStatus` フィルターロジックを追加する（`repetitions === 0` → new, `next_review_at <= today` → due, それ以外 → learning, `useMemo` の依存配列に `reviewStatus` を追加）
+- [X] T018 [US2] `frontend/src/pages/CardsPage.tsx` に `FilterChips` を組み込む（`reviewStatus`, `setReviewStatus` を useCardSearch から取得して渡す）
 
 **Checkpoint**: この時点で US1 + US2 が両方独立して動作可能であること
 

@@ -11,6 +11,7 @@ import { Navigation } from '@/components/Navigation';
 import { Loading } from '@/components/common/Loading';
 import { Error } from '@/components/common/Error';
 import { SearchBar } from '@/components/SearchBar';
+import { FilterChips } from '@/components/FilterChips';
 import { useCardsContext } from '@/contexts/CardsContext';
 import { useCardSearch } from '@/hooks/useCardSearch';
 
@@ -30,7 +31,7 @@ export const CardsPage = () => {
   const activeTab: TabType = searchParams.get('tab') === 'due' ? 'due' : 'all';
 
   const tabCards = activeTab === 'due' ? dueCards : cards;
-  const { query, setQuery, filteredCards } = useCardSearch({ cards: tabCards });
+  const { query, setQuery, reviewStatus, setReviewStatus, filteredCards } = useCardSearch({ cards: tabCards });
 
   const setActiveTab = (tab: TabType) => {
     if (tab === 'due') {
@@ -102,6 +103,10 @@ export const CardsPage = () => {
         {/* 検索バー */}
         <div className="mt-2">
           <SearchBar value={query} onChange={setQuery} />
+        </div>
+        {/* 復習状態フィルター */}
+        <div className="mt-2">
+          <FilterChips value={reviewStatus} onChange={setReviewStatus} />
         </div>
       </header>
 
