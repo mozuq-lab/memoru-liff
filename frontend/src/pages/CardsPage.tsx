@@ -10,7 +10,9 @@ import { CardList } from '@/components/CardList';
 import { Navigation } from '@/components/Navigation';
 import { Loading } from '@/components/common/Loading';
 import { Error } from '@/components/common/Error';
+import { SearchBar } from '@/components/SearchBar';
 import { useCardsContext } from '@/contexts/CardsContext';
+import { useCardSearch } from '@/hooks/useCardSearch';
 
 type TabType = 'due' | 'all';
 
@@ -26,6 +28,9 @@ export const CardsPage = () => {
   );
 
   const activeTab: TabType = searchParams.get('tab') === 'due' ? 'due' : 'all';
+
+  const tabCards = activeTab === 'due' ? dueCards : cards;
+  const { query, setQuery, filteredCards } = useCardSearch({ cards: tabCards });
 
   const setActiveTab = (tab: TabType) => {
     if (tab === 'due') {
@@ -61,7 +66,7 @@ export const CardsPage = () => {
     }
   }, [activeTab, fetchCards, fetchDueCards]);
 
-  const displayCards = activeTab === 'due' ? dueCards : cards;
+  const displayCards = filteredCards;
 
   // 【ローディング表示】
   if (isLoading) {
@@ -94,6 +99,10 @@ export const CardsPage = () => {
         <p className="text-sm text-gray-600" data-testid="card-count">
           {displayCards.length}枚のカード
         </p>
+        {/* 検索バー */}
+        <div className="mt-2">
+          <SearchBar value={query} onChange={setQuery} />
+        </div>
       </header>
 
       {/* タブフィルタ */}
@@ -183,7 +192,7 @@ export const CardsPage = () => {
             )}
           </div>
         ) : (
-          <CardList cards={displayCards} />
+          <CardList cards={displayCards} highlightQuery={query} />
         )}
       </main>
 

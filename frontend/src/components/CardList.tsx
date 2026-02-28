@@ -7,20 +7,23 @@
 import { Link } from 'react-router-dom';
 import type { Card } from '@/types';
 import { formatDueDate, getDueStatus } from '@/utils/date';
+import { HighlightText } from './HighlightText';
 
 interface CardListProps {
   cards: Card[];
+  /** 検索キーワード（HighlightText に渡す）。省略可 */
+  highlightQuery?: string;
 }
 
 /**
  * 【機能概要】: カードリストコンポーネント
  * 【実装方針】: カードをリスト形式で表示
  */
-export const CardList = ({ cards }: CardListProps) => {
+export const CardList = ({ cards, highlightQuery = '' }: CardListProps) => {
   return (
     <div className="space-y-3" role="list" aria-label="カード一覧">
       {cards.map((card) => (
-        <CardListItem key={card.card_id} card={card} />
+        <CardListItem key={card.card_id} card={card} highlightQuery={highlightQuery} />
       ))}
     </div>
   );
@@ -28,13 +31,14 @@ export const CardList = ({ cards }: CardListProps) => {
 
 interface CardListItemProps {
   card: Card;
+  highlightQuery?: string;
 }
 
 /**
  * 【機能概要】: カードリストアイテムコンポーネント
  * 【実装方針】: 個別カードの表示とリンク
  */
-const CardListItem = ({ card }: CardListItemProps) => {
+const CardListItem = ({ card, highlightQuery = '' }: CardListItemProps) => {
   const dueStatus = card.next_review_at ? getDueStatus(card.next_review_at) : null;
 
   // ステータスに応じた色設定
@@ -55,10 +59,10 @@ const CardListItem = ({ card }: CardListItemProps) => {
       <div className="flex justify-between items-start">
         <div className="flex-1 min-w-0">
           <p className="text-gray-800 font-medium truncate" data-testid="card-front">
-            {card.front}
+            <HighlightText text={card.front} query={highlightQuery} />
           </p>
           <p className="text-gray-500 text-sm mt-1 truncate" data-testid="card-back">
-            {card.back}
+            <HighlightText text={card.back} query={highlightQuery} />
           </p>
         </div>
         {dueStatus && (

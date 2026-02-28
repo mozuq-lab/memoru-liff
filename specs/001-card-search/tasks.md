@@ -20,7 +20,7 @@ description: "Task list for 001-card-search feature implementation"
 
 **Purpose**: テスト環境の確認と作業ブランチ確認
 
-- [ ] T001 `frontend/` で `npm run test` が通ることを確認し、テスト実行環境が正常であることを検証する
+- [X] T001 `frontend/` で `npm run test` が通ることを確認し、テスト実行環境が正常であることを検証する
 
 ---
 
@@ -30,10 +30,10 @@ description: "Task list for 001-card-search feature implementation"
 
 **⚠️ CRITICAL**: このフェーズが完了するまで US1〜US3 の実装を開始してはいけない
 
-- [ ] T002 `frontend/src/types/card.ts` に `ReviewStatusFilter` 型を追加する（`'all' | 'new' | 'due' | 'learning'`）
-- [ ] T003 `frontend/src/types/card.ts` に `SortByOption` 型を追加する（`'created_at' | 'next_review_at' | 'ease_factor'`）
-- [ ] T004 `frontend/src/types/card.ts` に `SortOrder` 型を追加する（`'asc' | 'desc'`）
-- [ ] T005 `frontend/src/types/card.ts` に `CardFilterState` インターフェースを追加する（query, reviewStatus, sortBy, sortOrder）
+- [X] T002 `frontend/src/types/card.ts` に `ReviewStatusFilter` 型を追加する（`'all' | 'new' | 'due' | 'learning'`）
+- [X] T003 `frontend/src/types/card.ts` に `SortByOption` 型を追加する（`'created_at' | 'next_review_at' | 'ease_factor'`）
+- [X] T004 `frontend/src/types/card.ts` に `SortOrder` 型を追加する（`'asc' | 'desc'`）
+- [X] T005 `frontend/src/types/card.ts` に `CardFilterState` インターフェースを追加する（query, reviewStatus, sortBy, sortOrder）
 
 **Checkpoint**: `npm run type-check` が通ること → ユーザーストーリー実装開始可能
 
@@ -54,17 +54,17 @@ description: "Task list for 001-card-search feature implementation"
 
 > **NOTE: 以下のテストを先に記述し、すべて RED（失敗）であることを確認してから実装に進む**
 
-- [ ] T006 [P] [US1] `frontend/src/components/__tests__/HighlightText.test.tsx` を作成する（HT-001〜HT-006 の 6 ケース: 空クエリ, mark タグ, 大小文字無視, 全角半角無視, XSS エスケープ, 複数マッチ）
-- [ ] T007 [P] [US1] `frontend/src/hooks/__tests__/useCardSearch.test.ts` を作成する（クエリフィルター: 空クエリ全件返す, 部分一致, 全角half-width 正規化, useMemo が依存変化時のみ再計算）
-- [ ] T008 [P] [US1] `frontend/src/components/__tests__/SearchBar.test.tsx` を作成する（SB-001〜SB-008 の 8 ケース: 表示, onChange 呼び出し, クリアボタン表示/非表示/押下, maxLength, data-testid）
+- [X] T006 [P] [US1] `frontend/src/components/__tests__/HighlightText.test.tsx` を作成する（HT-001〜HT-006 の 6 ケース: 空クエリ, mark タグ, 大小文字無視, 全角半角無視, XSS エスケープ, 複数マッチ）
+- [X] T007 [P] [US1] `frontend/src/hooks/__tests__/useCardSearch.test.ts` を作成する（クエリフィルター: 空クエリ全件返す, 部分一致, 全角half-width 正規化, useMemo が依存変化時のみ再計算）
+- [X] T008 [P] [US1] `frontend/src/components/__tests__/SearchBar.test.tsx` を作成する（SB-001〜SB-008 の 8 ケース: 表示, onChange 呼び出し, クリアボタン表示/非表示/押下, maxLength, data-testid）
 
 ### 実装（テストが RED であることを確認後に実装し GREEN にする）
 
-- [ ] T009 [P] [US1] `frontend/src/components/HighlightText.tsx` を新規作成する（`text.normalize('NFKC').toLowerCase()` で正規化, `<mark>` タグ分割, `dangerouslySetInnerHTML` 不使用）
-- [ ] T010 [P] [US1] `frontend/src/hooks/useCardSearch.ts` を新規作成する（クエリフィルターのみ実装: `useMemo`, `normalize('NFKC').toLowerCase()`, 初期値 `query: ''`）
-- [ ] T011 [P] [US1] `frontend/src/components/SearchBar.tsx` を新規作成する（入力フィールド, クリアボタン, `data-testid="search-bar-input"`, `data-testid="search-bar-clear"`, `maxLength={100}`）
-- [ ] T012 [US1] `frontend/src/components/CardList.tsx` を更新する（`highlightQuery?: string` prop を追加し、CardListItem の front/back テキストを `HighlightText` コンポーネントで表示する）
-- [ ] T013 [US1] `frontend/src/pages/CardsPage.tsx` に `useCardSearch` フックと `SearchBar` を組み込む（`displayCards` を `filteredCards` に差し替え, `CardList` に `highlightQuery={query}` を渡す）
+- [X] T009 [P] [US1] `frontend/src/components/HighlightText.tsx` を新規作成する（`text.normalize('NFKC').toLowerCase()` で正規化, `<mark>` タグ分割, `dangerouslySetInnerHTML` 不使用）
+- [X] T010 [P] [US1] `frontend/src/hooks/useCardSearch.ts` を新規作成する（クエリフィルターのみ実装: `useMemo`, `normalize('NFKC').toLowerCase()`, 初期値 `query: ''`）
+- [X] T011 [P] [US1] `frontend/src/components/SearchBar.tsx` を新規作成する（入力フィールド, クリアボタン, `data-testid="search-bar-input"`, `data-testid="search-bar-clear"`, `maxLength={100}`）
+- [X] T012 [US1] `frontend/src/components/CardList.tsx` を更新する（`highlightQuery?: string` prop を追加し、CardListItem の front/back テキストを `HighlightText` コンポーネントで表示する）
+- [X] T013 [US1] `frontend/src/pages/CardsPage.tsx` に `useCardSearch` フックと `SearchBar` を組み込む（`displayCards` を `filteredCards` に差し替え, `CardList` に `highlightQuery={query}` を渡す）
 
 **Checkpoint**: この時点で US1 が単独で動作・テスト可能であること（`npm test`全通過, Vitest coverage US1 ファイル 80%+ ）
 
