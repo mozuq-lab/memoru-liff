@@ -60,27 +60,27 @@
 
 ## Phase 2: フロントエンド基盤
 
-- [ ] 5. フロントエンド型定義・API サービス・Context
-- [ ] 5.1 `frontend/src/types/deck.ts` を作成し、`types/index.ts` に re-export を追加 (P)
+- [x] 5. フロントエンド型定義・API サービス・Context
+- [x] 5.1 `frontend/src/types/deck.ts` を作成し、`types/index.ts` に re-export を追加 (P)
   - `Deck` interface: `deck_id`, `user_id`, `name`, `description?`, `color?`, `card_count`, `due_count`, `created_at`, `updated_at?`
   - `CreateDeckRequest` interface: `name`, `description?`, `color?`
   - `UpdateDeckRequest` interface: `name?`, `description?`, `color?`
   - `DeckListResponse` interface: `decks: Deck[]`, `total: number`
   - `types/index.ts` に `export type * from './deck';` を追加
   - _Requirements: 8.4_
-- [ ] 5.2 `frontend/src/services/api.ts` にデッキ API メソッドを追加 (P)
+- [x] 5.2 `frontend/src/services/api.ts` にデッキ API メソッドを追加 (P)
   - `ApiClient` クラスに `getDecks()`, `createDeck()`, `updateDeck()`, `deleteDeck()` メソッドを追加
   - `decksApi` ファサードオブジェクトを export
   - `getDueCards()` に `deckId` オプションパラメータを追加（`?deck_id=xxx` クエリパラメータ付与）
   - _Requirements: 8.3_
-- [ ] 5.3 `frontend/src/contexts/DecksContext.tsx` を作成し、`contexts/index.ts` に追加
+- [x] 5.3 `frontend/src/contexts/DecksContext.tsx` を作成し、`contexts/index.ts` に追加
   - `DecksContextType`: `decks`, `isLoading`, `error`, `fetchDecks`, `createDeck`, `updateDeck`, `deleteDeck`
   - `DecksProvider`: `useState` / `useCallback` / `useMemo` パターン（CardsContext に準拠）
   - `useDecksContext` フック
   - CUD 操作後に `fetchDecks()` を自動再取得
   - `contexts/index.ts` に `DecksProvider`, `useDecksContext` を追加
   - _Requirements: 8.1, 8.2, 8.5_
-- [ ] 5.4 `App.tsx` に `DecksProvider` と `/decks` ルートを追加
+- [x] 5.4 `App.tsx` に `DecksProvider` と `/decks` ルートを追加
   - `DecksProvider` を `CardsProvider` と並列でラップ（`AuthProvider` → `DecksProvider` + `CardsProvider`）
   - `<Route path="/decks" element={<ProtectedRoute><DecksPage /></ProtectedRoute>} />` を追加
   - `import { DecksPage } from '@/pages'` を追加
@@ -89,14 +89,14 @@
 
 ## Phase 3: フロントエンド UI
 
-- [ ] 6. デッキ管理画面
-- [ ] 6.1 `frontend/src/components/DeckFormModal.tsx` を作成 (P)
+- [x] 6. デッキ管理画面
+- [x] 6.1 `frontend/src/components/DeckFormModal.tsx` を作成 (P)
   - Props: `mode: 'create' | 'edit'`, `deck?: Deck`, `isOpen: boolean`, `onClose: () => void`, `onSubmit: (data: CreateDeckRequest | UpdateDeckRequest) => Promise<void>`
   - フィールド: デッキ名（必須、1〜100 文字）、説明（任意）、カラー（プリセットカラーパレットから選択）
   - モーダルオーバーレイ、閉じるボタン、キャンセル/保存ボタン
   - バリデーション: クライアントサイドでデッキ名の空チェック
   - _Requirements: 4.2, 4.4_
-- [ ] 6.2 `frontend/src/pages/DecksPage.tsx` を作成
+- [x] 6.2 `frontend/src/pages/DecksPage.tsx` を作成
   - デッキ一覧表示: カード数・due 数バッジ、カラーインジケーター
   - 「デッキを作成」ボタン → DeckFormModal (create モード)
   - デッキカードタップ → `/cards?deck_id=xxx` に遷移

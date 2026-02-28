@@ -10,6 +10,10 @@ import type {
   User,
   UpdateUserRequest,
   LinkLineRequest,
+  Deck,
+  CreateDeckRequest,
+  UpdateDeckRequest,
+  DeckListResponse,
 } from '@/types';
 import { authService } from './auth';
 
@@ -118,9 +122,12 @@ class ApiClient {
     });
   }
 
-  async getDueCards(limit?: number): Promise<DueCardsResponse> {
-    const params = limit ? `?limit=${limit}` : '';
-    return this.request<DueCardsResponse>(`/cards/due${params}`);
+  async getDueCards(limit?: number, deckId?: string): Promise<DueCardsResponse> {
+    const searchParams = new URLSearchParams();
+    if (limit) searchParams.set('limit', String(limit));
+    if (deckId) searchParams.set('deck_id', deckId);
+    const qs = searchParams.toString();
+    return this.request<DueCardsResponse>(`/cards/due${qs ? `?${qs}` : ''}`);
   }
 
   async getDueCount(): Promise<number> {
@@ -166,6 +173,32 @@ class ApiClient {
       method: 'POST',
     });
   }
+
+  // デッキ API
+  async getDecks(): Promise<Deck[]> {
+    const response = await this.request<DeckListResponse>('/decks');
+    return response.decks;
+  }
+
+  async createDeck(data: CreateDeckRequest): Promise<Deck> {
+    return this.request<Deck>('/decks', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateDeck(id: string, data: UpdateDeckRequest): Promise<Deck> {
+    return this.request<Deck>(`/decks/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteDeck(id: string): Promise<void> {
+    await this.request<void>(`/decks/${id}`, {
+      method: 'DELETE',
+    });
+  }
 }
 
 export const apiClient = new ApiClient();
@@ -177,8 +210,15 @@ export const cardsApi = {
   updateCard: (id: string, data: UpdateCardRequest) => apiClient.updateCard(id, data),
   deleteCard: (id: string) => apiClient.deleteCard(id),
   generateCards: (data: GenerateCardsRequest, options?: { signal?: AbortSignal }) => apiClient.generateCards(data, options),
-  getDueCards: (limit?: number) => apiClient.getDueCards(limit),
+  getDueCards: (limit?: number, deckId?: string) => apiClient.getDueCards(limit, deckId),
   getDueCount: () => apiClient.getDueCount(),
+};
+
+export const decksApi = {
+  getDecks: () => apiClient.getDecks(),
+  createDeck: (data: CreateDeckRequest) => apiClient.createDeck(data),
+  updateDeck: (id: string, data: UpdateDeckRequest) => apiClient.updateDeck(id, data),
+  deleteDeck: (id: string) => apiClient.deleteDeck(id),
 };
 
 export const reviewsApi = {
