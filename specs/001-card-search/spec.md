@@ -1,11 +1,11 @@
 # Feature Specification: カード検索
 
-**Feature Branch**: `001-card-search`  
-**Created**: 2026-02-28  
-**Status**: Draft  
+**Feature Branch**: `001-card-search`
+**Created**: 2026-02-28
+**Status**: Draft
 **Input**: User description: "カード検索: カードが増えた際に、キーワードで素早く目的のカードを見つけられる機能"
 
-## User Scenarios & Testing *(mandatory)*
+## User Scenarios & Testing _(mandatory)_
 
 ### User Story 1 - キーワード検索でカードを素早く見つける (Priority: P1)
 
@@ -65,7 +65,7 @@
 - 全角・半角の区別は区別しない（例：「ABC」と「ＡＢＣ」で同じ結果を返す）
 - カードが多数（500枚以上）存在する場合でも、フィルタリング結果が即座（300ms以内）に表示される
 
-## Requirements *(mandatory)*
+## Requirements _(mandatory)_
 
 ### Functional Requirements
 
@@ -94,7 +94,7 @@
 - デッキによるフィルタリングは「カテゴリ（デッキ）管理」機能（別フィーチャー）実装後に追加可能な拡張ポイントとして設計する
 - モバイルファーストのUI（LINE LIFF環境での利用を前提）
 
-## Success Criteria *(mandatory)*
+## Success Criteria _(mandatory)_
 
 ### Measurable Outcomes
 

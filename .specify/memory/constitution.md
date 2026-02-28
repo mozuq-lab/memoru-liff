@@ -1,4 +1,4 @@
-<!-- 
+<!--
 SYNC IMPACT REPORT:
 Version: Template → 1.0.0
 Added Principles: I. Test-Driven Development, II. Security First, III. API Contract Integrity, IV. Performance & Scalability, V. Documentation Excellence
@@ -12,26 +12,31 @@ Follow-up TODOs: None
 ## Core Principles
 
 ### I. Test-Driven Development (NON-NEGOTIABLE)
+
 TDD MUST be followed: Tests written → User approved → Tests fail → Implementation begins. Red-Green-Refactor cycle strictly enforced. Coverage target: 80%+ for all production code. Integration tests required for API contracts, authentication flows, and AI service interactions.
 
 **Rationale**: Complex multi-component system (React frontend, Python Lambda backend, Keycloak auth, AI services) requires rigorous testing to prevent regressions and ensure reliable user experience with personal learning data.
 
 ### II. Security First
+
 All user data MUST be protected through established security patterns. Authentication via Keycloak + OIDC mandatory. Personal learning data requires encryption in transit and at rest. Security reviews mandatory for user-facing features.
 
 **Rationale**: Educational platform handles sensitive user learning data and integrates with LINE platform. Security breaches would destroy user trust and violate privacy expectations.
 
 ### III. API Contract Integrity
+
 Backend-Frontend API contracts MUST remain stable. Breaking changes require versioning strategy and migration path. OpenAPI specifications mandatory for all endpoints. Frontend TypeScript types must match backend Pydantic models.
 
 **Rationale**: LIFF environment requires seamless integration between React frontend and Python Lambda backend. Contract breaks cause deployment failures and user experience disruption.
 
-### IV. Performance & Scalability  
+### IV. Performance & Scalability
+
 Response times MUST be <500ms p95 for user actions. AI-generated content loading acceptable up to 3 seconds with progress indicators. DynamoDB queries optimized for single-table design. Lambda cold start mitigation required for user-critical paths.
 
 **Rationale**: Mobile-first LINE users expect instant responsiveness. Spaced repetition requires reliable timing. AWS Lambda + DynamoDB architecture demands performance-conscious design patterns.
 
 ### V. Documentation Excellence
+
 All features MUST include: implementation documentation, API documentation, deployment guides. Architectural decisions recorded as ADRs. User scenarios documented with acceptance criteria. Troubleshooting guides required for complex integrations.
 
 **Rationale**: Multi-technology stack (AWS SAM, React LIFF, Keycloak, AI services) requires comprehensive documentation for maintenance, onboarding, and operational support.
@@ -58,8 +63,9 @@ All features MUST include: implementation documentation, API documentation, depl
 ## Governance
 
 This constitution supersedes all other development practices. Amendment requires:
+
 1. Technical impact assessment
-2. Migration plan for existing codebase  
+2. Migration plan for existing codebase
 3. Documentation updates across all affected templates
 4. Team approval and version increment
 
