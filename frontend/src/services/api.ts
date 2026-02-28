@@ -108,10 +108,11 @@ class ApiClient {
     });
   }
 
-  async generateCards(data: GenerateCardsRequest): Promise<GenerateCardsResponse> {
+  async generateCards(data: GenerateCardsRequest, options?: { signal?: AbortSignal }): Promise<GenerateCardsResponse> {
     return this.request<GenerateCardsResponse>('/cards/generate', {
       method: 'POST',
       body: JSON.stringify(data),
+      signal: options?.signal,
     });
   }
 
@@ -167,7 +168,7 @@ export const cardsApi = {
   createCard: (data: CreateCardRequest) => apiClient.createCard(data),
   updateCard: (id: string, data: UpdateCardRequest) => apiClient.updateCard(id, data),
   deleteCard: (id: string) => apiClient.deleteCard(id),
-  generateCards: (data: GenerateCardsRequest) => apiClient.generateCards(data),
+  generateCards: (data: GenerateCardsRequest, options?: { signal?: AbortSignal }) => apiClient.generateCards(data, options),
   getDueCards: (limit?: number) => apiClient.getDueCards(limit),
   getDueCount: () => apiClient.getDueCount(),
 };

@@ -49,18 +49,15 @@ export const GeneratePage = () => {
     setGeneratedCards([]);
     setSelectedCards(new Set());
 
-    // タイムアウト設定
-    const timeoutId = setTimeout(() => {
-      setIsGenerating(false);
-      setError('生成がタイムアウトしました。もう一度お試しください。');
-    }, MAX_GENERATION_TIME);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), MAX_GENERATION_TIME);
 
     try {
       const request: GenerateCardsRequest = {
         input_text: inputText,
         language: 'ja',
       };
-      const response = await cardsApi.generateCards(request);
+      const response = await cardsApi.generateCards(request, { signal: controller.signal });
       clearTimeout(timeoutId);
 
       // tempIdを付与
@@ -73,7 +70,11 @@ export const GeneratePage = () => {
       setSelectedCards(new Set());
     } catch (err) {
       clearTimeout(timeoutId);
-      setError('カードの生成に失敗しました。もう一度お試しください。');
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        setError('生成がタイムアウトしました。もう一度お試しください。');
+      } else {
+        setError('カードの生成に失敗しました。もう一度お試しください。');
+      }
     } finally {
       setIsGenerating(false);
     }
