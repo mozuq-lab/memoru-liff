@@ -3,8 +3,13 @@
  * 【実装方針】: useMemo で filteredCards を計算し、依存変化時のみ再計算
  * 【テスト対応】: TDD - useCardSearch.test.ts
  */
-import { useState, useMemo } from 'react';
-import type { Card, ReviewStatusFilter, SortByOption, SortOrder } from '@/types';
+import { useState, useMemo } from "react";
+import type {
+  Card,
+  ReviewStatusFilter,
+  SortByOption,
+  SortOrder,
+} from "@/types";
 
 interface UseCardSearchOptions {
   /** フィルタリング対象のカード配列 */
@@ -34,25 +39,27 @@ interface UseCardSearchReturn {
 }
 
 /** 文字列を NFKC 正規化して小文字に変換（全角・半角・大小文字統一） */
-const normalize = (str: string): string => str.normalize('NFKC').toLowerCase();
+const normalize = (str: string): string => str.normalize("NFKC").toLowerCase();
 
 /** カードの復習状態を判定する */
 const getReviewStatus = (card: Card, today: string): ReviewStatusFilter => {
-  if (card.repetitions === 0) return 'new';
+  if (card.repetitions === 0) return "new";
   // H-1 fix: 時刻付き ISO 文字列でも正しく判定するため日付部分のみ比較
   if (card.next_review_at && card.next_review_at.slice(0, 10) <= today)
-    return 'due';
-  return 'learning';
+    return "due";
+  return "learning";
 };
 
 /**
  * カード検索・フィルター・ソートの状態を管理するカスタムフック
  */
-export const useCardSearch = ({ cards }: UseCardSearchOptions): UseCardSearchReturn => {
-  const [query, setQuery] = useState('');
-  const [reviewStatus, setReviewStatus] = useState<ReviewStatusFilter>('all');
-  const [sortBy, setSortBy] = useState<SortByOption>('created_at');
-  const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
+export const useCardSearch = ({
+  cards,
+}: UseCardSearchOptions): UseCardSearchReturn => {
+  const [query, setQuery] = useState("");
+  const [reviewStatus, setReviewStatus] = useState<ReviewStatusFilter>("all");
+  const [sortBy, setSortBy] = useState<SortByOption>("created_at");
+  const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
 
   const filteredCards = useMemo(() => {
     // L-4 note: today は useMemo 内で計算。日付をまたぐ長時間セッションでは
@@ -74,9 +81,9 @@ export const useCardSearch = ({ cards }: UseCardSearchOptions): UseCardSearchRet
     }
 
     // Step 2: reviewStatus フィルター
-    if (reviewStatus !== 'all') {
+    if (reviewStatus !== "all") {
       result = result.filter(
-        (card) => getReviewStatus(card, today) === reviewStatus
+        (card) => getReviewStatus(card, today) === reviewStatus,
       );
     }
 
@@ -84,29 +91,29 @@ export const useCardSearch = ({ cards }: UseCardSearchOptions): UseCardSearchRet
     result = [...result].sort((a, b) => {
       let comparison = 0;
 
-      if (sortBy === 'created_at') {
+      if (sortBy === "created_at") {
         comparison = a.created_at.localeCompare(b.created_at);
-      } else if (sortBy === 'ease_factor') {
+      } else if (sortBy === "ease_factor") {
         comparison = a.ease_factor - b.ease_factor;
-      } else if (sortBy === 'next_review_at') {
-        // H-2 fix: null は sortOrder に関わらず常に末尾
-        if (a.next_review_at === null && b.next_review_at === null) return 0;
-        if (a.next_review_at === null) return 1;
-        if (b.next_review_at === null) return -1;
+      } else if (sortBy === "next_review_at") {
+        // H-2 fix: null/undefined は sortOrder に関わらず常に末尾
+        if (!a.next_review_at && !b.next_review_at) return 0;
+        if (!a.next_review_at) return 1;
+        if (!b.next_review_at) return -1;
         comparison = a.next_review_at.localeCompare(b.next_review_at);
       }
 
-      return sortOrder === 'asc' ? comparison : -comparison;
+      return sortOrder === "asc" ? comparison : -comparison;
     });
 
     return result;
   }, [cards, query, reviewStatus, sortBy, sortOrder]);
 
   const reset = () => {
-    setQuery('');
-    setReviewStatus('all');
-    setSortBy('created_at');
-    setSortOrder('desc');
+    setQuery("");
+    setReviewStatus("all");
+    setSortBy("created_at");
+    setSortOrder("desc");
   };
 
   return {

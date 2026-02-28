@@ -12,7 +12,6 @@ import type { Card } from "@/types";
 const FIXED_DATE = new Date("2026-02-28T12:00:00Z");
 
 // テスト用フィクスチャ（2026-02-28 基準）
-const TODAY = "2026-02-28";
 const PAST = "2026-02-01";
 const FUTURE = "2026-03-30";
 
@@ -179,7 +178,7 @@ describe("useCardSearch", () => {
         result.current.setSortBy("created_at");
         result.current.setSortOrder("desc");
       });
-      const ids = result.current.filteredCards.map((c) => c.card_id);
+      const ids = result.current.filteredCards.map((c: Card) => c.card_id);
       expect(ids).toEqual(["3", "2", "1"]);
     });
 
@@ -189,7 +188,7 @@ describe("useCardSearch", () => {
         result.current.setSortBy("created_at");
         result.current.setSortOrder("asc");
       });
-      const ids = result.current.filteredCards.map((c) => c.card_id);
+      const ids = result.current.filteredCards.map((c: Card) => c.card_id);
       expect(ids).toEqual(["1", "2", "3"]);
     });
 
@@ -199,7 +198,9 @@ describe("useCardSearch", () => {
         result.current.setSortBy("ease_factor");
         result.current.setSortOrder("asc");
       });
-      const factors = result.current.filteredCards.map((c) => c.ease_factor);
+      const factors = result.current.filteredCards.map(
+        (c: Card) => c.ease_factor,
+      );
       expect(factors).toEqual([1.8, 2.5, 3.0]);
     });
 
@@ -209,7 +210,7 @@ describe("useCardSearch", () => {
         result.current.setSortBy("next_review_at");
         result.current.setSortOrder("asc");
       });
-      const ids = result.current.filteredCards.map((c) => c.card_id);
+      const ids = result.current.filteredCards.map((c: Card) => c.card_id);
       // PAST < FUTURE < null(末尾)
       expect(ids).toEqual(["2", "3", "1"]);
     });
@@ -221,7 +222,7 @@ describe("useCardSearch", () => {
         result.current.setSortBy("next_review_at");
         result.current.setSortOrder("desc");
       });
-      const ids = result.current.filteredCards.map((c) => c.card_id);
+      const ids = result.current.filteredCards.map((c: Card) => c.card_id);
       // FUTURE > PAST > null(末尾)
       expect(ids).toEqual(["3", "2", "1"]);
     });

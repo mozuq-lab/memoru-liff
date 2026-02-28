@@ -4,19 +4,19 @@
  * 【テスト対応】: TASK-0016 テストケース1〜8
  * 🟡 黄信号: user-stories.md 3.2より
  */
-import { useEffect, useState, useCallback } from 'react';
-import { useLocation, useSearchParams, Link } from 'react-router-dom';
-import { CardList } from '@/components/CardList';
-import { Navigation } from '@/components/Navigation';
-import { Loading } from '@/components/common/Loading';
-import { Error } from '@/components/common/Error';
-import { SearchBar } from '@/components/SearchBar';
-import { FilterChips } from '@/components/FilterChips';
-import { SortSelect } from '@/components/SortSelect';
-import { useCardsContext } from '@/contexts/CardsContext';
-import { useCardSearch } from '@/hooks/useCardSearch';
+import { useEffect, useState, useCallback } from "react";
+import { useLocation, useSearchParams, Link } from "react-router-dom";
+import { CardList } from "@/components/CardList";
+import { Navigation } from "@/components/Navigation";
+import { Loading } from "@/components/common/Loading";
+import { Error as ErrorDisplay } from "@/components/common/Error";
+import { SearchBar } from "@/components/SearchBar";
+import { FilterChips } from "@/components/FilterChips";
+import { SortSelect } from "@/components/SortSelect";
+import { useCardsContext } from "@/contexts/CardsContext";
+import { useCardSearch } from "@/hooks/useCardSearch";
 
-type TabType = 'due' | 'all';
+type TabType = "due" | "all";
 
 /**
  * 【機能概要】: カード一覧ページコンポーネント
@@ -24,19 +24,24 @@ type TabType = 'due' | 'all';
 export const CardsPage = () => {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { cards, dueCards, isLoading, error, fetchCards, fetchDueCards } = useCardsContext();
+  const { cards, dueCards, isLoading, error, fetchCards, fetchDueCards } =
+    useCardsContext();
   const [successMessage, setSuccessMessage] = useState<string | null>(
-    (location.state as { message?: string } | null)?.message || null
+    (location.state as { message?: string } | null)?.message || null,
   );
 
-  const activeTab: TabType = searchParams.get('tab') === 'due' ? 'due' : 'all';
+  const activeTab: TabType = searchParams.get("tab") === "due" ? "due" : "all";
 
-  const tabCards = activeTab === 'due' ? dueCards : cards;
+  const tabCards = activeTab === "due" ? dueCards : cards;
   const {
-    query, setQuery,
-    reviewStatus, setReviewStatus,
-    sortBy, setSortBy,
-    sortOrder, setSortOrder,
+    query,
+    setQuery,
+    reviewStatus,
+    setReviewStatus,
+    sortBy,
+    setSortBy,
+    sortOrder,
+    setSortOrder,
     filteredCards,
     reset: resetSearch,
   } = useCardSearch({ cards: tabCards });
@@ -44,8 +49,8 @@ export const CardsPage = () => {
   const setActiveTab = (tab: TabType) => {
     // M-2 fix: タブ切替時にフィルターをリセットして二重フィルタリングの混乱を防ぐ
     resetSearch();
-    if (tab === 'due') {
-      setSearchParams({ tab: 'due' });
+    if (tab === "due") {
+      setSearchParams({ tab: "due" });
     } else {
       setSearchParams({});
     }
@@ -53,7 +58,7 @@ export const CardsPage = () => {
 
   // 【初期読み込み】: タブに応じたデータを取得
   useEffect(() => {
-    if (activeTab === 'due') {
+    if (activeTab === "due") {
       fetchDueCards();
     } else {
       fetchCards();
@@ -70,7 +75,7 @@ export const CardsPage = () => {
 
   // 【再取得ハンドラ】
   const handleRetry = useCallback(() => {
-    if (activeTab === 'due') {
+    if (activeTab === "due") {
       fetchDueCards();
     } else {
       fetchCards();
@@ -96,7 +101,10 @@ export const CardsPage = () => {
     return (
       <div className="flex flex-col h-screen">
         <div className="flex-1 flex items-center justify-center p-4">
-          <Error message="カードの取得に失敗しました" onRetry={handleRetry} />
+          <ErrorDisplay
+            message="カードの取得に失敗しました"
+            onRetry={handleRetry}
+          />
         </div>
         <Navigation />
       </div>
@@ -106,7 +114,12 @@ export const CardsPage = () => {
   return (
     <div className="flex flex-col min-h-screen pb-20">
       <header className="bg-white shadow-sm p-4 mb-0">
-        <h1 className="text-xl font-bold text-gray-800" data-testid="cards-title">カード一覧</h1>
+        <h1
+          className="text-xl font-bold text-gray-800"
+          data-testid="cards-title"
+        >
+          カード一覧
+        </h1>
         <p className="text-sm text-gray-600" data-testid="card-count">
           {displayCards.length}枚のカード
         </p>
@@ -127,22 +140,24 @@ export const CardsPage = () => {
       <div className="bg-white border-b" data-testid="tab-filter">
         <div className="flex">
           <button
-            onClick={() => setActiveTab('due')}
+            type="button"
+            onClick={() => setActiveTab("due")}
             className={`flex-1 py-3 text-sm font-medium text-center border-b-2 transition-colors ${
-              activeTab === 'due'
-                ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
+              activeTab === "due"
+                ? "border-blue-600 text-blue-600"
+                : "border-transparent text-gray-500 hover:text-gray-700"
             }`}
             data-testid="tab-due"
           >
             復習対象
           </button>
           <button
-            onClick={() => setActiveTab('all')}
+            type="button"
+            onClick={() => setActiveTab("all")}
             className={`flex-1 py-3 text-sm font-medium text-center border-b-2 transition-colors ${
-              activeTab === 'all'
-                ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
+              activeTab === "all"
+                ? "border-blue-600 text-blue-600"
+                : "border-transparent text-gray-500 hover:text-gray-700"
             }`}
             data-testid="tab-all"
           >
@@ -153,7 +168,7 @@ export const CardsPage = () => {
 
       <main className="flex-1 px-4 mt-4">
         {/* 復習開始ボタン */}
-        {activeTab === 'due' && displayCards.length > 0 && (
+        {activeTab === "due" && displayCards.length > 0 && (
           <Link
             to="/review"
             className="block w-full py-3 mb-4 bg-blue-600 text-white text-center rounded-lg hover:bg-blue-700 active:bg-blue-800 min-h-[44px] transition-colors font-medium"
@@ -192,14 +207,15 @@ export const CardsPage = () => {
             </svg>
             <p className="text-gray-600 mb-4">
               {query
-                ? '該当するカードがありません'
-                : activeTab === 'due'
-                  ? '復習対象のカードはありません'
-                  : 'カードがありません'}
+                ? "該当するカードがありません"
+                : activeTab === "due"
+                  ? "復習対象のカードはありません"
+                  : "カードがありません"}
             </p>
-            {activeTab === 'due' ? (
+            {activeTab === "due" ? (
               <button
-                onClick={() => setActiveTab('all')}
+                type="button"
+                onClick={() => setActiveTab("all")}
                 className="inline-block px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 min-h-[44px] transition-colors"
               >
                 すべてのカードを見る
