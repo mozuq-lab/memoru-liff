@@ -210,6 +210,48 @@ class TestReviewHistory:
         assert len(history) == 2
         assert history[1]["grade"] == 4
 
+    def test_add_entry_with_repetitions_and_next_review_at(self):
+        """Test adding entry with repetitions_before/after and next_review_at_before/after."""
+        entry = ReviewHistoryEntry(
+            reviewed_at=datetime.now(timezone.utc),
+            grade=4,
+            ease_factor_before=2.5,
+            ease_factor_after=2.5,
+            interval_before=6,
+            interval_after=15,
+            repetitions_before=2,
+            repetitions_after=3,
+            next_review_at_before="2026-02-20T10:00:00+00:00",
+            next_review_at_after="2026-03-07T10:00:00+00:00",
+        )
+
+        history = add_review_history(None, entry)
+
+        assert len(history) == 1
+        assert history[0]["repetitions_before"] == 2
+        assert history[0]["repetitions_after"] == 3
+        assert history[0]["next_review_at_before"] == "2026-02-20T10:00:00+00:00"
+        assert history[0]["next_review_at_after"] == "2026-03-07T10:00:00+00:00"
+
+    def test_add_entry_without_optional_fields(self):
+        """Test that optional fields are omitted when None (backward compat)."""
+        entry = ReviewHistoryEntry(
+            reviewed_at=datetime.now(timezone.utc),
+            grade=4,
+            ease_factor_before=2.5,
+            ease_factor_after=2.5,
+            interval_before=1,
+            interval_after=6,
+        )
+
+        history = add_review_history(None, entry)
+
+        assert len(history) == 1
+        assert "repetitions_before" not in history[0]
+        assert "repetitions_after" not in history[0]
+        assert "next_review_at_before" not in history[0]
+        assert "next_review_at_after" not in history[0]
+
     def test_max_entries_limit(self):
         """Test that history is limited to max entries."""
         existing = [{"reviewed_at": f"2024-01-{i:02d}T12:00:00+00:00", "grade": 4} for i in range(1, 101)]

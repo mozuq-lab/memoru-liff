@@ -95,6 +95,10 @@ class ReviewHistoryEntry:
     ease_factor_after: float
     interval_before: int
     interval_after: int
+    repetitions_before: Optional[int] = None
+    repetitions_after: Optional[int] = None
+    next_review_at_before: Optional[str] = None
+    next_review_at_after: Optional[str] = None
 
 
 def add_review_history(
@@ -125,6 +129,16 @@ def add_review_history(
         "interval_before": entry.interval_before,
         "interval_after": entry.interval_after,
     }
+
+    # Add optional fields for undo support
+    if entry.repetitions_before is not None:
+        new_entry["repetitions_before"] = entry.repetitions_before
+    if entry.repetitions_after is not None:
+        new_entry["repetitions_after"] = entry.repetitions_after
+    if entry.next_review_at_before is not None:
+        new_entry["next_review_at_before"] = entry.next_review_at_before
+    if entry.next_review_at_after is not None:
+        new_entry["next_review_at_after"] = entry.next_review_at_after
 
     history.append(new_entry)
 

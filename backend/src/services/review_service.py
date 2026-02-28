@@ -123,6 +123,8 @@ class ReviewService:
             grade=grade,
             previous_ease_factor=card.ease_factor,
             previous_interval=card.interval,
+            previous_repetitions=card.repetitions,
+            previous_next_review_at=card.next_review_at.isoformat() if card.next_review_at else None,
         )
 
         # Record review in reviews table
@@ -160,6 +162,8 @@ class ReviewService:
         grade: int,
         previous_ease_factor: float,
         previous_interval: int,
+        previous_repetitions: Optional[int] = None,
+        previous_next_review_at: Optional[str] = None,
     ) -> None:
         """Update card's SRS data and review history.
 
@@ -170,6 +174,8 @@ class ReviewService:
             grade: Review grade.
             previous_ease_factor: Ease factor before review.
             previous_interval: Interval before review.
+            previous_repetitions: Repetitions before review (for undo support).
+            previous_next_review_at: Next review at before review (for undo support).
         """
         now = datetime.now(timezone.utc)
 
@@ -191,6 +197,10 @@ class ReviewService:
             ease_factor_after=result.ease_factor,
             interval_before=previous_interval,
             interval_after=result.interval,
+            repetitions_before=previous_repetitions,
+            repetitions_after=result.repetitions,
+            next_review_at_before=previous_next_review_at,
+            next_review_at_after=result.next_review_at.isoformat(),
         )
         updated_history = add_review_history(existing_history, history_entry)
 
