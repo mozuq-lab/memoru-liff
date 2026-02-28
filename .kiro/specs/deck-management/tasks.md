@@ -140,15 +140,15 @@
   - CardDetailPage: 編集モードでデッキ変更を追加
   - _Requirements: 5.1, 5.2_
 
-- [ ]* 9. テスト
-- [ ]* 9.1 バックエンドユニットテスト (P)
-  - `tests/unit/test_deck_model.py`: Pydantic バリデーション（名前長制限、カラー形式、UUID 自動生成）
-  - `tests/unit/test_deck_service.py`: DeckService CRUD、上限チェック、デッキ削除時カード更新（moto DynamoDB モック）
-  - `tests/unit/test_handler_decks.py`: デッキ CRUD エンドポイント、エラーレスポンス
+- [x] 9. テスト
+- [x] 9.1 バックエンドユニットテスト (P)
+  - `tests/unit/test_deck_model.py`: Pydantic バリデーション（名前長制限、カラー形式、UUID 自動生成）27 テスト ✓
+  - `tests/unit/test_deck_service.py`: DeckService CRUD、上限チェック、デッキ削除時カード更新（moto DynamoDB モック）25 テスト ✓
+  - `tests/unit/test_handler_decks.py`: デッキ CRUD エンドポイント、エラーレスポンス 14 テスト ✓
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 2.2, 2.3, 3.4, 3.5_
-- [ ]* 9.2 フロントエンドユニットテスト (P)
-  - `components/__tests__/DeckSelector.test.tsx`: デッキ選択・未分類オプション
-  - `components/__tests__/DeckSummary.test.tsx`: サマリー表示・0 件メッセージ
-  - `contexts/__tests__/DecksContext.test.tsx`: fetch・CUD 操作・エラーハンドリング
-  - `pages/__tests__/DecksPage.test.tsx`: デッキ表示・作成・編集・削除 UI
+- [x] 9.2 フロントエンドユニットテスト (P)
+  - `components/__tests__/DeckSelector.test.tsx`: デッキ選択・未分類オプション 7 テスト ✓
+  - `components/__tests__/DeckSummary.test.tsx`: サマリー表示・0 件メッセージ 10 テスト ✓
+  - `__tests__/DecksContext.test.tsx`: fetch・CUD 操作・エラーハンドリング 11 テスト ✓
+  - `pages/__tests__/DecksPage.test.tsx`: デッキ表示・作成・編集・削除 UI 14 テスト ✓
   - _Requirements: 4.1, 4.2, 4.4, 4.5, 5.3, 7.1, 7.4, 8.1, 8.5_

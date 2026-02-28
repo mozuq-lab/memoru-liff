@@ -611,7 +611,7 @@ def create_deck():
         return Response(
             status_code=400,
             content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid request", "details": e.errors()}),
+            body=json.dumps({"error": "Invalid request", "details": str(e)}),
         )
     except json.JSONDecodeError:
         return Response(
@@ -688,7 +688,7 @@ def update_deck(deck_id: str):
         return Response(
             status_code=400,
             content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid request", "details": e.errors()}),
+            body=json.dumps({"error": "Invalid request", "details": str(e)}),
         )
     except json.JSONDecodeError:
         return Response(
