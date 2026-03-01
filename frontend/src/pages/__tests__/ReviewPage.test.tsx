@@ -573,7 +573,7 @@ describe('ReviewPage', () => {
       await gradeAndComplete(user);
 
       // Click undo button
-      const undoButton = screen.getByLabelText('質問1 の採点を取り消す');
+      const undoButton = screen.getByLabelText('質問1 を再採点する');
       await user.click(undoButton);
 
       expect(mockUndoReview).toHaveBeenCalledWith('card-1');
@@ -584,7 +584,7 @@ describe('ReviewPage', () => {
       await gradeAndComplete(user);
 
       // Click undo button
-      const undoButton = screen.getByLabelText('質問1 の採点を取り消す');
+      const undoButton = screen.getByLabelText('質問1 を再採点する');
       await user.click(undoButton);
 
       // Should show regrade mode with the card
@@ -598,7 +598,7 @@ describe('ReviewPage', () => {
       const user = userEvent.setup();
       await gradeAndComplete(user);
 
-      const undoButton = screen.getByLabelText('質問1 の採点を取り消す');
+      const undoButton = screen.getByLabelText('質問1 を再採点する');
       await user.click(undoButton);
 
       await waitFor(() => {
@@ -617,7 +617,7 @@ describe('ReviewPage', () => {
       await gradeAndComplete(user);
 
       // Undo
-      const undoButton = screen.getByLabelText('質問1 の採点を取り消す');
+      const undoButton = screen.getByLabelText('質問1 を再採点する');
       await user.click(undoButton);
 
       await waitFor(() => {
@@ -665,7 +665,7 @@ describe('ReviewPage', () => {
       mockUndoReview.mockRejectedValue(new Error('Undo failed'));
       await gradeAndComplete(user);
 
-      const undoButton = screen.getByLabelText('質問1 の採点を取り消す');
+      const undoButton = screen.getByLabelText('質問1 を再採点する');
       await user.click(undoButton);
 
       // Should stay on complete screen with error
@@ -680,7 +680,7 @@ describe('ReviewPage', () => {
       await gradeAndComplete(user);
 
       // Undo succeeds
-      const undoButton = screen.getByLabelText('質問1 の採点を取り消す');
+      const undoButton = screen.getByLabelText('質問1 を再採点する');
       await user.click(undoButton);
 
       await waitFor(() => {
@@ -921,7 +921,7 @@ describe('ReviewPage', () => {
       await gradeAndCompleteWith4(user);
 
       // Undo
-      const undoButton = screen.getByLabelText('質問1 の採点を取り消す');
+      const undoButton = screen.getByLabelText('質問1 を再採点する');
       await user.click(undoButton);
 
       await waitFor(() => {
@@ -959,7 +959,7 @@ describe('ReviewPage', () => {
       await gradeAndCompleteWith4(user);
 
       // Undo
-      const undoButton = screen.getByLabelText('質問1 の採点を取り消す');
+      const undoButton = screen.getByLabelText('質問1 を再採点する');
       await user.click(undoButton);
 
       await waitFor(() => {
@@ -1265,7 +1265,7 @@ describe('ReviewPage', () => {
         restored: { ease_factor: 2.5, interval: 1, repetitions: 0, due_date: '2026-02-28' },
         undone_at: '2026-02-28T10:01:00Z',
       });
-      const undoButton = screen.getByLabelText('質問1 の採点を取り消す');
+      const undoButton = screen.getByLabelText('質問1 を再採点する');
       await user.click(undoButton);
 
       expect(mockUndoReview).toHaveBeenCalledWith('card-1');
@@ -1309,7 +1309,7 @@ describe('ReviewPage', () => {
       });
 
       // Undo → regrade
-      const undoButton = screen.getByLabelText('質問1 の採点を取り消す');
+      const undoButton = screen.getByLabelText('質問1 を再採点する');
       await user.click(undoButton);
 
       await waitFor(() => {
@@ -1370,7 +1370,7 @@ describe('ReviewPage', () => {
       });
 
       // Undo → regrade
-      const undoButton = screen.getByLabelText('質問1 の採点を取り消す');
+      const undoButton = screen.getByLabelText('質問1 を再採点する');
       await user.click(undoButton);
 
       await waitFor(() => {
@@ -1547,7 +1547,7 @@ describe('ReviewPage', () => {
       });
 
       // Undo → regradeMode
-      const undoButton = screen.getByLabelText('質問1 の採点を取り消す');
+      const undoButton = screen.getByLabelText('質問1 を再採点する');
       await user.click(undoButton);
 
       await waitFor(() => {
@@ -1671,7 +1671,7 @@ describe('ReviewPage', () => {
       });
 
       // Undo → reconfirmQueue.filter は空振りするがエラーなし
-      const undoButton = screen.getByLabelText('質問1 の採点を取り消す');
+      const undoButton = screen.getByLabelText('質問1 を再採点する');
       await user.click(undoButton);
 
       // regrade モードに正常遷移

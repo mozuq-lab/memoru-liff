@@ -7,7 +7,7 @@ import type { SessionCardResult } from '@/types';
 describe('ReviewResultItem', () => {
   describe('再確認結果表示', () => {
     // 【テスト目的】: type='reconfirmed' のカードが正しい表示で結果リストに表示されることを確認
-    // 【テスト内容】: 元の評価バッジ、「覚えた✔」サブラベル、Undoボタンの表示
+    // 【テスト内容】: 元の評価バッジ、「再確認済み」サブラベル、再採点ボタンの表示
     // 【期待される動作】: 通常 graded とは異なるサブラベルで再確認結果が区別できる
     // 🔵 受け入れ基準 TC-501-01, TC-501-02 に対応
 
@@ -33,7 +33,7 @@ describe('ReviewResultItem', () => {
         expect(badge.className).toContain('text-amber-700');
       });
 
-      it('type="reconfirmed" で「覚えた✔」サブラベルが表示される (TC-RRI-002)', () => {
+      it('type="reconfirmed" で「再確認済み」サブラベルが表示される (TC-RRI-002)', () => {
         // 【テストデータ準備】: 再確認で「覚えた」として確認済みのカード
         const result: SessionCardResult = {
           cardId: 'card-1',
@@ -45,13 +45,12 @@ describe('ReviewResultItem', () => {
         // 【実際の処理実行】: 再確認結果のカードをレンダリング
         render(<ReviewResultItem result={result} index={0} />);
 
-        // 【結果検証】: 「覚えた✔」サブラベルが表示されること
-        // 【検証項目】: reconfirm-ui-requirements.md セクション2.4「サブラベル: 覚えた✔, text-xs text-green-600」 🔵
-        expect(screen.getByText('覚えた✔')).toBeInTheDocument();
+        // 【結果検証】: 「再確認済み」サブラベルが表示されること
+        expect(screen.getByText('再確認済み')).toBeInTheDocument();
       });
 
-      it('type="reconfirmed" で「次回:」が表示されない (TC-RRI-003)', () => {
-        // 【テストデータ準備】: nextReviewDate が設定されていても type='reconfirmed' では非表示
+      it('type="reconfirmed" で nextReviewDate がある場合「次回:」が表示される (TC-RRI-003)', () => {
+        // 【テストデータ準備】: nextReviewDate が設定されている reconfirmed カード
         const result: SessionCardResult = {
           cardId: 'card-1',
           front: 'テスト問題',
@@ -63,9 +62,10 @@ describe('ReviewResultItem', () => {
         // 【実際の処理実行】: 再確認結果のカードをレンダリング
         render(<ReviewResultItem result={result} index={0} />);
 
-        // 【結果検証】: 次回復習日が表示されないこと
-        // 【検証項目】: type='reconfirmed' では nextReviewDate は非表示 🔵
-        expect(screen.queryByText(/次回/)).toBeNull();
+        // 【結果検証】: 次回復習日が表示されること
+        expect(screen.getByText(/次回: 2026-03-01/)).toBeInTheDocument();
+        // 「再確認済み」サブラベルも表示される
+        expect(screen.getByText('再確認済み')).toBeInTheDocument();
       });
 
       it('type="graded"（grade=4）で従来通りのバッジと次回復習日が表示される (TC-RRI-004)', () => {
@@ -85,8 +85,8 @@ describe('ReviewResultItem', () => {
         expect(screen.getByText('4')).toBeInTheDocument();
         // 【検証項目】: 次回復習日が表示されること 🔵
         expect(screen.getByText(/次回: 2026-03-01/)).toBeInTheDocument();
-        // 【検証項目】: 「覚えた✔」は表示されないこと 🔵
-        expect(screen.queryByText('覚えた✔')).toBeNull();
+        // 【検証項目】: 「再確認済み」は表示されないこと 🔵
+        expect(screen.queryByText('再確認済み')).toBeNull();
       });
 
       it('type="graded"（grade=1）で従来通りの表示（低評価）(TC-RRI-005)', () => {
@@ -104,11 +104,11 @@ describe('ReviewResultItem', () => {
         // 【結果検証】: type='graded' なら低評価でも従来通りの表示 🔵
         expect(screen.getByText('1')).toBeInTheDocument();
         expect(screen.getByText(/次回: 2026-03-01/)).toBeInTheDocument();
-        // 【検証項目】: 「覚えた✔」は表示されないこと 🔵
-        expect(screen.queryByText('覚えた✔')).toBeNull();
+        // 【検証項目】: 「再確認済み」は表示されないこと 🔵
+        expect(screen.queryByText('再確認済み')).toBeNull();
       });
 
-      it('type="reconfirmed" で Undo ボタンが表示される (TC-RRI-006)', () => {
+      it('type="reconfirmed" で再採点ボタンが表示される (TC-RRI-006)', () => {
         // 【テストデータ準備】: 再確認カードに Undo 機能が有効なケース
         const result: SessionCardResult = {
           cardId: 'card-1',
@@ -121,12 +121,12 @@ describe('ReviewResultItem', () => {
         // 【実際の処理実行】: onUndo ハンドラ付きで再確認カードをレンダリング
         render(<ReviewResultItem result={result} index={0} onUndo={onUndo} />);
 
-        // 【結果検証】: Undo ボタンが表示されること
-        // 【検証項目】: 要件定義書 REQ-404「Undo 機能は再確認カードにも使用可能」 🔵
-        expect(screen.getByRole('button', { name: /取り消す/ })).toBeInTheDocument();
+        // 【結果検証】: 再採点ボタンが表示されること
+        // 【検証項目】: 要件定義書 REQ-404「再採点機能は再確認カードにも使用可能」 🔵
+        expect(screen.getByRole('button', { name: /再採点する/ })).toBeInTheDocument();
       });
 
-      it('type="reconfirmed" で Undo ボタンクリックが onUndo(index) を呼ぶ (TC-RRI-007)', async () => {
+      it('type="reconfirmed" で再採点ボタンクリックが onUndo(index) を呼ぶ (TC-RRI-007)', async () => {
         // 【テストデータ準備】: 再確認カードの Undo 操作
         const result: SessionCardResult = {
           cardId: 'card-1',
@@ -140,7 +140,7 @@ describe('ReviewResultItem', () => {
         render(<ReviewResultItem result={result} index={0} onUndo={onUndo} />);
 
         const user = userEvent.setup();
-        await user.click(screen.getByRole('button', { name: /取り消す/ }));
+        await user.click(screen.getByRole('button', { name: /再採点する/ }));
 
         // 【結果検証】: onUndo に index=0 が渡されること 🔵
         expect(onUndo).toHaveBeenCalledWith(0);
@@ -178,8 +178,8 @@ describe('ReviewResultItem', () => {
         // 【結果検証】: 従来の skipped 表示が変わっていないこと 🔵
         expect(screen.getByText('—')).toBeInTheDocument();
         expect(screen.getByText('スキップ')).toBeInTheDocument();
-        // 【検証項目】: Undo ボタンは非表示（onUndo なし）
-        expect(screen.queryByRole('button', { name: /取り消す/ })).toBeNull();
+        // 【検証項目】: 再採点ボタンは非表示（onUndo なし）
+        expect(screen.queryByRole('button', { name: /再採点する/ })).toBeNull();
       });
 
       it('type="undone" で従来通りの表示（戻るバッジ + 取り消し済み）(TC-RRI-009)', () => {
@@ -195,8 +195,8 @@ describe('ReviewResultItem', () => {
         // 【結果検証】: 従来の undone 表示が変わっていないこと 🔵
         expect(screen.getByText('↩')).toBeInTheDocument();
         expect(screen.getByText('取り消し済み')).toBeInTheDocument();
-        // 【検証項目】: Undo ボタンは非表示（onUndo なし）
-        expect(screen.queryByRole('button', { name: /取り消す/ })).toBeNull();
+        // 【検証項目】: 再採点ボタンは非表示（onUndo なし）
+        expect(screen.queryByRole('button', { name: /再採点する/ })).toBeNull();
       });
     });
 
@@ -214,7 +214,7 @@ describe('ReviewResultItem', () => {
 
         // 【結果検証】: グレード数値が表示されないこと（グレースフルデグラデーション）
         // 【検証項目】: gradeConfig = null となりバッジがレンダリングされない 🟡
-        // 「覚えた✔」のみ表示される（またはバッジなしで正常に動作する）
+        // 「再確認済み」のみ表示される（またはバッジなしで正常に動作する）
         expect(screen.getByText('テスト問題')).toBeInTheDocument();
         // 数値ラベルが存在しないことを確認（0,1,2,3,4,5 どれも表示されない）
         for (let i = 0; i <= 5; i++) {
@@ -240,8 +240,8 @@ describe('ReviewResultItem', () => {
         const badge = screen.getByText('0');
         expect(badge.className).toContain('bg-red-100');
         expect(badge.className).toContain('text-red-700');
-        // 「覚えた✔」も表示される
-        expect(screen.getByText('覚えた✔')).toBeInTheDocument();
+        // 「再確認済み」も表示される
+        expect(screen.getByText('再確認済み')).toBeInTheDocument();
       });
     });
   });
