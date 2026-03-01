@@ -93,15 +93,43 @@ export interface UndoReviewResponse {
   undone_at: string;
 }
 
-// Session result types
-export type SessionCardResultType = 'graded' | 'skipped' | 'undone';
+// セッション結果の型定義
+// 【SessionCardResultType】: 各カードの処理結果を表すユニオン型
+// - 'graded'     : SM-2 API で採点済み
+// - 'skipped'    : スキップされた（SM-2 評価なし）
+// - 'undone'     : 取り消し済み（再採点待ち）
+// - 'reconfirmed': 再確認ループで「覚えた」として確認済み（TASK-0081 追加）
+// 🔵 信頼性レベル: 要件定義書 REQ-001, REQ-501 より
+export type SessionCardResultType = 'graded' | 'skipped' | 'undone' | 'reconfirmed';
 
+/**
+ * 【SessionCardResult】: 1枚のカードのセッション処理結果を表すインターフェース
+ * - grade, nextReviewDate は 'graded' / 'reconfirmed' 時に設定
+ * - reconfirmResult は 'reconfirmed' 時に設定（現在は 'remembered' のみ）
+ * 🔵 信頼性レベル: 要件定義書 REQ-003, REQ-501 より
+ */
 export interface SessionCardResult {
   cardId: string;
   front: string;
   grade?: number;
   nextReviewDate?: string;
   type: SessionCardResultType;
+  // 【再確認結果】: 'reconfirmed' type のカードのみ設定される（TASK-0081 追加）
+  reconfirmResult?: 'remembered';
+}
+
+/**
+ * 【ReconfirmCard】: 再確認キューに入れるカードの型（TASK-0081 追加）
+ * quality 0-2 で評価されたカードを再確認ループで表示するために使用する
+ * セッション内フロントエンド state のみで管理（バックエンド API 呼び出しなし）
+ * 🔵 信頼性レベル: 要件定義書 REQ-001, REQ-201・architecture.md より
+ */
+export interface ReconfirmCard {
+  cardId: string;
+  front: string;
+  back: string;
+  // 【元の評価値】: quality 0, 1, or 2 のいずれか（SM-2 は初回評価時に設定済み）
+  originalGrade: number;
 }
 
 export interface DueCard {
@@ -117,4 +145,43 @@ export interface DueCardsResponse {
   due_cards: DueCard[];
   total_due_count: number;
   next_due_date: string | null;
+}
+
+// ===== カード検索・フィルター・ソート型定義 =====
+
+/**
+ * カードの復習状態フィルター
+ * - 'all': すべてのカード
+ * - 'new': repetitions === 0
+ * - 'due': repetitions > 0 かつ next_review_at <= 今日
+ * - 'learning': repetitions > 0 かつ next_review_at > 今日
+ */
+export type ReviewStatusFilter = 'all' | 'new' | 'due' | 'learning';
+
+/**
+ * カードのソートキー
+ * - 'created_at': 作成日順
+ * - 'next_review_at': 次回復習日順（null は末尾）
+ * - 'ease_factor': 習熟度順（低い = 苦手なカード）
+ */
+export type SortByOption = 'created_at' | 'next_review_at' | 'ease_factor';
+
+/**
+ * ソート方向
+ */
+export type SortOrder = 'asc' | 'desc';
+
+/**
+ * カード検索・フィルター・ソートの状態
+ * useCardSearch フックが管理する状態の型
+ */
+export interface CardFilterState {
+  /** キーワード検索文字列（空文字 = フィルターなし） */
+  query: string;
+  /** 復習状態フィルター */
+  reviewStatus: ReviewStatusFilter;
+  /** ソートキー */
+  sortBy: SortByOption;
+  /** ソート方向 */
+  sortOrder: SortOrder;
 }

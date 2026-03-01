@@ -26,9 +26,9 @@ export const ReviewResultItem = ({
 
   return (
     <div className="flex items-center gap-3 py-3 px-4 bg-white rounded-lg border border-gray-200">
-      {/* Grade badge or status */}
+      {/* グレードバッジまたはステータス表示 */}
       <div className="shrink-0 w-10">
-        {result.type === 'graded' && gradeConfig && (
+        {(result.type === 'graded' || result.type === 'reconfirmed') && gradeConfig && (
           <span
             className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold ${gradeConfig.bgClass} ${gradeConfig.textClass}`}
           >
@@ -47,13 +47,16 @@ export const ReviewResultItem = ({
         )}
       </div>
 
-      {/* Card front text */}
+      {/* カード表面テキストとサブラベル */}
       <div className="flex-1 min-w-0">
         <p className="text-sm text-gray-800 truncate">{result.front}</p>
         {result.type === 'graded' && result.nextReviewDate && (
           <p className="text-xs text-gray-500 mt-0.5">
             次回: {result.nextReviewDate}
           </p>
+        )}
+        {result.type === 'reconfirmed' && (
+          <p className="text-xs text-green-600 mt-0.5">覚えた✔</p>
         )}
         {result.type === 'skipped' && (
           <p className="text-xs text-gray-400 mt-0.5">スキップ</p>
@@ -63,9 +66,9 @@ export const ReviewResultItem = ({
         )}
       </div>
 
-      {/* Undo button */}
+      {/* Undo ボタン（graded/reconfirmed のみ表示） */}
       <div className="shrink-0">
-        {result.type === 'graded' && onUndo && (
+        {(result.type === 'graded' || result.type === 'reconfirmed') && onUndo && (
           <button
             type="button"
             onClick={() => onUndo(index)}

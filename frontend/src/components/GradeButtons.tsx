@@ -2,7 +2,13 @@ interface GradeButtonsProps {
   onGrade: (grade: number) => void;
   onSkip?: () => void;
   disabled: boolean;
+  isReconfirmMode?: boolean;
+  onReconfirmRemembered?: () => void;
+  onReconfirmForgotten?: () => void;
 }
+
+/** 【設定定数】: disabled 状態のボタンに適用する共通スタイル 🔵 */
+const DISABLED_BUTTON_CLASSES = 'opacity-50 cursor-not-allowed';
 
 const GRADE_CONFIGS = [
   { grade: 0, bgClass: 'bg-red-50 hover:bg-red-100 active:bg-red-200 border-red-300', textClass: 'text-red-700', descClass: 'text-red-600', description: '全く覚えていない' },
@@ -13,7 +19,38 @@ const GRADE_CONFIGS = [
   { grade: 5, bgClass: 'bg-green-50 hover:bg-green-100 active:bg-green-200 border-green-300', textClass: 'text-green-700', descClass: 'text-green-600', description: '完璧' },
 ] as const;
 
-export const GradeButtons = ({ onGrade, onSkip, disabled }: GradeButtonsProps) => {
+export const GradeButtons = ({ onGrade, onSkip, disabled, isReconfirmMode = false, onReconfirmRemembered, onReconfirmForgotten }: GradeButtonsProps) => {
+  if (isReconfirmMode) {
+    return (
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            type="button"
+            onClick={onReconfirmRemembered}
+            disabled={disabled}
+            aria-label="覚えた"
+            className={`min-h-[56px] py-3 px-4 rounded-lg border border-green-300 bg-green-50 text-green-700 font-medium text-base transition-colors hover:bg-green-100 active:bg-green-200 ${
+              disabled ? DISABLED_BUTTON_CLASSES : ''
+            }`}
+          >
+            覚えた
+          </button>
+          <button
+            type="button"
+            onClick={onReconfirmForgotten}
+            disabled={disabled}
+            aria-label="覚えていない"
+            className={`min-h-[56px] py-3 px-4 rounded-lg border border-red-300 bg-red-50 text-red-700 font-medium text-base transition-colors hover:bg-red-100 active:bg-red-200 ${
+              disabled ? DISABLED_BUTTON_CLASSES : ''
+            }`}
+          >
+            覚えていない
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-3 gap-2">
@@ -25,7 +62,7 @@ export const GradeButtons = ({ onGrade, onSkip, disabled }: GradeButtonsProps) =
             disabled={disabled}
             aria-label={`${grade} - ${description}`}
             className={`flex flex-col items-center justify-center min-h-[44px] py-2 px-3 rounded-lg border transition-colors ${bgClass} ${
-              disabled ? 'opacity-50 cursor-not-allowed' : ''
+              disabled ? DISABLED_BUTTON_CLASSES : ''
             }`}
           >
             <span className={`font-bold text-lg ${textClass}`}>{grade}</span>
@@ -40,7 +77,7 @@ export const GradeButtons = ({ onGrade, onSkip, disabled }: GradeButtonsProps) =
           disabled={disabled}
           aria-label="スキップ"
           className={`w-full min-h-[44px] py-2 px-4 rounded-lg border border-gray-300 text-gray-600 text-sm font-medium transition-colors hover:bg-gray-100 active:bg-gray-200 ${
-            disabled ? 'opacity-50 cursor-not-allowed' : ''
+            disabled ? DISABLED_BUTTON_CLASSES : ''
           }`}
         >
           スキップ

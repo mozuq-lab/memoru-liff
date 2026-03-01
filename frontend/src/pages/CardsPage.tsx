@@ -5,17 +5,21 @@
  * 【テスト対応】: TASK-0016 テストケース1〜8, TASK-0091 TC-091-005〜B02
  * 🟡 黄信号: user-stories.md 3.2より
  */
-import { useEffect, useState, useCallback } from 'react';
-import { useLocation, useSearchParams, Link } from 'react-router-dom';
-import { CardList } from '@/components/CardList';
-import { Navigation } from '@/components/Navigation';
-import { Loading } from '@/components/common/Loading';
-import { Error } from '@/components/common/Error';
-import { useCardsContext } from '@/contexts/CardsContext';
+import { useEffect, useState, useCallback } from "react";
+import { useLocation, useSearchParams, Link } from "react-router-dom";
+import { CardList } from "@/components/CardList";
+import { Navigation } from "@/components/Navigation";
+import { Loading } from "@/components/common/Loading";
+import { Error as ErrorDisplay } from "@/components/common/Error";
+import { SearchBar } from "@/components/SearchBar";
+import { FilterChips } from "@/components/FilterChips";
+import { SortSelect } from "@/components/SortSelect";
+import { useCardsContext } from "@/contexts/CardsContext";
+import { useCardSearch } from "@/hooks/useCardSearch";
 // 【TASK-0091】: deck_id 指定時のデッキ名表示に DecksContext を使用 🟡
-import { useDecksContext } from '@/contexts/DecksContext';
+import { useDecksContext } from "@/contexts/DecksContext";
 
-type TabType = 'due' | 'all';
+type TabType = "due" | "all";
 
 /**
  * 【機能概要】: カード一覧ページコンポーネント
@@ -25,14 +29,29 @@ type TabType = 'due' | 'all';
 export const CardsPage = () => {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { cards, dueCards, isLoading, error, fetchCards, fetchDueCards } = useCardsContext();
+  const { cards, dueCards, isLoading, error, fetchCards, fetchDueCards } =
+    useCardsContext();
   // 【TASK-0091】: デッキ名検索のために DecksContext を参照 🟡
   const { decks } = useDecksContext();
   const [successMessage, setSuccessMessage] = useState<string | null>(
-    (location.state as { message?: string } | null)?.message || null
+    (location.state as { message?: string } | null)?.message || null,
   );
 
-  const activeTab: TabType = searchParams.get('tab') === 'due' ? 'due' : 'all';
+  const activeTab: TabType = searchParams.get("tab") === "due" ? "due" : "all";
+
+  const tabCards = activeTab === "due" ? dueCards : cards;
+  const {
+    query,
+    setQuery,
+    reviewStatus,
+    setReviewStatus,
+    sortBy,
+    setSortBy,
+    sortOrder,
+    setSortOrder,
+    filteredCards,
+    reset: resetSearch,
+  } = useCardSearch({ cards: tabCards });
 
   // 【TASK-0091】: URL クエリパラメータから deck_id を取得
   // 空文字列や null の場合は undefined に変換（falsy な値をフィルタなしとして扱う）
@@ -51,11 +70,12 @@ export const CardsPage = () => {
    * 🟡 黄信号: Green フェーズ課題1（setSearchParams が deck_id を失う問題）の修正
    */
   const setActiveTab = (tab: TabType) => {
+    // M-2 fix: タブ切替時にフィルターをリセットして二重フィルタリングの混乱を防ぐ
+    resetSearch();
     // 【既存パラメータ保持】: deck_id が指定されている場合は新しい searchParams にも引き継ぐ
-    // 【タブ切り替え】: tab=due 以外はタブパラメータを削除（'all' がデフォルト）
     const newParams: Record<string, string> = {};
     if (deckId) newParams['deck_id'] = deckId;
-    if (tab === 'due') newParams['tab'] = 'due';
+    if (tab === "due") newParams['tab'] = "due";
     setSearchParams(newParams);
   };
 
@@ -63,7 +83,7 @@ export const CardsPage = () => {
   // 【TASK-0091】: deckId を依存配列に追加、fetchCards/fetchDueCards に deckId を渡す
   // 🔵 青信号: architecture.md セクション6 の useEffect 実装概要に基づく
   useEffect(() => {
-    if (activeTab === 'due') {
+    if (activeTab === "due") {
       fetchDueCards(deckId);
     } else {
       fetchCards(deckId);
@@ -86,14 +106,14 @@ export const CardsPage = () => {
    */
   const handleRetry = useCallback(() => {
     // 【再取得】: deckId を引数として渡し、フィルタ条件を維持したまま再取得する
-    if (activeTab === 'due') {
+    if (activeTab === "due") {
       fetchDueCards(deckId);
     } else {
       fetchCards(deckId);
     }
   }, [activeTab, deckId, fetchCards, fetchDueCards]);
 
-  const displayCards = activeTab === 'due' ? dueCards : cards;
+  const displayCards = filteredCards;
 
   // 【ローディング表示】
   if (isLoading) {
@@ -112,7 +132,10 @@ export const CardsPage = () => {
     return (
       <div className="flex flex-col h-screen">
         <div className="flex-1 flex items-center justify-center p-4">
-          <Error message="カードの取得に失敗しました" onRetry={handleRetry} />
+          <ErrorDisplay
+            message="カードの取得に失敗しました"
+            onRetry={handleRetry}
+          />
         </div>
         <Navigation />
       </div>
@@ -124,7 +147,12 @@ export const CardsPage = () => {
       <header className="bg-white shadow-sm p-4 mb-0">
         {/* 【TASK-0091】: deck_id 指定時はデッキ名を表示、未指定時は「カード一覧」を表示 */}
         {/* 🟡 黄信号: REQ-101・note.md deckName フォールバック設計より */}
-        <h1 className="text-xl font-bold text-gray-800" data-testid="cards-title">{deckName || 'カード一覧'}</h1>
+        <h1
+          className="text-xl font-bold text-gray-800"
+          data-testid="cards-title"
+        >
+          {deckName || 'カード一覧'}
+        </h1>
         <p className="text-sm text-gray-600" data-testid="card-count">
           {displayCards.length}枚のカード
         </p>
@@ -139,28 +167,43 @@ export const CardsPage = () => {
             全カードを表示
           </Link>
         )}
+        {/* 検索・フィルター・ソート（モバイル縦並び） */}
+        <div className="mt-3 flex flex-col gap-2">
+          <SearchBar value={query} onChange={setQuery} />
+          {activeTab !== "due" && (
+            <FilterChips value={reviewStatus} onChange={setReviewStatus} />
+          )}
+          <SortSelect
+            sortBy={sortBy}
+            sortOrder={sortOrder}
+            onSortByChange={setSortBy}
+            onSortOrderChange={setSortOrder}
+          />
+        </div>
       </header>
 
       {/* タブフィルタ */}
       <div className="bg-white border-b" data-testid="tab-filter">
         <div className="flex">
           <button
-            onClick={() => setActiveTab('due')}
+            type="button"
+            onClick={() => setActiveTab("due")}
             className={`flex-1 py-3 text-sm font-medium text-center border-b-2 transition-colors ${
-              activeTab === 'due'
-                ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
+              activeTab === "due"
+                ? "border-blue-600 text-blue-600"
+                : "border-transparent text-gray-500 hover:text-gray-700"
             }`}
             data-testid="tab-due"
           >
             復習対象
           </button>
           <button
-            onClick={() => setActiveTab('all')}
+            type="button"
+            onClick={() => setActiveTab("all")}
             className={`flex-1 py-3 text-sm font-medium text-center border-b-2 transition-colors ${
-              activeTab === 'all'
-                ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
+              activeTab === "all"
+                ? "border-blue-600 text-blue-600"
+                : "border-transparent text-gray-500 hover:text-gray-700"
             }`}
             data-testid="tab-all"
           >
@@ -171,7 +214,7 @@ export const CardsPage = () => {
 
       <main className="flex-1 px-4 mt-4">
         {/* 復習開始ボタン */}
-        {activeTab === 'due' && displayCards.length > 0 && (
+        {activeTab === "due" && displayCards.length > 0 && (
           <Link
             to="/review"
             className="block w-full py-3 mb-4 bg-blue-600 text-white text-center rounded-lg hover:bg-blue-700 active:bg-blue-800 min-h-[44px] transition-colors font-medium"
@@ -209,11 +252,16 @@ export const CardsPage = () => {
               />
             </svg>
             <p className="text-gray-600 mb-4">
-              {activeTab === 'due' ? '復習対象のカードはありません' : 'カードがありません'}
+              {query
+                ? "該当するカードがありません"
+                : activeTab === "due"
+                  ? "復習対象のカードはありません"
+                  : "カードがありません"}
             </p>
-            {activeTab === 'due' ? (
+            {activeTab === "due" ? (
               <button
-                onClick={() => setActiveTab('all')}
+                type="button"
+                onClick={() => setActiveTab("all")}
                 className="inline-block px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 min-h-[44px] transition-colors"
               >
                 すべてのカードを見る
@@ -228,7 +276,7 @@ export const CardsPage = () => {
             )}
           </div>
         ) : (
-          <CardList cards={displayCards} />
+          <CardList cards={displayCards} highlightQuery={query} />
         )}
       </main>
 
