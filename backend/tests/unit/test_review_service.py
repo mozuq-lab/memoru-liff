@@ -2,6 +2,7 @@
 
 import pytest
 from moto import mock_aws
+from unittest.mock import patch
 import boto3
 from datetime import datetime, timedelta, timezone
 

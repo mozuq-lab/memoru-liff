@@ -53,7 +53,7 @@ def _jwt_dev_fallback_decode(auth_header: str | None) -> str | None:
             )
         return user_id
     except Exception as e:
-        logger.error(f"Failed to decode JWT from Authorization header: {e}")
+        logger.error("Failed to decode JWT from Authorization header", extra={"error": str(e)})
         return None
 
 
@@ -78,7 +78,7 @@ def get_user_id_from_context(resolver) -> str:
         if claims and "sub" in claims:
             return claims["sub"]
     except (KeyError, TypeError, AttributeError) as e:
-        logger.warning(f"Failed to extract user_id from authorizer context: {e}")
+        logger.warning("Failed to extract user_id from authorizer context", extra={"error": str(e)})
 
     # Dev fallback: ENVIRONMENT=dev AND AWS_SAM_LOCAL=true required
     auth_header = resolver.current_event.get_header_value("Authorization")
