@@ -25,7 +25,7 @@
 
 ## 全体進捗
 
-- [ ] Phase 1: フロントエンド修正
+- [x] Phase 1: フロントエンド修正
 
 ## マイルストーン
 
@@ -40,9 +40,9 @@
 
 ### タスク一覧
 
-- [ ] [TASK-0099: 基盤修正（normalize共通化 + reset useCallback + デッドコード削除）](TASK-0099.md) - 3h (TDD) 🔵
-- [ ] [TASK-0100: コンポーネント修正（FilterChips条件表示 + SortSelect型ガード + role属性）](TASK-0100.md) - 3h (TDD) 🔵
-- [ ] [TASK-0101: 統合テスト（CardsPage + CardList）](TASK-0101.md) - 4h (TDD) 🔵
+- [x] [TASK-0099: 基盤修正（normalize共通化 + reset useCallback + デッドコード削除）](TASK-0099.md) - 3h (TDD) 🔵
+- [x] [TASK-0100: コンポーネント修正（FilterChips条件表示 + SortSelect型ガード + role属性）](TASK-0100.md) - 3h (TDD) 🔵
+- [x] [TASK-0101: 統合テスト（CardsPage + CardList）](TASK-0101.md) - 4h (TDD) 🔵
 
 ### 依存関係
 
