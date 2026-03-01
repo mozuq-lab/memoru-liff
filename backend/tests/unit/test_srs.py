@@ -2,9 +2,12 @@
 
 import pytest
 from datetime import datetime, timezone, timedelta
+from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 from services.srs import (
     calculate_sm2,
+    calculate_next_review_boundary,
     add_review_history,
     ReviewHistoryEntry,
     SM2Result,
@@ -159,6 +162,134 @@ class TestSM2Algorithm:
         """Test invalid grade raises ValueError."""
         with pytest.raises(ValueError, match="Grade must be between 0 and 5"):
             calculate_sm2(grade=6, repetitions=0, ease_factor=2.5, interval=1)
+
+
+class TestCalculateNextReviewBoundary:
+    """Tests for day-boundary normalization of next_review_at."""
+
+    def test_after_boundary_sets_next_day(self):
+        """REQ-001: 境界時刻以降の復習で翌日境界に設定される。
+        10:00 JST に復習、interval=1 → 翌日 04:00 JST。"""
+        # 2026-03-01 10:00 JST = 2026-03-01 01:00 UTC
+        mock_now = datetime(2026, 3, 1, 1, 0, 0, tzinfo=timezone.utc)
+        with patch("services.srs.datetime") as mock_dt:
+            mock_dt.now.return_value = mock_now
+            mock_dt.side_effect = lambda *args, **kwargs: datetime(*args, **kwargs)
+
+            result = calculate_next_review_boundary(
+                interval=1,
+                user_timezone="Asia/Tokyo",
+                day_start_hour=4,
+            )
+
+        # 翌日 04:00 JST = 2026-03-01 19:00 UTC
+        expected = datetime(2026, 3, 1, 19, 0, 0, tzinfo=timezone.utc)
+        assert result == expected
+
+    def test_before_boundary_treats_as_previous_day(self):
+        """REQ-001: 境界時刻以前の復習（前日扱い）で当日境界に設定される。
+        01:00 JST に復習（境界前=前日扱い）、interval=1 → 当日 04:00 JST。"""
+        # 2026-03-01 01:00 JST = 2026-02-28 16:00 UTC
+        mock_now = datetime(2026, 2, 28, 16, 0, 0, tzinfo=timezone.utc)
+        with patch("services.srs.datetime") as mock_dt:
+            mock_dt.now.return_value = mock_now
+            mock_dt.side_effect = lambda *args, **kwargs: datetime(*args, **kwargs)
+
+            result = calculate_next_review_boundary(
+                interval=1,
+                user_timezone="Asia/Tokyo",
+                day_start_hour=4,
+            )
+
+        # 当日 04:00 JST = 2026-02-28 19:00 UTC
+        expected = datetime(2026, 2, 28, 19, 0, 0, tzinfo=timezone.utc)
+        assert result == expected
+
+    def test_interval_greater_than_one(self):
+        """REQ-001: interval > 1 の場合に正しい日数後の境界に設定される。
+        14:00 JST に復習、interval=6 → 6日後 04:00 JST。"""
+        # 2026-03-01 14:00 JST = 2026-03-01 05:00 UTC
+        mock_now = datetime(2026, 3, 1, 5, 0, 0, tzinfo=timezone.utc)
+        with patch("services.srs.datetime") as mock_dt:
+            mock_dt.now.return_value = mock_now
+            mock_dt.side_effect = lambda *args, **kwargs: datetime(*args, **kwargs)
+
+            result = calculate_next_review_boundary(
+                interval=6,
+                user_timezone="Asia/Tokyo",
+                day_start_hour=4,
+            )
+
+        # 2026-03-07 04:00 JST = 2026-03-06 19:00 UTC
+        expected = datetime(2026, 3, 6, 19, 0, 0, tzinfo=timezone.utc)
+        assert result == expected
+
+    def test_default_parameters(self):
+        """デフォルト値 (Asia/Tokyo, day_start_hour=4) で正しく動作する。"""
+        mock_now = datetime(2026, 3, 1, 1, 0, 0, tzinfo=timezone.utc)  # 10:00 JST
+        with patch("services.srs.datetime") as mock_dt:
+            mock_dt.now.return_value = mock_now
+            mock_dt.side_effect = lambda *args, **kwargs: datetime(*args, **kwargs)
+
+            result = calculate_next_review_boundary(interval=1)
+
+        expected = datetime(2026, 3, 1, 19, 0, 0, tzinfo=timezone.utc)
+        assert result == expected
+
+    def test_day_start_hour_14_night_shift(self):
+        """REQ-002: day_start_hour=14 での夜勤ユーザー向け設定テスト。
+        23:00 JST に復習 (14以降)、interval=1 → 翌日 14:00 JST。"""
+        # 2026-03-01 23:00 JST = 2026-03-01 14:00 UTC
+        mock_now = datetime(2026, 3, 1, 14, 0, 0, tzinfo=timezone.utc)
+        with patch("services.srs.datetime") as mock_dt:
+            mock_dt.now.return_value = mock_now
+            mock_dt.side_effect = lambda *args, **kwargs: datetime(*args, **kwargs)
+
+            result = calculate_next_review_boundary(
+                interval=1,
+                user_timezone="Asia/Tokyo",
+                day_start_hour=14,
+            )
+
+        # 2026-03-02 14:00 JST = 2026-03-02 05:00 UTC
+        expected = datetime(2026, 3, 2, 5, 0, 0, tzinfo=timezone.utc)
+        assert result == expected
+
+    def test_day_start_hour_0_midnight(self):
+        """day_start_hour=0 (深夜0時) でも正しく動作する。"""
+        # 2026-03-01 15:00 JST = 2026-03-01 06:00 UTC
+        mock_now = datetime(2026, 3, 1, 6, 0, 0, tzinfo=timezone.utc)
+        with patch("services.srs.datetime") as mock_dt:
+            mock_dt.now.return_value = mock_now
+            mock_dt.side_effect = lambda *args, **kwargs: datetime(*args, **kwargs)
+
+            result = calculate_next_review_boundary(
+                interval=1,
+                user_timezone="Asia/Tokyo",
+                day_start_hour=0,
+            )
+
+        # 2026-03-02 00:00 JST = 2026-03-01 15:00 UTC
+        expected = datetime(2026, 3, 1, 15, 0, 0, tzinfo=timezone.utc)
+        assert result == expected
+
+    def test_utc_timezone(self):
+        """異なるタイムゾーン (UTC) での正規化テスト。"""
+        # 2026-03-01 10:00 UTC
+        mock_now = datetime(2026, 3, 1, 10, 0, 0, tzinfo=timezone.utc)
+        with patch("services.srs.datetime") as mock_dt:
+            mock_dt.now.return_value = mock_now
+            mock_dt.side_effect = lambda *args, **kwargs: datetime(*args, **kwargs)
+
+            result = calculate_next_review_boundary(
+                interval=1,
+                user_timezone="UTC",
+                day_start_hour=4,
+            )
+
+        # 2026-03-02 04:00 UTC
+        expected = datetime(2026, 3, 2, 4, 0, 0, tzinfo=timezone.utc)
+        assert result == expected
 
 
 class TestReviewHistory:

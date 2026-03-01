@@ -85,6 +85,46 @@ def calculate_sm2(
     )
 
 
+def calculate_next_review_boundary(
+    interval: int,
+    user_timezone: str = "Asia/Tokyo",
+    day_start_hour: int = 4,
+) -> datetime:
+    """Calculate next_review_at normalized to user's day boundary.
+
+    Args:
+        interval: Days until next review (from SM-2 calculation).
+        user_timezone: User's IANA timezone string.
+        day_start_hour: Hour when user's "day" starts (0-23).
+
+    Returns:
+        UTC datetime set to the day boundary time.
+    """
+    from zoneinfo import ZoneInfo
+
+    user_tz = ZoneInfo(user_timezone)
+    now_utc = datetime.now(timezone.utc)
+    local_now = now_utc.astimezone(user_tz)
+
+    # 有効日付: 境界時刻前なら前日扱い
+    effective_date = local_now.date()
+    if local_now.hour < day_start_hour:
+        effective_date -= timedelta(days=1)
+
+    # interval 日後の境界時刻
+    target_date = effective_date + timedelta(days=interval)
+    boundary = datetime(
+        target_date.year,
+        target_date.month,
+        target_date.day,
+        day_start_hour,
+        0,
+        0,
+        tzinfo=user_tz,
+    )
+    return boundary.astimezone(timezone.utc).replace(microsecond=0)
+
+
 @dataclass
 class ReviewHistoryEntry:
     """Single entry in review history."""
