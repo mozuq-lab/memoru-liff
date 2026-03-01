@@ -164,12 +164,12 @@ def test_link_line_event_exists_with_correct_path(api_events):
 
 
 def test_total_http_api_event_count(api_events):
-    """TC-042-04: 整合性 - ApiFunction の HttpApi イベント総数が 13 個
+    """TC-042-04: 整合性 - ApiFunction の HttpApi イベント総数が 14 個
 
     期待イベント:
     1. GetUser          - GET /users/me
     2. UpdateUser       - PUT /users/me/settings
-    3. LinkLine         - POST /users/link-line       (新規追加)
+    3. LinkLine         - POST /users/link-line
     4. UnlinkLine       - POST /users/me/unlink-line
     5. ListCards        - GET /cards
     6. CreateCard       - POST /cards
@@ -177,12 +177,13 @@ def test_total_http_api_event_count(api_events):
     8. UpdateCard       - PUT /cards/{cardId}
     9. DeleteCard       - DELETE /cards/{cardId}
     10. GetDueCards     - GET /cards/due
-    11. SubmitReview    - POST /reviews/{cardId}      (パス修正)
-    12. GetReviewStats  - GET /reviews/stats
-    13. GenerateCards   - POST /cards/generate
+    11. SubmitReview    - POST /reviews/{cardId}
+    12. UndoReview      - POST /reviews/{cardId}/undo
+    13. GetReviewStats  - GET /reviews/stats
+    14. GenerateCards   - POST /cards/generate
     """
-    assert len(api_events) == 13, (
-        f"期待: 13 イベント（既存12 + LinkLine）、実際: {len(api_events)} イベント\n"
+    assert len(api_events) == 14, (
+        f"期待: 14 イベント、実際: {len(api_events)} イベント\n"
         f"現在のイベント: {list(api_events.keys())}"
     )
 
@@ -264,12 +265,13 @@ def test_sam_paths_match_handler_routes(api_events, handler_routes):
         ("DeleteCard", "/cards/{cardId}", "DELETE"),
         ("GetDueCards", "/cards/due", "GET"),
         ("SubmitReview", "/reviews/{cardId}", "POST"),      # 修正対象
+        ("UndoReview", "/reviews/{cardId}/undo", "POST"),
         ("GetReviewStats", "/reviews/stats", "GET"),
         ("GenerateCards", "/cards/generate", "POST"),
     ],
 )
 def test_event_path_and_method(api_events, event_name, expected_path, expected_method):
-    """TC-042-07: 整合性 - 全 13 エンドポイントのパスとメソッドが期待通りであること"""
+    """TC-042-07: 整合性 - 全 14 エンドポイントのパスとメソッドが期待通りであること"""
     assert event_name in api_events, (
         f"イベント '{event_name}' が SAM テンプレートに存在しません。"
         f" 現在のイベント: {list(api_events.keys())}"
@@ -301,8 +303,8 @@ def test_no_duplicate_event_names(sam_template):
         if ev.get("Type") == "HttpApi"
     }
     # YAML で重複キーは後勝ちになるため、パース後にイベント数が期待通りかで検証
-    assert len(http_api_events) == 13, (
-        f"期待: 13 イベント, 実際: {len(http_api_events)} イベント\n"
+    assert len(http_api_events) == 14, (
+        f"期待: 14 イベント, 実際: {len(http_api_events)} イベント\n"
         f"イベント: {list(http_api_events.keys())}"
     )
 
