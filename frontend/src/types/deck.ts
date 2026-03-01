@@ -18,8 +18,8 @@ export interface CreateDeckRequest {
 
 export interface UpdateDeckRequest {
   name?: string;
-  description?: string;
-  color?: string;
+  description?: string | null;
+  color?: string | null;
 }
 
 export interface DeckListResponse {

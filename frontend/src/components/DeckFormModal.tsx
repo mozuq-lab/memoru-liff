@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { Deck, CreateDeckRequest, UpdateDeckRequest } from '@/types';
 
 const PRESET_COLORS = [
@@ -13,6 +13,13 @@ const PRESET_COLORS = [
   '#6366F1', // indigo
   '#14B8A6', // teal
 ];
+
+/** edit モード初期値スナップショット */
+interface DeckFormInitialValues {
+  name: string;
+  description: string;
+  color: string | null;
+}
 
 interface DeckFormModalProps {
   mode: 'create' | 'edit';
@@ -29,14 +36,25 @@ export const DeckFormModal = ({ mode, deck, isOpen, onClose, onSubmit }: DeckFor
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // edit モード: モーダルを開いた瞬間の値をスナップショットとして保持
+  // deck prop が再レンダリングで変わっても、比較基準は起動時スナップショットを使う
+  const initialValues = useRef<DeckFormInitialValues | null>(null);
+
   // フォーム初期化
   useEffect(() => {
     if (isOpen) {
       if (mode === 'edit' && deck) {
-        setName(deck.name);
-        setDescription(deck.description ?? '');
-        setColor(deck.color ?? undefined);
+        const snapshot: DeckFormInitialValues = {
+          name: deck.name,
+          description: deck.description ?? '',
+          color: deck.color ?? null,
+        };
+        initialValues.current = snapshot;
+        setName(snapshot.name);
+        setDescription(snapshot.description);
+        setColor(snapshot.color ?? undefined);
       } else {
+        initialValues.current = null;
         setName('');
         setDescription('');
         setColor(undefined);
@@ -69,11 +87,28 @@ export const DeckFormModal = ({ mode, deck, isOpen, onClose, onSubmit }: DeckFor
         if (color) data.color = color;
         await onSubmit(data);
       } else {
-        const data: UpdateDeckRequest = {};
-        if (trimmedName !== deck?.name) data.name = trimmedName;
-        if (description.trim() !== (deck?.description ?? '')) data.description = description.trim();
-        if (color !== (deck?.color ?? undefined)) data.color = color;
-        await onSubmit(data);
+        // edit モード: 差分送信ロジック
+        // 初期値スナップショットと比較し、変更されたフィールドのみ payload に含める
+        const initial = initialValues.current;
+        const normalizedDescription = description.trim();
+        // color: フォーム値 undefined は null に正規化（選択解除を null として比較）
+        const normalizedColor: string | null = color ?? null;
+
+        const payload: UpdateDeckRequest = {};
+
+        if (trimmedName !== (initial?.name ?? '')) {
+          payload.name = trimmedName;
+        }
+        if (normalizedDescription !== (initial?.description ?? '')) {
+          // 空文字は null に変換（バックエンドで REMOVE）
+          payload.description = normalizedDescription === '' ? null : normalizedDescription;
+        }
+        if (normalizedColor !== (initial?.color ?? null)) {
+          // 選択解除（undefined → null）はそのまま null として送信（バックエンドで REMOVE）
+          payload.color = normalizedColor;
+        }
+
+        await onSubmit(payload);
       }
       onClose();
     } catch (err) {
