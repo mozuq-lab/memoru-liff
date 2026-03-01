@@ -12,6 +12,11 @@ from models.deck import Deck
 
 logger = Logger()
 
+# Sentinel value to distinguish "not provided" from explicit None (null).
+# 【Sentinel 定数】: update_deck で description/color が省略された場合に「変更なし」を表現する。
+# 🔵 card_service.py と同一パターン (TASK-0085 参照)
+_UNSET = object()
+
 
 class DeckServiceError(Exception):
     """Base exception for deck service errors."""
@@ -195,64 +200,110 @@ class DeckService:
         self,
         user_id: str,
         deck_id: str,
-        name: Optional[str] = None,
-        description: Optional[str] = None,
-        color: Optional[str] = None,
+        name: Any = _UNSET,
+        description: Any = _UNSET,
+        color: Any = _UNSET,
     ) -> Deck:
         """Update a deck.
+
+        【Sentinel パターン】: 各フィールドは 3 状態を持つ:
+          - _UNSET（省略）: 変更なし（DynamoDB 操作なし）
+          - None（明示的 null）: DynamoDB から属性を REMOVE
+          - 文字列値: DynamoDB に SET
 
         Args:
             user_id: The user's ID.
             deck_id: The deck's ID.
-            name: Optional new deck name.
-            description: Optional new deck description.
-            color: Optional new hex color code.
+            name: _UNSET（省略）=変更なし, 文字列=SET。name は必須フィールドのため REMOVE 不可。
+            description: _UNSET（省略）=変更なし, None=REMOVE（DynamoDB 属性削除）, 文字列=SET。
+            color: _UNSET（省略）=変更なし, None=REMOVE（DynamoDB 属性削除）, 文字列=SET。
 
         Returns:
             Updated Deck object.
 
         Raises:
             DeckNotFoundError: If deck does not exist.
+
+        🔵 信頼性レベル: 青信号 - card_service.py update_card の deck_id Sentinel パターンと同一設計
         """
-        # Verify deck exists
+        # 【デッキ存在確認】: 更新前にデッキが存在することを確認する
         deck = self.get_deck(user_id, deck_id)
 
-        # Build update expression
+        # 【UpdateExpression 構築準備】: SET パーツと REMOVE パーツを別々に収集する
+        # 🔵 card_service.py の update_card と同一パターン
         update_parts = []
+        remove_parts = []
         expression_values: Dict[str, Any] = {}
         expression_names: Dict[str, str] = {}
 
-        if name is not None:
+        # 【name 処理】: name は必須フィールドのため REMOVE はサポートしない
+        # _UNSET（省略）→ 変更なし、値→ SET のみ
+        # 🔵 信頼性レベル: 青信号 - 要件定義 REQ-101 より name は必須
+        if name is not _UNSET:
             update_parts.append("#name = :name")
             expression_values[":name"] = name
             expression_names["#name"] = "name"
             deck.name = name
 
-        if description is not None:
+        # 【description 処理】: Sentinel パターンで 3 状態を判定
+        # None → REMOVE（DynamoDB から属性削除）
+        # _UNSET → 変更なし（何もしない）
+        # 文字列値 → SET
+        # 🔵 信頼性レベル: 青信号 - REQ-105 より description はオプショナル
+        if description is None:
+            # 【REMOVE 対象追加】: DynamoDB から description 属性を削除する
+            remove_parts.append("description")
+            deck.description = None
+        elif description is not _UNSET:
+            # 【SET 対象追加】: description を新しい値で更新する
             update_parts.append("description = :description")
             expression_values[":description"] = description
             deck.description = description
+        # description is _UNSET → 変更なし（何もしない）
 
-        if color is not None:
+        # 【color 処理】: description と同一の Sentinel パターン
+        # None → REMOVE（DynamoDB から属性削除）
+        # _UNSET → 変更なし（何もしない）
+        # 文字列値 → SET
+        # 🔵 信頼性レベル: 青信号 - REQ-106 より color はオプショナル
+        if color is None:
+            # 【REMOVE 対象追加】: DynamoDB から color 属性を削除する
+            remove_parts.append("color")
+            deck.color = None
+        elif color is not _UNSET:
+            # 【SET 対象追加】: color を新しい値で更新する
             update_parts.append("color = :color")
             expression_values[":color"] = color
             deck.color = color
+        # color is _UNSET → 変更なし（何もしない）
 
-        if not update_parts:
+        # 【変更なし判定】: SET も REMOVE もない場合は DynamoDB 操作なしで返す
+        if not update_parts and not remove_parts:
             return deck
 
+        # 【updated_at 更新】: 変更があった場合は updated_at を SET に追加する
+        # REMOVE のみの場合でも updated_at は SET 側に追加するため update_parts を使う
+        # 🔵 信頼性レベル: 青信号 - TC-016 より REMOVE のみでも updated_at は更新が必要
         now = datetime.now(timezone.utc)
         update_parts.append("updated_at = :updated_at")
         expression_values[":updated_at"] = now.isoformat()
         deck.updated_at = now
 
         try:
-            update_expression = "SET " + ", ".join(update_parts)
+            # 【UpdateExpression 構築】: SET句（値更新 + updated_at）と REMOVE句（属性削除）を結合する
+            # 🔵 card_service.py update_card の SET + REMOVE 構築と同一パターン
+            update_expression = ""
+            if update_parts:
+                update_expression += "SET " + ", ".join(update_parts)
+            if remove_parts:
+                update_expression += " REMOVE " + ", ".join(remove_parts)
+
             update_kwargs: Dict[str, Any] = {
                 "Key": {"user_id": user_id, "deck_id": deck_id},
                 "UpdateExpression": update_expression,
-                "ExpressionAttributeValues": expression_values,
             }
+            if expression_values:
+                update_kwargs["ExpressionAttributeValues"] = expression_values
             if expression_names:
                 update_kwargs["ExpressionAttributeNames"] = expression_names
 

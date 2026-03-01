@@ -107,8 +107,14 @@ def update_deck(deck_id: str):
     logger.info(f"Updating deck {deck_id} for user_id: {user_id}")
 
     try:
+        # 【バリデーション + Sentinel 判別】: Pydantic でフォーマット検証し、
+        # raw body の key 存在チェックで null/未送信を判別する
+        # 🔵 信頼性レベル: 青信号 - Red フェーズ Green 実装方針より
         body = router.current_event.json_body
-        request = UpdateDeckRequest(**body)
+        # 【Pydantic バリデーション専用】: color フォーマット等の検証のために先に実行する
+        # 🔵 戻り値は使用しない。null/未送信の判別は raw body の key 存在チェックで行うため。
+        # Pydantic は null と未送信を区別できないので、handler で raw body を直接参照する必要がある。
+        UpdateDeckRequest(**body)  # noqa: F841
     except ValidationError as e:
         logger.warning(f"Validation error: {e}")
         return Response(
@@ -124,12 +130,24 @@ def update_deck(deck_id: str):
         )
 
     try:
+        # 【Sentinel パターン適用】: JSON body の key 存在チェックで null/未送信を判別する
+        # key が存在する場合は body の値（None または文字列）をそのまま渡す
+        # key が存在しない場合は _UNSET（省略）を渡す → deck_service 側で「変更なし」と判定
+        # 🔵 信頼性レベル: 青信号 - Red フェーズ Green 実装方針より
+        update_kwargs = {}
+        if "name" in body:
+            update_kwargs["name"] = body["name"]
+        if "description" in body:
+            # 【null 通過】: description=None は REMOVE 操作として deck_service に渡す
+            update_kwargs["description"] = body["description"]
+        if "color" in body:
+            # 【null 通過】: color=None は REMOVE 操作として deck_service に渡す
+            update_kwargs["color"] = body["color"]
+
         deck = deck_service.update_deck(
             user_id=user_id,
             deck_id=deck_id,
-            name=request.name,
-            description=request.description,
-            color=request.color,
+            **update_kwargs,
         )
         card_counts = deck_service.get_deck_card_counts(user_id, [deck_id])
         due_counts = deck_service.get_deck_due_counts(user_id, [deck_id])
