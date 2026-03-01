@@ -5,7 +5,6 @@ import os
 import random
 import re
 import time
-from dataclasses import dataclass
 from typing import List, Literal, Optional
 
 import boto3
@@ -19,6 +18,8 @@ from services.ai_service import (
     AIRateLimitError,
     AIInternalError,
     AIParseError,
+    GeneratedCard,
+    GenerationResult,
     GradingResult,
     LearningAdvice,
 )
@@ -52,25 +53,6 @@ class BedrockParseError(BedrockServiceError, AIParseError):
     """Raised when Bedrock response cannot be parsed."""
 
     pass
-
-
-@dataclass
-class GeneratedCard:
-    """A generated flashcard."""
-
-    front: str
-    back: str
-    suggested_tags: List[str]
-
-
-@dataclass
-class GenerationResult:
-    """Result of card generation."""
-
-    cards: List[GeneratedCard]
-    input_length: int
-    model_used: str
-    processing_time_ms: int
 
 
 class BedrockService:
