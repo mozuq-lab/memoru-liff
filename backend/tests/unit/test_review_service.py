@@ -231,8 +231,8 @@ class TestSubmitReviewDayBoundaryNormalization:
         # next_review_at = 2024-06-16 04:00 JST = 2024-06-15 19:00 UTC
         expected = datetime(2024, 6, 15, 19, 0, 0, tzinfo=timezone.utc)
         actual_due_date = response.updated.due_date
-        # due_date is the date portion of next_review_at
-        assert actual_due_date == expected.date().isoformat() or actual_due_date == "2024-06-16"
+        # due_date is the UTC date portion of next_review_at (2024-06-15 19:00 UTC)
+        assert actual_due_date == "2024-06-15"
 
     def test_next_review_at_stored_in_dynamodb_as_normalized(self, review_service, sample_card, dynamodb_tables):
         """Test that the normalized next_review_at is actually stored in DynamoDB."""
