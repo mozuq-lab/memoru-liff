@@ -19,7 +19,7 @@
 |--------|------|--------|------|------|------|
 | TASK-0116 | srs.py import 移動と Logger 追加 | DIRECT | [x] 完了 | 0.25h | なし |
 | TASK-0117 | Decimal→int 正規化の実装 | TDD | [x] 完了 | 0.5h | TASK-0116 |
-| TASK-0118 | ZoneInfo フォールバック実装 | TDD | [ ] 未着手 | 0.5h | TASK-0116 |
+| TASK-0118 | ZoneInfo フォールバック実装 | TDD | [x] 完了 | 0.5h | TASK-0116 |
 | TASK-0119 | validate_timezone ZoneInfo 検証 | TDD | [ ] 未着手 | 0.5h | なし |
 | TASK-0120 | from_dynamodb_item デフォルト修正 | DIRECT | [ ] 未着手 | 0.25h | なし |
 | TASK-0121 | test_review_service アサーション修正 | TDD | [ ] 未着手 | 0.5h | なし |

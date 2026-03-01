@@ -338,6 +338,53 @@ class TestCalculateNextReviewBoundary:
                 day_start_hour=Decimal(-1),
             )
 
+    def test_invalid_timezone_fallback(self):
+        """REQ-003: 不正 TZ で Asia/Tokyo にフォールバックすること。"""
+        mock_now = datetime(2026, 3, 1, 1, 0, 0, tzinfo=timezone.utc)  # 10:00 JST
+        with patch("services.srs.datetime") as mock_dt, \
+             patch("services.srs.logger") as mock_logger:
+            mock_dt.now.return_value = mock_now
+            mock_dt.side_effect = lambda *args, **kwargs: datetime(*args, **kwargs)
+
+            result = calculate_next_review_boundary(
+                interval=1,
+                user_timezone="Foo/Bar",
+                day_start_hour=4,
+            )
+
+            mock_logger.warning.assert_called_once()
+            assert "Foo/Bar" in mock_logger.warning.call_args[0][0]
+
+        # Should produce same result as Asia/Tokyo
+        expected = datetime(2026, 3, 1, 19, 0, 0, tzinfo=timezone.utc)
+        assert result == expected
+
+    def test_fallback_produces_valid_result(self):
+        """REQ-003: フォールバック時の結果が Asia/Tokyo と一致すること。"""
+        mock_now = datetime(2026, 3, 1, 1, 0, 0, tzinfo=timezone.utc)
+
+        with patch("services.srs.datetime") as mock_dt:
+            mock_dt.now.return_value = mock_now
+            mock_dt.side_effect = lambda *args, **kwargs: datetime(*args, **kwargs)
+
+            result_fallback = calculate_next_review_boundary(
+                interval=1,
+                user_timezone="Invalid/Zone",
+                day_start_hour=4,
+            )
+
+        with patch("services.srs.datetime") as mock_dt:
+            mock_dt.now.return_value = mock_now
+            mock_dt.side_effect = lambda *args, **kwargs: datetime(*args, **kwargs)
+
+            result_tokyo = calculate_next_review_boundary(
+                interval=1,
+                user_timezone="Asia/Tokyo",
+                day_start_hour=4,
+            )
+
+        assert result_fallback == result_tokyo
+
     def test_utc_timezone(self):
         """異なるタイムゾーン (UTC) での正規化テスト。"""
         # 2026-03-01 10:00 UTC

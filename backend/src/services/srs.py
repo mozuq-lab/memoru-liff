@@ -110,7 +110,12 @@ def calculate_next_review_boundary(
     if not 0 <= day_start_hour <= 23:
         raise ValueError(f"day_start_hour must be 0-23, got {day_start_hour}")
 
-    user_tz = ZoneInfo(user_timezone)
+    try:
+        user_tz = ZoneInfo(user_timezone)
+    except (ZoneInfoNotFoundError, KeyError):
+        logger.warning(f"Invalid timezone '{user_timezone}', falling back to Asia/Tokyo")
+        user_tz = ZoneInfo("Asia/Tokyo")
+
     now_utc = datetime.now(timezone.utc)
     local_now = now_utc.astimezone(user_tz)
 
