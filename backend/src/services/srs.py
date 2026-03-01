@@ -3,6 +3,11 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from aws_lambda_powertools import Logger
+
+logger = Logger()
 
 
 @dataclass
@@ -100,8 +105,6 @@ def calculate_next_review_boundary(
     Returns:
         UTC datetime set to the day boundary time.
     """
-    from zoneinfo import ZoneInfo
-
     user_tz = ZoneInfo(user_timezone)
     now_utc = datetime.now(timezone.utc)
     local_now = now_utc.astimezone(user_tz)
