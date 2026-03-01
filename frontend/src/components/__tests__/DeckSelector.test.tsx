@@ -146,4 +146,77 @@ describe('DeckSelector', () => {
       expect(select).toBeDisabled();
     });
   });
+
+  // ============================================================
+  // TASK-0092: null値ハンドリングテスト
+  // ============================================================
+  describe('null値ハンドリング', () => {
+    // ----------------------------------------------------------------
+    // TC-N01: value が null の場合、「未分類」が選択状態になる
+    // ----------------------------------------------------------------
+    it('value=null の場合、「未分類」（空文字列）が選択される', () => {
+      // 【テスト目的】: null 値が正しく空文字列の option にマッピングされることを確認
+      // 【テスト内容】: value={null} を指定した時に select 要素の value が '' になるかを検証
+      // 【期待される動作】: select.value === ''
+      // 🔵 要件定義 REQ-002・受け入れ基準 TC-103-05 より
+
+      const onChange = vi.fn();
+      renderDeckSelector({ value: null, onChange });
+
+      const select = screen.getByRole('combobox') as HTMLSelectElement;
+      expect(select.value).toBe(''); // 【確認内容】: null が空文字列にマッピングされている 🔵
+    });
+
+    // ----------------------------------------------------------------
+    // TC-N02: value が undefined の場合、「未分類」が選択状態になる
+    // ----------------------------------------------------------------
+    it('value=undefined の場合、「未分類」（空文字列）が選択される', () => {
+      // 【テスト目的】: undefined 値が正しく空文字列の option にマッピングされることを確認
+      // 【テスト内容】: value={undefined} を指定した時に select 要素の value が '' になるかを検証
+      // 【期待される動作】: select.value === ''
+      // 🔵 要件定義 REQ-104・受け入れ基準 TC-104-01 より
+
+      const onChange = vi.fn();
+      renderDeckSelector({ value: undefined, onChange });
+
+      const select = screen.getByRole('combobox') as HTMLSelectElement;
+      expect(select.value).toBe(''); // 【確認内容】: undefined が空文字列にマッピングされている 🔵
+    });
+
+    // ----------------------------------------------------------------
+    // TC-N03: 「未分類」から通常デッキへの変更で値が送信される
+    // ----------------------------------------------------------------
+    it('「未分類」から通常デッキに変更すると onChange が deck_id で呼ばれる', () => {
+      // 【テスト目的】: null 値から deck_id 文字列への変更が正しく handleChange に反映されること
+      // 【テスト内容】: 「未分類」→「英語」への変更時に onChange('deck-1') が呼ばれるかを検証
+      // 【期待される動作】: onChange が deck_id 値で呼ばれる
+      // 🔵 要件定義 REQ-002・受け入れ基準 TC-103-06 より
+
+      const onChange = vi.fn();
+      renderDeckSelector({ value: null, onChange });
+
+      const select = screen.getByRole('combobox');
+      fireEvent.change(select, { target: { value: 'deck-1' } });
+
+      expect(onChange).toHaveBeenCalledWith('deck-1'); // 【確認内容】: deck_id が送信される 🔵
+    });
+
+    // ----------------------------------------------------------------
+    // TC-N04: 通常デッキから「未分類」への変更で null が送信される
+    // ----------------------------------------------------------------
+    it('通常デッキから「未分類」に変更すると onChange が null で呼ばれる', () => {
+      // 【テスト目的】: deck_id 値から null への明示的な変更が handleChange に反映されること
+      // 【テスト内容】: 「英語」→「未分類」への変更時に onChange(null) が呼ばれるかを検証
+      // 【期待される動作】: onChange が null で呼ばれる
+      // 🔵 要件定義 REQ-002・EDGE-101 より
+
+      const onChange = vi.fn();
+      renderDeckSelector({ value: 'deck-1', onChange });
+
+      const select = screen.getByRole('combobox');
+      fireEvent.change(select, { target: { value: '' } });
+
+      expect(onChange).toHaveBeenCalledWith(null); // 【確認内容】: null が明示的に送信される 🔵
+    });
+  });
 });

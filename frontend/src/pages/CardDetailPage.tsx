@@ -144,12 +144,17 @@ export const CardDetailPage = () => {
   }, [id]);
 
   // 【デッキ変更ハンドラ】
+  // 【修正内容】: TASK-0092 で null 送信に対応。deckId が null の場合は明示的に null を送信し、
+  // バックエンド TASK-0085 の Sentinel パターン（deck_id を REMOVE）と連携する 🔵
   const handleDeckChange = useCallback(async (deckId: string | null) => {
     if (!id) return;
 
     setError(null);
     try {
-      const updatedCard = await cardsApi.updateCard(id, { deck_id: deckId ?? undefined });
+      // 【送信ロジック】: deckId=null の場合は { deck_id: null } を送信（明示的クリア）
+      // deckId=undefined なら送信しない（変更なし）、deckId='xxx' なら { deck_id: 'xxx' } を送信
+      const updatePayload = deckId === undefined ? {} : { deck_id: deckId };
+      const updatedCard = await cardsApi.updateCard(id, updatePayload);
       setCard(updatedCard);
       setSuccessMessage('デッキを変更しました');
     } catch (_err) {

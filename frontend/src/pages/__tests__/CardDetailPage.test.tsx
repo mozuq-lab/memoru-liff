@@ -28,6 +28,37 @@ vi.mock('@/services/api', () => ({
   },
 }));
 
+// DecksContext モック
+const mockFetchDecks = vi.fn();
+const mockDecks = [
+  {
+    deck_id: 'deck-1',
+    user_id: 'user-1',
+    name: '英語',
+    color: '#EF4444',
+    card_count: 10,
+    due_count: 3,
+    created_at: '2024-01-01T00:00:00Z',
+  },
+  {
+    deck_id: 'deck-2',
+    user_id: 'user-1',
+    name: '数学',
+    color: '#3B82F6',
+    card_count: 5,
+    due_count: 1,
+    created_at: '2024-01-02T00:00:00Z',
+  },
+];
+vi.mock('@/contexts/DecksContext', () => ({
+  useDecksContext: () => ({
+    decks: mockDecks,
+    isLoading: false,
+    error: null,
+    fetchDecks: mockFetchDecks,
+  }),
+}));
+
 // useNavigate モック
 const mockNavigate = vi.fn();
 vi.mock('react-router-dom', async () => {
@@ -47,6 +78,7 @@ const mockCard: Card = {
   ease_factor: 2.5,
   interval: 7,
   repetitions: 3,
+  deck_id: 'deck-1', // 【初期値】: null 送信テストのために初期値を deck-1 に設定 🔵
   next_review_at: '2024-01-20',
   created_at: '2024-01-01T00:00:00Z',
   updated_at: '2024-01-15T00:00:00Z',
@@ -367,6 +399,204 @@ describe('CardDetailPage', () => {
   // ============================================================
   // TASK-0079: フロントエンド プリセットボタンUI テストケース
   // ============================================================
+  // ============================================================
+  // TASK-0092: デッキ変更（null送信）テストケース
+  // ============================================================
+  describe('デッキ変更（null送信）', () => {
+    // ----------------------------------------------------------------
+    // TC-D01: デッキ選択時に updateCard API が呼ばれる
+    // ----------------------------------------------------------------
+    it('デッキを選択すると updateCard API が呼ばれる', async () => {
+      // 【テスト目的】: デッキセレクターでデッキを選択した時にAPI呼び出しが行われることを確認
+      // 【テスト内容】: DeckSelector の onChange ハンドラが updateCard を呼び出すかを検証
+      // 【期待される動作】: cardsApi.updateCard(cardId, { deck_id: 'deck-1' }) が呼ばれる
+      // 🔵 要件定義 REQ-002・受け入れ基準 TC-103-03 より
+
+      const user = userEvent.setup();
+
+      // 【テストデータ準備】: デッキ変更後のカードを返すよう設定
+      const updatedCard = { ...mockCard, deck_id: 'deck-1' };
+      mockUpdateCard.mockResolvedValue(updatedCard);
+
+      renderCardDetailPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('card-deck')).toBeInTheDocument();
+      });
+
+      // 【実際の処理実行】: デッキセレクターを変更
+      const select = screen.getByRole('combobox') as HTMLSelectElement;
+      await user.selectOptions(select, 'deck-1');
+
+      // 【結果検証】: updateCard API が呼ばれること
+      await waitFor(() => {
+        expect(mockUpdateCard).toHaveBeenCalledWith('card-1', { deck_id: 'deck-1' }); // 【確認内容】: deck_id に文字列を送信 🔵
+      });
+    });
+
+    // ----------------------------------------------------------------
+    // TC-D02: 「未分類」選択時に null が送信される
+    // ----------------------------------------------------------------
+    it('「未分類」を選択すると updateCard API が { deck_id: null } で呼ばれる', async () => {
+      // 【テスト目的】: 「未分類」選択時に null が明示的に送信されることを確認
+      // 【テスト内容】: DeckSelector で空文字列が選択された時に null に変換されるかを検証
+      // 【期待される動作】: cardsApi.updateCard(cardId, { deck_id: null }) が呼ばれる
+      // 🔵 要件定義 REQ-002, REQ-103・EDGE-101 より
+
+      const user = userEvent.setup();
+
+      // 【テストデータ準備】: deck_id が null になったカードを返すよう設定
+      const updatedCard = { ...mockCard, deck_id: null };
+      mockUpdateCard.mockResolvedValue(updatedCard);
+
+      renderCardDetailPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('card-deck')).toBeInTheDocument();
+      });
+
+      // 【初期状態確認】: 初期値は deck_id を持つ
+      const select = screen.getByRole('combobox') as HTMLSelectElement;
+      expect(select.value).not.toBe(''); // 初期値が空でない
+
+      // 【実際の処理実行】: 「未分類」（空文字列）を選択
+      await user.selectOptions(select, '');
+
+      // 【結果検証】: updateCard が null を含むオブジェクトで呼ばれること
+      await waitFor(() => {
+        expect(mockUpdateCard).toHaveBeenCalledWith('card-1', { deck_id: null }); // 【確認内容】: null が明示的に送信される 🔵
+      });
+    });
+
+    // ----------------------------------------------------------------
+    // TC-D03: deck_id null 送信成功時に成功メッセージが表示される
+    // ----------------------------------------------------------------
+    it('「未分類」選択後 API 成功時に「デッキを変更しました」メッセージが表示される', async () => {
+      // 【テスト目的】: null 送信成功時に成功メッセージが表示されること
+      // 【テスト内容】: handleDeckChange の成功フローで setSuccessMessage が呼ばれるかを検証
+      // 【期待される動作】: data-testid="success-message" に「デッキを変更しました」が表示される
+      // 🔵 設計文書 architecture.md・要件定義 REQ-203 より
+
+      const user = userEvent.setup();
+
+      // 【テストデータ準備】: API成功を返すよう設定
+      const updatedCard = { ...mockCard, deck_id: null };
+      mockUpdateCard.mockResolvedValue(updatedCard);
+
+      renderCardDetailPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('card-deck')).toBeInTheDocument();
+      });
+
+      // 【実際の処理実行】: 「未分類」を選択
+      const select = screen.getByRole('combobox') as HTMLSelectElement;
+      await user.selectOptions(select, '');
+
+      // 【結果検証】: 成功メッセージが表示されること
+      await waitFor(() => {
+        expect(screen.getByTestId('success-message')).toHaveTextContent('デッキを変更しました'); // 【確認内容】: 成功メッセージが表示される 🔵
+      });
+    });
+
+    // ----------------------------------------------------------------
+    // TC-D04: deck_id 値変更時に値が送信される
+    // ----------------------------------------------------------------
+    it('デッキを別のデッキに変更すると updateCard API が新しい deck_id で呼ばれる', async () => {
+      // 【テスト目的】: deck_id が値（文字列）に設定された場合に、その値が送信されることを確認
+      // 【テスト内容】: デッキ選択時に deck_id: "deck-2" が送信されるかを検証
+      // 【期待される動作】: cardsApi.updateCard(cardId, { deck_id: 'deck-2' }) が呼ばれる
+      // 🔵 要件定義 REQ-002・受け入れ基準 TC-103-04 より
+
+      const user = userEvent.setup();
+
+      // 【テストデータ準備】: 新しいデッキに変更されたカードを返すよう設定
+      const updatedCard = { ...mockCard, deck_id: 'deck-2' };
+      mockUpdateCard.mockResolvedValue(updatedCard);
+
+      renderCardDetailPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('card-deck')).toBeInTheDocument();
+      });
+
+      // 【実際の処理実行】: デッキを選択
+      const select = screen.getByRole('combobox') as HTMLSelectElement;
+      await user.selectOptions(select, 'deck-2');
+
+      // 【結果検証】: updateCard が新しい deck_id で呼ばれること
+      await waitFor(() => {
+        expect(mockUpdateCard).toHaveBeenCalledWith('card-1', { deck_id: 'deck-2' }); // 【確認内容】: 新しい deck_id が送信される 🔵
+      });
+    });
+
+    // ----------------------------------------------------------------
+    // TC-D05: デッキ変更失敗時にエラーメッセージが表示される
+    // ----------------------------------------------------------------
+    it('デッキ変更失敗時に「デッキの変更に失敗しました」エラーメッセージが表示される', async () => {
+      // 【テスト目的】: API失敗時にエラーメッセージが表示されること
+      // 【テスト内容】: handleDeckChange のエラーフローで setError が呼ばれるかを検証
+      // 【期待される動作】: data-testid="error-message" にエラーメッセージが表示される
+      // 🟡 要件定義 REQ-103・既存テストパターンから妥当な推測
+
+      const user = userEvent.setup();
+
+      // 【テストデータ準備】: API失敗を模擬
+      mockUpdateCard.mockRejectedValue(new Error('API Error'));
+
+      renderCardDetailPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('card-deck')).toBeInTheDocument();
+      });
+
+      // 【実際の処理実行】: デッキを選択
+      const select = screen.getByRole('combobox') as HTMLSelectElement;
+      await user.selectOptions(select, 'deck-1');
+
+      // 【結果検証】: エラーメッセージが表示されること
+      await waitFor(() => {
+        expect(screen.getByTestId('error-message')).toHaveTextContent('デッキの変更に失敗しました'); // 【確認内容】: エラーメッセージが表示される 🟡
+      });
+    });
+
+    // ----------------------------------------------------------------
+    // TC-D06: デッキ変更失敗時にカードデータは変更されない
+    // ----------------------------------------------------------------
+    it('デッキ変更失敗時にカードの deck_id が変更前の値のまま保持される', async () => {
+      // 【テスト目的】: API失敗時に UI が変更前のデータを維持すること
+      // 【テスト内容】: API失敗後のカード表示が元のままであることを検証
+      // 【期待される動作】: デッキ情報が変更前の状態で保持される
+      // 🟡 要件定義 REQ-104・データフロー図エラーフローから妥当な推測
+
+      const user = userEvent.setup();
+
+      // 【テストデータ準備】: API失敗を模擬
+      mockUpdateCard.mockRejectedValue(new Error('API Error'));
+
+      renderCardDetailPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('card-deck')).toBeInTheDocument();
+      });
+
+      // 【初期状態確認】: 初期 deck_id が表示されている
+      const initialCard = mockCard;
+      expect(screen.queryByTestId('card-detail')).toBeInTheDocument();
+
+      // 【実際の処理実行】: デッキ変更を試みるが失敗する
+      const select = screen.getByRole('combobox') as HTMLSelectElement;
+      await user.selectOptions(select, 'deck-2');
+
+      // 【結果検証】: エラー後もカードの deck_id が変更されていないこと
+      await waitFor(() => {
+        expect(screen.getByTestId('error-message')).toBeInTheDocument();
+      });
+      // updateCard は呼ばれたが、setCard は呼ばれていないので、mockCard のまま
+      expect(mockUpdateCard).toHaveBeenCalledWith('card-1', { deck_id: 'deck-2' }); // 【確認内容】: API呼び出しは行われた 🟡
+    });
+  });
+
   describe('復習間隔プリセットボタン', () => {
     // 【テスト前準備】: 各テスト実行前にモックを初期化し、標準的なカードデータを返すよう設定
     // 【環境初期化】: vi.clearAllMocks() は外側の beforeEach で実行済みのため省略

@@ -29,7 +29,7 @@
 ## 全体進捗
 
 - [x] Phase 1: バックエンド基盤 + High修正
-- [ ] Phase 2: バックエンド Medium/Low + フロントエンド High
+- [x] Phase 2: バックエンド Medium/Low + フロントエンド High
 - [ ] Phase 3: フロントエンド Medium/Low + 統合テスト
 
 ## マイルストーン
@@ -69,11 +69,11 @@ TASK-0084 + TASK-0086 → TASK-0087
 
 ### タスク一覧
 
-- [ ] [TASK-0088: total_due_count 修正](TASK-0088.md) - 3h (TDD) 🔵
-- [ ] [TASK-0089: description/color REMOVE](TASK-0089.md) - 3h (TDD) 🔵
+- [x] [TASK-0088: total_due_count 修正](TASK-0088.md) - 3h (TDD) 🔵
+- [x] [TASK-0089: description/color REMOVE](TASK-0089.md) - 3h (TDD) 🔵
 - [x] [TASK-0090: TODO コメント追加](TASK-0090.md) - 1h (DIRECT) 🔵
-- [ ] [TASK-0091: CardsPage deck_id フィルタ対応](TASK-0091.md) - 5h (TDD) 🔵
-- [ ] [TASK-0092: フロントエンド型修正 + null 送信](TASK-0092.md) - 4h (TDD) 🔵
+- [x] [TASK-0091: CardsPage deck_id フィルタ対応](TASK-0091.md) - 5h (TDD) 🔵
+- [x] [TASK-0092: フロントエンド型修正 + null 送信](TASK-0092.md) - 4h (TDD) 🔵
 
 ### 依存関係
 
