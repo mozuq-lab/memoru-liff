@@ -146,15 +146,20 @@ def update_card(card_id: str):
         )
 
     try:
-        card = card_service.update_card(
-            user_id=user_id,
-            card_id=card_id,
-            front=request.front,
-            back=request.back,
-            deck_id=request.deck_id,
-            tags=request.tags,
-            interval=request.interval,
-        )
+        # Determine deck_id: distinguish JSON null from missing key
+        update_kwargs = {
+            "user_id": user_id,
+            "card_id": card_id,
+            "front": request.front,
+            "back": request.back,
+            "tags": request.tags,
+            "interval": request.interval,
+        }
+        if "deck_id" in body:
+            # Key present in JSON → pass value (None for null, string for value)
+            update_kwargs["deck_id"] = body["deck_id"]
+
+        card = card_service.update_card(**update_kwargs)
         return card.to_response().model_dump(mode="json")
     except CardNotFoundError:
         raise NotFoundError(f"Card not found: {card_id}")

@@ -14,6 +14,9 @@ from models.card import Card
 # 【ロガー設定】: TransactionCanceledException などの内部エラーをログ出力するために必要 (EARS-009)
 logger = Logger()
 
+# Sentinel value to distinguish "not provided" from explicit None (null)
+_UNSET = object()
+
 
 class CardServiceError(Exception):
     """Base exception for card service errors."""
@@ -213,7 +216,7 @@ class CardService:
         card_id: str,
         front: Optional[str] = None,
         back: Optional[str] = None,
-        deck_id: Optional[str] = None,
+        deck_id=_UNSET,
         tags: Optional[List[str]] = None,
         interval: Optional[int] = None,
     ) -> Card:
@@ -247,6 +250,7 @@ class CardService:
 
         # Build update expression
         update_parts = []
+        remove_parts = []
         expression_values = {}
         expression_names = {}
 
@@ -262,10 +266,16 @@ class CardService:
             expression_names["#back"] = "back"
             card.back = back
 
-        if deck_id is not None:
+        if deck_id is None:
+            # Explicit null → REMOVE deck_id from DynamoDB
+            remove_parts.append("deck_id")
+            card.deck_id = None
+        elif deck_id is not _UNSET:
+            # New value → SET deck_id
             update_parts.append("deck_id = :deck_id")
             expression_values[":deck_id"] = deck_id
             card.deck_id = deck_id
+        # deck_id is _UNSET → no change
 
         if tags is not None:
             update_parts.append("tags = :tags")
@@ -291,7 +301,7 @@ class CardService:
             expression_values[":next_review_at"] = next_review_at.isoformat()
             card.next_review_at = next_review_at
 
-        if not update_parts:
+        if not update_parts and not remove_parts:
             return card
 
         now = datetime.now(timezone.utc)
@@ -300,12 +310,19 @@ class CardService:
         card.updated_at = now
 
         try:
-            update_expression = "SET " + ", ".join(update_parts)
+            # Build combined SET + REMOVE expression
+            update_expression = ""
+            if update_parts:
+                update_expression += "SET " + ", ".join(update_parts)
+            if remove_parts:
+                update_expression += " REMOVE " + ", ".join(remove_parts)
+
             update_kwargs = {
                 "Key": {"user_id": user_id, "card_id": card_id},
                 "UpdateExpression": update_expression,
-                "ExpressionAttributeValues": expression_values,
             }
+            if expression_values:
+                update_kwargs["ExpressionAttributeValues"] = expression_values
             if expression_names:
                 update_kwargs["ExpressionAttributeNames"] = expression_names
 
