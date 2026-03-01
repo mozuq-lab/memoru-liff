@@ -273,6 +273,71 @@ class TestCalculateNextReviewBoundary:
         expected = datetime(2026, 3, 1, 15, 0, 0, tzinfo=timezone.utc)
         assert result == expected
 
+    def test_decimal_day_start_hour(self):
+        """REQ-001: Decimal(4) を渡しても int(4) と同じ結果になること。"""
+        from decimal import Decimal
+
+        mock_now = datetime(2026, 3, 1, 1, 0, 0, tzinfo=timezone.utc)  # 10:00 JST
+        with patch("services.srs.datetime") as mock_dt:
+            mock_dt.now.return_value = mock_now
+            mock_dt.side_effect = lambda *args, **kwargs: datetime(*args, **kwargs)
+
+            result = calculate_next_review_boundary(
+                interval=Decimal(1),
+                user_timezone="Asia/Tokyo",
+                day_start_hour=Decimal(4),
+            )
+
+        expected = datetime(2026, 3, 1, 19, 0, 0, tzinfo=timezone.utc)
+        assert result == expected
+
+    def test_decimal_boundary_values(self):
+        """REQ-001: Decimal(0) / Decimal(23) の境界値テスト。"""
+        from decimal import Decimal
+
+        mock_now = datetime(2026, 3, 1, 6, 0, 0, tzinfo=timezone.utc)  # 15:00 JST
+        with patch("services.srs.datetime") as mock_dt:
+            mock_dt.now.return_value = mock_now
+            mock_dt.side_effect = lambda *args, **kwargs: datetime(*args, **kwargs)
+
+            # day_start_hour=0
+            result_0 = calculate_next_review_boundary(
+                interval=Decimal(1),
+                user_timezone="Asia/Tokyo",
+                day_start_hour=Decimal(0),
+            )
+            expected_0 = datetime(2026, 3, 1, 15, 0, 0, tzinfo=timezone.utc)
+            assert result_0 == expected_0
+
+            # day_start_hour=23
+            result_23 = calculate_next_review_boundary(
+                interval=Decimal(1),
+                user_timezone="Asia/Tokyo",
+                day_start_hour=Decimal(23),
+            )
+            # 15:00 JST < 23, so effective_date = previous day (2026-02-28)
+            # target_date = 2026-03-01, boundary = 2026-03-01 23:00 JST = 2026-03-01 14:00 UTC
+            expected_23 = datetime(2026, 3, 1, 14, 0, 0, tzinfo=timezone.utc)
+            assert result_23 == expected_23
+
+    def test_invalid_day_start_hour_range(self):
+        """REQ-001: 範囲外の day_start_hour で ValueError が発生すること。"""
+        from decimal import Decimal
+
+        with pytest.raises(ValueError, match="day_start_hour must be 0-23"):
+            calculate_next_review_boundary(
+                interval=1,
+                user_timezone="Asia/Tokyo",
+                day_start_hour=Decimal(24),
+            )
+
+        with pytest.raises(ValueError, match="day_start_hour must be 0-23"):
+            calculate_next_review_boundary(
+                interval=1,
+                user_timezone="Asia/Tokyo",
+                day_start_hour=Decimal(-1),
+            )
+
     def test_utc_timezone(self):
         """異なるタイムゾーン (UTC) での正規化テスト。"""
         # 2026-03-01 10:00 UTC

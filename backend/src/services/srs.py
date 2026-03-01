@@ -105,6 +105,11 @@ def calculate_next_review_boundary(
     Returns:
         UTC datetime set to the day boundary time.
     """
+    interval = int(interval)
+    day_start_hour = int(day_start_hour)
+    if not 0 <= day_start_hour <= 23:
+        raise ValueError(f"day_start_hour must be 0-23, got {day_start_hour}")
+
     user_tz = ZoneInfo(user_timezone)
     now_utc = datetime.now(timezone.utc)
     local_now = now_utc.astimezone(user_tz)
