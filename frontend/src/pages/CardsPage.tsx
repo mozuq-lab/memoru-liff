@@ -1,7 +1,8 @@
 /**
  * 【機能概要】: カード一覧画面
  * 【実装方針】: カードの一覧表示、タブフィルタ（復習対象/すべて）、詳細へのナビゲーション
- * 【テスト対応】: TASK-0016 テストケース1〜8
+ *              TASK-0091: URL クエリパラメータ deck_id によるデッキ別フィルタ対応
+ * 【テスト対応】: TASK-0016 テストケース1〜8, TASK-0091 TC-091-005〜B02
  * 🟡 黄信号: user-stories.md 3.2より
  */
 import { useEffect, useState, useCallback } from 'react';
@@ -11,38 +12,63 @@ import { Navigation } from '@/components/Navigation';
 import { Loading } from '@/components/common/Loading';
 import { Error } from '@/components/common/Error';
 import { useCardsContext } from '@/contexts/CardsContext';
+// 【TASK-0091】: deck_id 指定時のデッキ名表示に DecksContext を使用 🟡
+import { useDecksContext } from '@/contexts/DecksContext';
 
 type TabType = 'due' | 'all';
 
 /**
  * 【機能概要】: カード一覧ページコンポーネント
+ * 【TASK-0091】: URL クエリパラメータ deck_id によるデッキ別フィルタ対応
+ *               deck_id 指定時はデッキ名をヘッダーに表示
  */
 export const CardsPage = () => {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const { cards, dueCards, isLoading, error, fetchCards, fetchDueCards } = useCardsContext();
+  // 【TASK-0091】: デッキ名検索のために DecksContext を参照 🟡
+  const { decks } = useDecksContext();
   const [successMessage, setSuccessMessage] = useState<string | null>(
     (location.state as { message?: string } | null)?.message || null
   );
 
   const activeTab: TabType = searchParams.get('tab') === 'due' ? 'due' : 'all';
 
+  // 【TASK-0091】: URL クエリパラメータから deck_id を取得
+  // 空文字列や null の場合は undefined に変換（falsy な値をフィルタなしとして扱う）
+  // 🔵 青信号: architecture.md セクション6 の実装概要に基づく
+  const deckId = searchParams.get('deck_id') || undefined;
+
+  // 【TASK-0091】: deckId に対応するデッキ名を DecksContext から検索
+  // 🟡 黄信号: REQ-101・note.md の DecksContext 設計パターンより
+  const deckName = deckId ? decks.find(d => d.deck_id === deckId)?.name : undefined;
+
+  /**
+   * 【機能概要】: アクティブタブを切り替える
+   * 【改善内容】: setSearchParams でタブ変更時に既存の deck_id パラメータを保持するよう修正
+   * 【設計方針】: deck_id が指定されている場合は新しいパラメータオブジェクトにも deck_id を含める
+   * 【保守性】: URL パラメータの意図的な分離（tab: タブ状態, deck_id: フィルタ条件）
+   * 🟡 黄信号: Green フェーズ課題1（setSearchParams が deck_id を失う問題）の修正
+   */
   const setActiveTab = (tab: TabType) => {
-    if (tab === 'due') {
-      setSearchParams({ tab: 'due' });
-    } else {
-      setSearchParams({});
-    }
+    // 【既存パラメータ保持】: deck_id が指定されている場合は新しい searchParams にも引き継ぐ
+    // 【タブ切り替え】: tab=due 以外はタブパラメータを削除（'all' がデフォルト）
+    const newParams: Record<string, string> = {};
+    if (deckId) newParams['deck_id'] = deckId;
+    if (tab === 'due') newParams['tab'] = 'due';
+    setSearchParams(newParams);
   };
 
-  // 【初期読み込み】: タブに応じたデータを取得
+  // 【初期読み込み】: タブと deck_id に応じたデータを取得
+  // 【TASK-0091】: deckId を依存配列に追加、fetchCards/fetchDueCards に deckId を渡す
+  // 🔵 青信号: architecture.md セクション6 の useEffect 実装概要に基づく
   useEffect(() => {
     if (activeTab === 'due') {
-      fetchDueCards();
+      fetchDueCards(deckId);
     } else {
-      fetchCards();
+      fetchCards(deckId);
     }
-  }, [activeTab, fetchCards, fetchDueCards]);
+  }, [activeTab, deckId, fetchCards, fetchDueCards]);
 
   // 【成功メッセージの自動非表示】
   useEffect(() => {
@@ -52,14 +78,20 @@ export const CardsPage = () => {
     }
   }, [successMessage]);
 
-  // 【再取得ハンドラ】
+  /**
+   * 【機能概要】: エラー発生後の再取得ハンドラ
+   * 【改善内容】: deckId を引数として渡すよう修正（Green フェーズ課題2）
+   * 【設計方針】: エラー後の再取得でも deck_id フィルタを維持する
+   * 🔵 青信号: Green フェーズ課題2（handleRetry が deckId なし）の修正
+   */
   const handleRetry = useCallback(() => {
+    // 【再取得】: deckId を引数として渡し、フィルタ条件を維持したまま再取得する
     if (activeTab === 'due') {
-      fetchDueCards();
+      fetchDueCards(deckId);
     } else {
-      fetchCards();
+      fetchCards(deckId);
     }
-  }, [activeTab, fetchCards, fetchDueCards]);
+  }, [activeTab, deckId, fetchCards, fetchDueCards]);
 
   const displayCards = activeTab === 'due' ? dueCards : cards;
 
@@ -90,10 +122,23 @@ export const CardsPage = () => {
   return (
     <div className="flex flex-col min-h-screen pb-20">
       <header className="bg-white shadow-sm p-4 mb-0">
-        <h1 className="text-xl font-bold text-gray-800" data-testid="cards-title">カード一覧</h1>
+        {/* 【TASK-0091】: deck_id 指定時はデッキ名を表示、未指定時は「カード一覧」を表示 */}
+        {/* 🟡 黄信号: REQ-101・note.md deckName フォールバック設計より */}
+        <h1 className="text-xl font-bold text-gray-800" data-testid="cards-title">{deckName || 'カード一覧'}</h1>
         <p className="text-sm text-gray-600" data-testid="card-count">
           {displayCards.length}枚のカード
         </p>
+        {/* 【NFR-201】: deck_id 指定時に全カード一覧への「戻る」ナビゲーションを提供 */}
+        {/* 🟡 黄信号: NFR-201 ユーザビリティ要件より */}
+        {deckId && (
+          <Link
+            to="/cards"
+            className="text-sm text-blue-600 hover:text-blue-700"
+            data-testid="back-to-all-cards"
+          >
+            全カードを表示
+          </Link>
+        )}
       </header>
 
       {/* タブフィルタ */}

@@ -7,8 +7,9 @@ interface CardsContextType {
   dueCards: Card[];
   isLoading: boolean;
   error: Error | null;
-  fetchCards: () => Promise<void>;
-  fetchDueCards: () => Promise<void>;
+  // 【TASK-0091】: deckId パラメータ追加（省略時は従来通り全カード取得） 🔵
+  fetchCards: (deckId?: string) => Promise<void>;
+  fetchDueCards: (deckId?: string) => Promise<void>;
   addCard: (card: Card) => void;
   updateCard: (cardId: string, updates: Partial<Card>) => void;
   deleteCard: (cardId: string) => void;
@@ -44,11 +45,19 @@ export const CardsProvider = ({ children }: CardsProviderProps) => {
   const [error, setError] = useState<Error | null>(null);
   const [dueCount, setDueCount] = useState(0);
 
-  const fetchCards = useCallback(async () => {
+  /**
+   * 【機能概要】: カード一覧を取得してStateを更新する
+   * 【実装方針】: deckId が指定された場合はフィルタあり、省略時は全カード取得（後方互換）
+   * 【テスト対応】: TC-091-001, TC-091-002
+   * 🔵 青信号: architecture.md セクション6・REQ-001・REQ-102 に基づく
+   * @param deckId - フィルタするデッキID（省略時は全カード取得）
+   */
+  const fetchCards = useCallback(async (deckId?: string) => {
     setIsLoading(true);
     setError(null);
     try {
-      const data = await cardsApi.getCards();
+      // 【API呼び出し】: deckId を API レイヤーに伝搬（undefined の場合は全カード取得）
+      const data = await cardsApi.getCards(deckId);
       setCards(data);
     } catch (err) {
       setError(err as Error);
@@ -57,11 +66,19 @@ export const CardsProvider = ({ children }: CardsProviderProps) => {
     }
   }, []);
 
-  const fetchDueCards = useCallback(async () => {
+  /**
+   * 【機能概要】: 復習対象カードを取得してStateを更新する
+   * 【実装方針】: deckId が指定された場合はフィルタあり、省略時は全復習対象カード取得（後方互換）
+   * 【テスト対応】: TC-091-003, TC-091-004
+   * 🔵 青信号: architecture.md セクション6・既存 getDueCards 実装（deckId パラメータ対応済み）に基づく
+   * @param deckId - フィルタするデッキID（省略時は全復習対象カード取得）
+   */
+  const fetchDueCards = useCallback(async (deckId?: string) => {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await cardsApi.getDueCards();
+      // 【API呼び出し】: limit は undefined、deckId を第2引数として伝搬
+      const response = await cardsApi.getDueCards(undefined, deckId);
       setDueCards(response.due_cards.map(dueCardToCard));
       setDueCount(response.total_due_count);
     } catch (err) {

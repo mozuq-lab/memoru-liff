@@ -85,8 +85,19 @@ class ApiClient {
   }
 
   // カード API
-  async getCards(): Promise<Card[]> {
-    const response = await this.request<{ cards: Card[] }>('/cards');
+  /**
+   * 【機能概要】: カード一覧を取得する（オプションで deck_id フィルタ対応）
+   * 【実装方針】: getDueCards と同様に URLSearchParams でクエリ文字列を構築する
+   * 【テスト対応】: TC-091-001, TC-091-002
+   * 🔵 青信号: architecture.md セクション6・既存 getDueCards 実装パターンに基づく
+   * @param deckId - フィルタするデッキID（省略時は全カード取得）
+   */
+  async getCards(deckId?: string): Promise<Card[]> {
+    // 【クエリ文字列構築】: deckId が指定された場合のみ deck_id パラメータを追加
+    const searchParams = new URLSearchParams();
+    if (deckId) searchParams.set('deck_id', deckId);
+    const qs = searchParams.toString();
+    const response = await this.request<{ cards: Card[] }>(`/cards${qs ? `?${qs}` : ''}`);
     return response.cards;
   }
 
@@ -204,7 +215,8 @@ class ApiClient {
 export const apiClient = new ApiClient();
 
 export const cardsApi = {
-  getCards: () => apiClient.getCards(),
+  // 【deckId 対応】: deckId パラメータを API クライアントに転送 🔵
+  getCards: (deckId?: string) => apiClient.getCards(deckId),
   getCard: (id: string) => apiClient.getCard(id),
   createCard: (data: CreateCardRequest) => apiClient.createCard(data),
   updateCard: (id: string, data: UpdateCardRequest) => apiClient.updateCard(id, data),
