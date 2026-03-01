@@ -15,6 +15,7 @@ Globals:
         USERS_TABLE: !Ref UsersTable
         CARDS_TABLE: !Ref CardsTable
         REVIEWS_TABLE: !Ref ReviewsTable
+        DECKS_TABLE: !Ref DecksTable
         LOG_LEVEL: !If [IsProd, INFO, DEBUG]
         DYNAMODB_ENDPOINT_URL: ""
         AWS_ENDPOINT_URL: ""
@@ -190,6 +191,36 @@ Resources:
         - Key: Application
           Value: memoru
 
+  # Decks Table
+  DecksTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub memoru-decks-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: deck_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_id
+          KeyType: HASH
+        - AttributeName: deck_id
+          KeyType: RANGE
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+      DeletionProtectionEnabled: !If [IsProd, true, false]
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: memoru
+
   #============================================================
   # API Gateway (HTTP API)
   #============================================================
@@ -253,6 +284,8 @@ Resources:
             TableName: !Ref CardsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref ReviewsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DecksTable
         - Version: '2012-10-17'
           Statement:
             - Effect: Allow
@@ -353,6 +386,31 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /cards/generate
             Method: POST
+        # Deck endpoints
+        ListDecks:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /decks
+            Method: GET
+        CreateDeck:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /decks
+            Method: POST
+        UpdateDeck:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /decks/{deckId}
+            Method: PUT
+        DeleteDeck:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /decks/{deckId}
+            Method: DELETE
       Tags:
         Environment: !Ref Environment
         Application: memoru
@@ -788,6 +846,18 @@ Outputs:
     Value: !GetAtt ReviewsTable.Arn
     Export:
       Name: !Sub memoru-${Environment}-reviews-table-arn
+
+  DecksTableName:
+    Description: Decks table name
+    Value: !Ref DecksTable
+    Export:
+      Name: !Sub memoru-${Environment}-decks-table
+
+  DecksTableArn:
+    Description: Decks table ARN
+    Value: !GetAtt DecksTable.Arn
+    Export:
+      Name: !Sub memoru-${Environment}-decks-table-arn
 
   # API Gateway
   ApiEndpoint:

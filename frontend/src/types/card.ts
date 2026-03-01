@@ -23,7 +23,7 @@ export interface CreateCardRequest {
 export interface UpdateCardRequest {
   front?: string;
   back?: string;
-  deck_id?: string;
+  deck_id?: string | null;
   tags?: string[];
   // 【追加フィールド】: 復習間隔調整機能（TASK-0079）で追加。1〜365の整数を受け付ける 🔵
   interval?: number;

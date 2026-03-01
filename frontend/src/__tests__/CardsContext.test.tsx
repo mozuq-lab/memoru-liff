@@ -16,6 +16,7 @@ import type { ReactNode } from 'react';
 vi.mock('@/services/api', () => ({
   cardsApi: {
     getCards: vi.fn(),
+    getDueCards: vi.fn(),
     getDueCount: vi.fn(),
   },
 }));
@@ -24,6 +25,11 @@ describe('CardsContext', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(cardsApi.getCards).mockResolvedValue([]);
+    vi.mocked(cardsApi.getDueCards).mockResolvedValue({
+      due_cards: [],
+      total_due_count: 0,
+      next_due_date: null,
+    });
     vi.mocked(cardsApi.getDueCount).mockResolvedValue(0);
   });
 
@@ -306,6 +312,146 @@ describe('CardsContext', () => {
 
       await waitFor(() => {
         expect(result.current.dueCount).toBe(5);
+      });
+    });
+  });
+});
+
+/**
+ * TASK-0091: CardsContext fetchCards/fetchDueCards deckId パラメータ テスト
+ * 【テスト対象】: fetchCards(deckId?) / fetchDueCards(deckId?) パラメータ追加
+ * 【テスト対応】: TC-091-001〜TC-091-004
+ */
+describe('TASK-0091: CardsContext fetchCards/fetchDueCards deckId パラメータ', () => {
+  const mockCard: Card = {
+    card_id: '1',
+    user_id: 'user1',
+    front: 'Question 1',
+    back: 'Answer 1',
+    tags: [],
+    interval: 1,
+    ease_factor: 2.5,
+    repetitions: 0,
+    created_at: '2024-01-01T00:00:00Z',
+    updated_at: '2024-01-01T00:00:00Z',
+  };
+
+  // 【テスト前準備】: モック関数をクリアし、初期状態を設定
+  // 【環境初期化】: 前のテストの影響を排除する
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(cardsApi.getCards).mockResolvedValue([mockCard]);
+    vi.mocked(cardsApi.getDueCards).mockResolvedValue({
+      due_cards: [
+        {
+          card_id: '1',
+          front: 'Question 1',
+          back: 'Answer 1',
+          deck_id: 'deck-abc-123',
+          due_date: '2024-01-15',
+          overdue_days: 0,
+        },
+      ],
+      total_due_count: 1,
+      next_due_date: '2024-01-15',
+    });
+    vi.mocked(cardsApi.getDueCount).mockResolvedValue(0);
+  });
+
+  describe('fetchCards(deckId) パラメータ伝搬', () => {
+    it('TC-091-001: deck_id 指定時に fetchCards が deckId パラメータ付きで API を呼び出す', async () => {
+      // 【テスト目的】: fetchCards(deckId) が cardsApi.getCards(deckId) を正しく呼び出すこと
+      // 【テスト内容】: 'deck-abc-123' を引数として fetchCards を呼んだ際に API に deckId が渡されること
+      // 【期待される動作】: API 呼び出しに deckId 文字列が引数として渡される
+      // 🔵 青信号: architecture.md セクション6・既存 CardsContext 実装・requirements REQ-001 に基づく
+
+      // 【テストデータ準備】: deckId を指定して fetchCards を呼び出す
+      const wrapper = ({ children }: { children: ReactNode }) => (
+        <CardsProvider>{children}</CardsProvider>
+      );
+      const { result } = renderHook(() => useCardsContext(), { wrapper });
+
+      // 【実際の処理実行】: fetchCards(deckId) を呼び出す
+      // 【処理内容】: CardsContext の fetchCards が cardsApi.getCards(deckId) を呼び出すことを確認
+      await result.current.fetchCards('deck-abc-123');
+
+      // 【結果検証】: cardsApi.getCards が 'deck-abc-123' を引数として呼ばれたことを確認
+      // 【期待値確認】: deckId が API レイヤーに正しく伝搬されること
+      await waitFor(() => {
+        expect(cardsApi.getCards).toHaveBeenCalledWith('deck-abc-123'); // 【確認内容】: getCards の引数に deckId が含まれること 🔵
+        expect(result.current.cards).toEqual([mockCard]); // 【確認内容】: 返却データが cards にセットされること 🔵
+      });
+    });
+
+    it('TC-091-002: deck_id 未指定で fetchCards を呼ぶと全カードを取得する', async () => {
+      // 【テスト目的】: fetchCards() を引数なしで呼んだ際に従来通り全カードが取得されること
+      // 【テスト内容】: 引数なしで fetchCards を呼んだ際、cardsApi.getCards(undefined) が呼ばれること
+      // 【期待される動作】: 後方互換性を維持し、全カードが返される
+      // 🔵 青信号: REQ-102・既存 CardsContext 実装パターンに基づく
+
+      // 【テストデータ準備】: 引数なしで fetchCards を呼び出す
+      const wrapper = ({ children }: { children: ReactNode }) => (
+        <CardsProvider>{children}</CardsProvider>
+      );
+      const { result } = renderHook(() => useCardsContext(), { wrapper });
+
+      // 【実際の処理実行】: fetchCards() を引数なしで呼び出す
+      // 【処理内容】: CardsContext の fetchCards が cardsApi.getCards() を呼び出すことを確認
+      await result.current.fetchCards();
+
+      // 【結果検証】: cardsApi.getCards が引数なし（undefined）で呼ばれたことを確認
+      // 【期待値確認】: 引数なしの呼び出しで既存動作が壊れないこと
+      await waitFor(() => {
+        expect(cardsApi.getCards).toHaveBeenCalledWith(undefined); // 【確認内容】: 引数なしの呼び出しで全カード取得 🔵
+        expect(result.current.cards).toEqual([mockCard]); // 【確認内容】: 全カードが返却されること 🔵
+      });
+    });
+  });
+
+  describe('fetchDueCards(deckId) パラメータ伝搬', () => {
+    it('TC-091-003: deck_id 指定時に fetchDueCards が deckId パラメータ付きで API を呼び出す', async () => {
+      // 【テスト目的】: fetchDueCards(deckId) が cardsApi.getDueCards(undefined, deckId) を正しく呼び出すこと
+      // 【テスト内容】: 'deck-abc-123' を引数として fetchDueCards を呼んだ際に API に deckId が渡されること
+      // 【期待される動作】: API 呼び出しに deckId が渡され、該当デッキの復習対象カードが返される
+      // 🔵 青信号: architecture.md セクション6・既存 getDueCards 実装（deckId パラメータ対応済み）に基づく
+
+      // 【テストデータ準備】: deckId を指定して fetchDueCards を呼び出す
+      const wrapper = ({ children }: { children: ReactNode }) => (
+        <CardsProvider>{children}</CardsProvider>
+      );
+      const { result } = renderHook(() => useCardsContext(), { wrapper });
+
+      // 【実際の処理実行】: fetchDueCards(deckId) を呼び出す
+      // 【処理内容】: CardsContext の fetchDueCards が cardsApi.getDueCards(undefined, deckId) を呼び出すことを確認
+      await result.current.fetchDueCards('deck-abc-123');
+
+      // 【結果検証】: cardsApi.getDueCards が deckId 引数付きで呼ばれたことを確認
+      // 【期待値確認】: deckId が getDueCards API に正しく伝搬されること
+      await waitFor(() => {
+        expect(cardsApi.getDueCards).toHaveBeenCalledWith(undefined, 'deck-abc-123'); // 【確認内容】: getDueCards の引数に deckId が含まれること 🔵
+      });
+    });
+
+    it('TC-091-004: deck_id 未指定で fetchDueCards を呼ぶと全復習対象カードを取得する', async () => {
+      // 【テスト目的】: fetchDueCards() を引数なしで呼んだ際に従来通り全復習対象カードが取得されること
+      // 【テスト内容】: 引数なしで fetchDueCards を呼んだ際、cardsApi.getDueCards() が呼ばれること
+      // 【期待される動作】: 後方互換性の維持
+      // 🔵 青信号: REQ-102・既存 getDueCards 実装に基づく
+
+      // 【テストデータ準備】: 引数なしで fetchDueCards を呼び出す
+      const wrapper = ({ children }: { children: ReactNode }) => (
+        <CardsProvider>{children}</CardsProvider>
+      );
+      const { result } = renderHook(() => useCardsContext(), { wrapper });
+
+      // 【実際の処理実行】: fetchDueCards() を引数なしで呼び出す
+      // 【処理内容】: CardsContext の fetchDueCards が cardsApi.getDueCards() を呼び出すことを確認
+      await result.current.fetchDueCards();
+
+      // 【結果検証】: cardsApi.getDueCards が引数なし（deckId なし）で呼ばれたことを確認
+      // 【期待値確認】: 引数なしの呼び出しで既存動作が壊れないこと
+      await waitFor(() => {
+        expect(cardsApi.getDueCards).toHaveBeenCalledWith(undefined, undefined); // 【確認内容】: 引数なしの呼び出しで全復習対象カード取得 🔵
       });
     });
   });

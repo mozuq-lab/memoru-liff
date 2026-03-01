@@ -1,5 +1,6 @@
 export { HomePage } from './HomePage';
 export { GeneratePage } from './GeneratePage';
+export { DecksPage } from './DecksPage';
 export { CardsPage } from './CardsPage';
 export { CardDetailPage } from './CardDetailPage';
 export { SettingsPage } from './SettingsPage';

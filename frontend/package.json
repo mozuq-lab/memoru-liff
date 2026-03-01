@@ -17,6 +17,8 @@
     "test:e2e:headed": "playwright test --headed"
   },
   "dependencies": {
+    "@headlessui/react": "^2.2.9",
+    "@heroicons/react": "^2.2.0",
     "@line/liff": "^2.27.3",
     "date-fns": "^4.1.0",
     "oidc-client-ts": "^3.4.1",

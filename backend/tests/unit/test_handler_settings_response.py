@@ -35,7 +35,7 @@ class TestUpdateSettingsResponse:
             user_id="test-user-id",
         )
 
-        with patch("api.handler.user_service") as mock_user_service:
+        with patch("api.handlers.user_handler.user_service") as mock_user_service:
             mock_user = MagicMock()
             mock_user.settings = {"notification_time": "21:00", "timezone": "UTC"}
             mock_user_service.get_or_create_user.return_value = mock_user
@@ -95,7 +95,7 @@ class TestUpdateSettingsResponse:
             user_id="test-user-id",
         )
 
-        with patch("api.handler.user_service") as mock_user_service:
+        with patch("api.handlers.user_handler.user_service") as mock_user_service:
             mock_user = MagicMock()
             mock_user.settings = {"notification_time": "21:00", "timezone": "Asia/Tokyo"}
             mock_user_service.get_or_create_user.return_value = mock_user
@@ -166,7 +166,7 @@ class TestUpdateSettingsResponse:
             user_id="test-user-id",
         )
 
-        with patch("api.handler.user_service") as mock_user_service:
+        with patch("api.handlers.user_handler.user_service") as mock_user_service:
             mock_user = MagicMock()
             mock_user.settings = {"notification_time": "21:00", "timezone": "UTC"}
             mock_user_service.get_or_create_user.return_value = mock_user

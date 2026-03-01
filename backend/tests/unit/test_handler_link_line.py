@@ -28,8 +28,8 @@ class TestLinkLineHandler:
         )
 
         # 【実際の処理実行】: handler を呼び出す
-        with patch("api.handler.user_service") as mock_user_service, \
-             patch("api.handler.line_service") as mock_line_service:
+        with patch("api.handlers.user_handler.user_service") as mock_user_service, \
+             patch("api.handlers.user_handler.line_service") as mock_line_service:
             mock_user_service.get_or_create_user.return_value = MagicMock()
 
             from api.handler import handler
@@ -61,8 +61,8 @@ class TestLinkLineHandler:
         )
 
         # 【実際の処理実行】: handler を呼び出す
-        with patch("api.handler.user_service") as mock_user_service, \
-             patch("api.handler.line_service") as mock_line_service:
+        with patch("api.handlers.user_handler.user_service") as mock_user_service, \
+             patch("api.handlers.user_handler.line_service") as mock_line_service:
             mock_user_service.get_or_create_user.return_value = MagicMock()
 
             from api.handler import handler
@@ -91,8 +91,8 @@ class TestLinkLineHandler:
         )
 
         # 【実際の処理実行】: handler を呼び出す
-        with patch("api.handler.user_service") as mock_user_service, \
-             patch("api.handler.line_service") as mock_line_service:
+        with patch("api.handlers.user_handler.user_service") as mock_user_service, \
+             patch("api.handlers.user_handler.line_service") as mock_line_service:
             # verify_id_token が line_user_id を返すようにモック
             mock_line_service.verify_id_token.return_value = "U1234567890abcdef1234567890abcdef"
             mock_user_service.get_or_create_user.return_value = MagicMock()
@@ -132,8 +132,8 @@ class TestLinkLineHandler:
         )
 
         # 【実際の処理実行】: handler を呼び出す
-        with patch("api.handler.user_service") as mock_user_service, \
-             patch("api.handler.line_service") as mock_line_service:
+        with patch("api.handlers.user_handler.user_service") as mock_user_service, \
+             patch("api.handlers.user_handler.line_service") as mock_line_service:
             mock_user_service.get_or_create_user.return_value = MagicMock()
             # verify_id_token が UnauthorizedError を発生させるようにモック
             mock_line_service.verify_id_token.side_effect = UnauthorizedError(

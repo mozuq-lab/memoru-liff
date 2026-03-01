@@ -164,7 +164,7 @@ def test_link_line_event_exists_with_correct_path(api_events):
 
 
 def test_total_http_api_event_count(api_events):
-    """TC-042-04: 整合性 - ApiFunction の HttpApi イベント総数が 14 個
+    """TC-042-04: 整合性 - ApiFunction の HttpApi イベント総数が 18 個
 
     期待イベント:
     1. GetUser          - GET /users/me
@@ -181,9 +181,13 @@ def test_total_http_api_event_count(api_events):
     12. UndoReview      - POST /reviews/{cardId}/undo
     13. GetReviewStats  - GET /reviews/stats
     14. GenerateCards   - POST /cards/generate
+    15. ListDecks       - GET /decks
+    16. CreateDeck      - POST /decks
+    17. UpdateDeck      - PUT /decks/{deckId}
+    18. DeleteDeck      - DELETE /decks/{deckId}
     """
-    assert len(api_events) == 14, (
-        f"期待: 14 イベント、実際: {len(api_events)} イベント\n"
+    assert len(api_events) == 18, (
+        f"期待: 18 イベント、実際: {len(api_events)} イベント\n"
         f"現在のイベント: {list(api_events.keys())}"
     )
 
@@ -255,8 +259,8 @@ def test_sam_paths_match_handler_routes(api_events, handler_routes):
     "event_name, expected_path, expected_method",
     [
         ("GetUser", "/users/me", "GET"),
-        ("UpdateUser", "/users/me/settings", "PUT"),       # 修正対象
-        ("LinkLine", "/users/link-line", "POST"),           # 新規追加対象
+        ("UpdateUser", "/users/me/settings", "PUT"),
+        ("LinkLine", "/users/link-line", "POST"),
         ("UnlinkLine", "/users/me/unlink-line", "POST"),
         ("ListCards", "/cards", "GET"),
         ("CreateCard", "/cards", "POST"),
@@ -264,14 +268,18 @@ def test_sam_paths_match_handler_routes(api_events, handler_routes):
         ("UpdateCard", "/cards/{cardId}", "PUT"),
         ("DeleteCard", "/cards/{cardId}", "DELETE"),
         ("GetDueCards", "/cards/due", "GET"),
-        ("SubmitReview", "/reviews/{cardId}", "POST"),      # 修正対象
+        ("SubmitReview", "/reviews/{cardId}", "POST"),
         ("UndoReview", "/reviews/{cardId}/undo", "POST"),
         ("GetReviewStats", "/reviews/stats", "GET"),
         ("GenerateCards", "/cards/generate", "POST"),
+        ("ListDecks", "/decks", "GET"),
+        ("CreateDeck", "/decks", "POST"),
+        ("UpdateDeck", "/decks/{deckId}", "PUT"),
+        ("DeleteDeck", "/decks/{deckId}", "DELETE"),
     ],
 )
 def test_event_path_and_method(api_events, event_name, expected_path, expected_method):
-    """TC-042-07: 整合性 - 全 14 エンドポイントのパスとメソッドが期待通りであること"""
+    """TC-042-07: 整合性 - 全 18 エンドポイントのパスとメソッドが期待通りであること"""
     assert event_name in api_events, (
         f"イベント '{event_name}' が SAM テンプレートに存在しません。"
         f" 現在のイベント: {list(api_events.keys())}"
@@ -295,7 +303,7 @@ def test_event_path_and_method(api_events, event_name, expected_path, expected_m
 def test_no_duplicate_event_names(sam_template):
     """TC-042-09: 品質 - イベント名の重複がないこと
 
-    YAML で重複キーは後勝ちになるため、イベント数が期待通りの 13 個かで検証する。
+    YAML で重複キーは後勝ちになるため、イベント数が期待通りの 18 個かで検証する。
     """
     events = sam_template["Resources"]["ApiFunction"]["Properties"]["Events"]
     http_api_events = {
@@ -303,8 +311,8 @@ def test_no_duplicate_event_names(sam_template):
         if ev.get("Type") == "HttpApi"
     }
     # YAML で重複キーは後勝ちになるため、パース後にイベント数が期待通りかで検証
-    assert len(http_api_events) == 14, (
-        f"期待: 14 イベント, 実際: {len(http_api_events)} イベント\n"
+    assert len(http_api_events) == 18, (
+        f"期待: 18 イベント, 実際: {len(http_api_events)} イベント\n"
         f"イベント: {list(http_api_events.keys())}"
     )
 

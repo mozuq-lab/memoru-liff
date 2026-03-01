@@ -177,12 +177,14 @@ class TestFeatureFlagConsistency:
         advice_event = _make_advice_event()
 
         with patch.dict(os.environ, {"USE_STRANDS": "true"}), \
-             patch("api.handler.create_ai_service") as mock_factory, \
+             patch("api.handlers.ai_handler.create_ai_service") as mock_generate_factory, \
+             patch("api.handler.create_ai_service") as mock_standalone_factory, \
              patch("api.handler.card_service") as mock_cs, \
              patch("api.handler.review_service") as mock_rs:
 
             mock_service = _setup_ai_mocks()
-            mock_factory.return_value = mock_service
+            mock_generate_factory.return_value = mock_service
+            mock_standalone_factory.return_value = mock_service
 
             # card_service モック設定 (grade_ai_handler 用)
             mock_card = MagicMock()
@@ -203,9 +205,10 @@ class TestFeatureFlagConsistency:
             grade_response = grade_ai_handler(grade_event, lambda_context)
             advice_response = advice_handler(advice_event, lambda_context)
 
-        # create_ai_service() が合計 3 回呼ばれること
-        assert mock_factory.call_count == 3, (
-            f"create_ai_service() は 3 回呼ばれるべきだが {mock_factory.call_count} 回だった"
+        # create_ai_service() が合計 3 回呼ばれること (generate: 1, grade_ai: 1, advice: 1)
+        assert mock_generate_factory.call_count + mock_standalone_factory.call_count == 3, (
+            f"create_ai_service() は 3 回呼ばれるべきだが "
+            f"{mock_generate_factory.call_count + mock_standalone_factory.call_count} 回だった"
         )
 
         # 全 3 エンドポイントが HTTP 200 を返すこと
@@ -230,12 +233,14 @@ class TestFeatureFlagConsistency:
         advice_event = _make_advice_event()
 
         with patch.dict(os.environ, {"USE_STRANDS": "false"}), \
-             patch("api.handler.create_ai_service") as mock_factory, \
+             patch("api.handlers.ai_handler.create_ai_service") as mock_generate_factory, \
+             patch("api.handler.create_ai_service") as mock_standalone_factory, \
              patch("api.handler.card_service") as mock_cs, \
              patch("api.handler.review_service") as mock_rs:
 
             mock_service = _setup_ai_mocks()
-            mock_factory.return_value = mock_service
+            mock_generate_factory.return_value = mock_service
+            mock_standalone_factory.return_value = mock_service
 
             mock_card = MagicMock()
             mock_card.front = "日本の首都は？"
@@ -254,9 +259,10 @@ class TestFeatureFlagConsistency:
             grade_response = grade_ai_handler(grade_event, lambda_context)
             advice_response = advice_handler(advice_event, lambda_context)
 
-        # create_ai_service() が合計 3 回呼ばれること
-        assert mock_factory.call_count == 3, (
-            f"create_ai_service() は 3 回呼ばれるべきだが {mock_factory.call_count} 回だった"
+        # create_ai_service() が合計 3 回呼ばれること (generate: 1, grade_ai: 1, advice: 1)
+        assert mock_generate_factory.call_count + mock_standalone_factory.call_count == 3, (
+            f"create_ai_service() は 3 回呼ばれるべきだが "
+            f"{mock_generate_factory.call_count + mock_standalone_factory.call_count} 回だった"
         )
 
         # 全 3 エンドポイントが HTTP 200 を返すこと
@@ -277,12 +283,14 @@ class TestFeatureFlagConsistency:
         env_without = {k: v for k, v in os.environ.items() if k != "USE_STRANDS"}
 
         with patch.dict(os.environ, env_without, clear=True), \
-             patch("api.handler.create_ai_service") as mock_factory, \
+             patch("api.handlers.ai_handler.create_ai_service") as mock_generate_factory, \
+             patch("api.handler.create_ai_service") as mock_standalone_factory, \
              patch("api.handler.card_service") as mock_cs, \
              patch("api.handler.review_service") as mock_rs:
 
             mock_service = _setup_ai_mocks()
-            mock_factory.return_value = mock_service
+            mock_generate_factory.return_value = mock_service
+            mock_standalone_factory.return_value = mock_service
 
             mock_card = MagicMock()
             mock_card.front = "日本の首都は？"
@@ -301,9 +309,10 @@ class TestFeatureFlagConsistency:
             grade_response = grade_ai_handler(grade_event, lambda_context)
             advice_response = advice_handler(advice_event, lambda_context)
 
-        # create_ai_service() が合計 3 回呼ばれること
-        assert mock_factory.call_count == 3, (
-            f"create_ai_service() は 3 回呼ばれるべきだが {mock_factory.call_count} 回だった"
+        # create_ai_service() が合計 3 回呼ばれること (generate: 1, grade_ai: 1, advice: 1)
+        assert mock_generate_factory.call_count + mock_standalone_factory.call_count == 3, (
+            f"create_ai_service() は 3 回呼ばれるべきだが "
+            f"{mock_generate_factory.call_count + mock_standalone_factory.call_count} 回だった"
         )
 
         # 全 3 エンドポイントが HTTP 200 を返すこと
@@ -340,7 +349,7 @@ class TestEndpointE2EFlow:
             user_id="test-user-id",
         )
 
-        with patch("api.handler.create_ai_service") as mock_factory:
+        with patch("api.handlers.ai_handler.create_ai_service") as mock_factory:
             mock_service = MagicMock()
             mock_service.generate_cards.return_value = MagicMock(
                 cards=[MagicMock(front="Q1", back="A1", suggested_tags=["tag1"])],
@@ -520,7 +529,8 @@ class TestCrossEndpointErrorConsistency:
         grade_event = _make_grade_ai_event()
         advice_event = _make_advice_event()
 
-        with patch("api.handler.create_ai_service") as mock_factory, \
+        with patch("api.handlers.ai_handler.create_ai_service") as mock_generate_factory, \
+             patch("api.handler.create_ai_service") as mock_standalone_factory, \
              patch("api.handler.card_service") as mock_cs, \
              patch("api.handler.review_service") as mock_rs:
 
@@ -530,7 +540,8 @@ class TestCrossEndpointErrorConsistency:
             mock_service.generate_cards.side_effect = AITimeoutError("timeout")
             mock_service.grade_answer.side_effect = AITimeoutError("timeout")
             mock_service.get_learning_advice.side_effect = AITimeoutError("timeout")
-            mock_factory.return_value = mock_service
+            mock_generate_factory.return_value = mock_service
+            mock_standalone_factory.return_value = mock_service
 
             generate_response = handler(generate_event, lambda_context)
             grade_response = grade_ai_handler(grade_event, lambda_context)
@@ -560,7 +571,8 @@ class TestCrossEndpointErrorConsistency:
         grade_event = _make_grade_ai_event()
         advice_event = _make_advice_event()
 
-        with patch("api.handler.create_ai_service") as mock_factory, \
+        with patch("api.handlers.ai_handler.create_ai_service") as mock_generate_factory, \
+             patch("api.handler.create_ai_service") as mock_standalone_factory, \
              patch("api.handler.card_service") as mock_cs, \
              patch("api.handler.review_service") as mock_rs:
 
@@ -570,7 +582,8 @@ class TestCrossEndpointErrorConsistency:
             mock_service.generate_cards.side_effect = AIRateLimitError("rate limit")
             mock_service.grade_answer.side_effect = AIRateLimitError("rate limit")
             mock_service.get_learning_advice.side_effect = AIRateLimitError("rate limit")
-            mock_factory.return_value = mock_service
+            mock_generate_factory.return_value = mock_service
+            mock_standalone_factory.return_value = mock_service
 
             generate_response = handler(generate_event, lambda_context)
             grade_response = grade_ai_handler(grade_event, lambda_context)
@@ -594,7 +607,8 @@ class TestCrossEndpointErrorConsistency:
         grade_event = _make_grade_ai_event()
         advice_event = _make_advice_event()
 
-        with patch("api.handler.create_ai_service") as mock_factory, \
+        with patch("api.handlers.ai_handler.create_ai_service") as mock_generate_factory, \
+             patch("api.handler.create_ai_service") as mock_standalone_factory, \
              patch("api.handler.card_service") as mock_cs, \
              patch("api.handler.review_service") as mock_rs:
 
@@ -604,7 +618,8 @@ class TestCrossEndpointErrorConsistency:
             mock_service.generate_cards.side_effect = AIProviderError("provider down")
             mock_service.grade_answer.side_effect = AIProviderError("provider down")
             mock_service.get_learning_advice.side_effect = AIProviderError("provider down")
-            mock_factory.return_value = mock_service
+            mock_generate_factory.return_value = mock_service
+            mock_standalone_factory.return_value = mock_service
 
             generate_response = handler(generate_event, lambda_context)
             grade_response = grade_ai_handler(grade_event, lambda_context)
@@ -628,7 +643,8 @@ class TestCrossEndpointErrorConsistency:
         grade_event = _make_grade_ai_event()
         advice_event = _make_advice_event()
 
-        with patch("api.handler.create_ai_service") as mock_factory, \
+        with patch("api.handlers.ai_handler.create_ai_service") as mock_generate_factory, \
+             patch("api.handler.create_ai_service") as mock_standalone_factory, \
              patch("api.handler.card_service") as mock_cs, \
              patch("api.handler.review_service") as mock_rs:
 
@@ -638,7 +654,8 @@ class TestCrossEndpointErrorConsistency:
             mock_service.generate_cards.side_effect = AIParseError("invalid json")
             mock_service.grade_answer.side_effect = AIParseError("invalid json")
             mock_service.get_learning_advice.side_effect = AIParseError("invalid json")
-            mock_factory.return_value = mock_service
+            mock_generate_factory.return_value = mock_service
+            mock_standalone_factory.return_value = mock_service
 
             generate_response = handler(generate_event, lambda_context)
             grade_response = grade_ai_handler(grade_event, lambda_context)
@@ -662,7 +679,8 @@ class TestCrossEndpointErrorConsistency:
         grade_event = _make_grade_ai_event()
         advice_event = _make_advice_event()
 
-        with patch("api.handler.create_ai_service") as mock_factory, \
+        with patch("api.handlers.ai_handler.create_ai_service") as mock_generate_factory, \
+             patch("api.handler.create_ai_service") as mock_standalone_factory, \
              patch("api.handler.card_service") as mock_cs, \
              patch("api.handler.review_service") as mock_rs:
 
@@ -672,7 +690,8 @@ class TestCrossEndpointErrorConsistency:
             mock_service.generate_cards.side_effect = AIInternalError("internal failure")
             mock_service.grade_answer.side_effect = AIInternalError("internal failure")
             mock_service.get_learning_advice.side_effect = AIInternalError("internal failure")
-            mock_factory.return_value = mock_service
+            mock_generate_factory.return_value = mock_service
+            mock_standalone_factory.return_value = mock_service
 
             generate_response = handler(generate_event, lambda_context)
             grade_response = grade_ai_handler(grade_event, lambda_context)
@@ -696,14 +715,16 @@ class TestCrossEndpointErrorConsistency:
         grade_event = _make_grade_ai_event()
         advice_event = _make_advice_event()
 
-        with patch("api.handler.create_ai_service") as mock_factory, \
+        with patch("api.handlers.ai_handler.create_ai_service") as mock_generate_factory, \
+             patch("api.handler.create_ai_service") as mock_standalone_factory, \
              patch("api.handler.card_service") as mock_cs, \
              patch("api.handler.review_service") as mock_rs:
 
             self._setup_mocks_for_error_tests(mock_cs, mock_rs)
 
             # ファクトリ自体が AIProviderError を raise する
-            mock_factory.side_effect = AIProviderError("Failed to initialize AI service")
+            mock_generate_factory.side_effect = AIProviderError("Failed to initialize AI service")
+            mock_standalone_factory.side_effect = AIProviderError("Failed to initialize AI service")
 
             generate_response = handler(generate_event, lambda_context)
             grade_response = grade_ai_handler(grade_event, lambda_context)

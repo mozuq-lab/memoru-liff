@@ -45,7 +45,7 @@ class TestEndpointFunctionalFinal:
     ハンドラーのルーティングと環境変数フラグの動作のみを検証する。
     """
 
-    @patch("api.handler.create_ai_service")
+    @patch("api.handlers.ai_handler.create_ai_service")
     def test_use_strands_true_generate_returns_200(self, mock_factory):
         """TC-QG-007-001: USE_STRANDS=true で POST /cards/generate が HTTP 200 を返す."""
         from api.handler import handler
@@ -82,7 +82,7 @@ class TestEndpointFunctionalFinal:
 
         assert response["statusCode"] == 200
 
-    @patch("api.handler.create_ai_service")
+    @patch("api.handlers.ai_handler.create_ai_service")
     def test_use_strands_false_generate_returns_200(self, mock_factory):
         """TC-QG-007-004: USE_STRANDS=false で POST /cards/generate が HTTP 200 を返す."""
         from api.handler import handler
@@ -119,21 +119,22 @@ class TestEndpointFunctionalFinal:
 
         assert response["statusCode"] == 200
 
-    @patch("api.handler.review_service")
-    @patch("api.handler.card_service")
-    @patch("api.handler.create_ai_service")
-    def test_use_strands_unset_all_endpoints_return_200(
-        self, mock_factory, mock_card_service, mock_review_service
-    ):
+    def test_use_strands_unset_all_endpoints_return_200(self):
         """TC-QG-007-007: USE_STRANDS 未設定で全 3 エンドポイントがデフォルト動作 (HTTP 200)."""
         from api.handler import handler, grade_ai_handler, advice_handler
-        mock_factory.return_value = make_mock_ai_service()
-        mock_card_service.get_card.return_value = make_mock_card()
-        mock_review_service.get_review_summary.return_value = make_mock_review_summary()
 
         # 【検証】: USE_STRANDS を環境から除去してデフォルト動作（BedrockService）を確認
         env = {k: v for k, v in os.environ.items() if k != "USE_STRANDS"}
-        with patch.dict("os.environ", env, clear=True):
+        with patch.dict("os.environ", env, clear=True), \
+             patch("api.handlers.ai_handler.create_ai_service") as mock_generate_factory, \
+             patch("api.handler.create_ai_service") as mock_standalone_factory, \
+             patch("api.handler.card_service") as mock_card_service, \
+             patch("api.handler.review_service") as mock_review_service:
+            mock_generate_factory.return_value = make_mock_ai_service()
+            mock_standalone_factory.return_value = make_mock_ai_service()
+            mock_card_service.get_card.return_value = make_mock_card()
+            mock_review_service.get_review_summary.return_value = make_mock_review_summary()
+
             resp1 = handler(make_generate_event(), MagicMock())
             resp2 = grade_ai_handler(make_grade_ai_event(), MagicMock())
             resp3 = advice_handler(make_advice_event(), MagicMock())
@@ -156,7 +157,7 @@ class TestResponseFormatFinal:
     【テスト方針】: make_mock_ai_service() を使い、レスポンス body の JSON 構造を検証する。
     """
 
-    @patch("api.handler.create_ai_service")
+    @patch("api.handlers.ai_handler.create_ai_service")
     def test_generate_response_has_generated_cards_and_generation_info(self, mock_factory):
         """TC-QG-008-001: POST /cards/generate レスポンスに generated_cards 配列 + generation_info が含まれる."""
         from api.handler import handler
@@ -170,7 +171,7 @@ class TestResponseFormatFinal:
         assert "generation_info" in body
         assert isinstance(body["generation_info"], dict)
 
-    @patch("api.handler.create_ai_service")
+    @patch("api.handlers.ai_handler.create_ai_service")
     def test_generate_cards_have_required_fields(self, mock_factory):
         """TC-QG-008-002: POST /cards/generate の generated_cards[].front, back, suggested_tags が存在."""
         from api.handler import handler
@@ -184,7 +185,7 @@ class TestResponseFormatFinal:
         assert "back" in card
         assert "suggested_tags" in card
 
-    @patch("api.handler.create_ai_service")
+    @patch("api.handlers.ai_handler.create_ai_service")
     def test_generate_info_has_required_fields(self, mock_factory):
         """TC-QG-008-003: POST /cards/generate の generation_info に input_length, model_used, processing_time_ms が存在."""
         from api.handler import handler
@@ -284,14 +285,18 @@ class TestCrossEndpointErrorMappingFinal:
         mock_service.get_learning_advice.side_effect = error
         return mock_service
 
-    def _get_responses(self, mock_factory, error: Exception) -> tuple:
+    def _get_responses(self, error: Exception) -> tuple:
         """全 3 エンドポイントのレスポンスをまとめて取得するヘルパー."""
         from api.handler import handler, grade_ai_handler, advice_handler
 
-        mock_factory.return_value = self._make_error_service(error)
+        error_service = self._make_error_service(error)
 
-        with patch("api.handler.card_service") as mock_card_service, \
+        with patch("api.handlers.ai_handler.create_ai_service") as mock_generate_factory, \
+             patch("api.handler.create_ai_service") as mock_standalone_factory, \
+             patch("api.handler.card_service") as mock_card_service, \
              patch("api.handler.review_service") as mock_review_service:
+            mock_generate_factory.return_value = error_service
+            mock_standalone_factory.return_value = error_service
             mock_card_service.get_card.return_value = make_mock_card()
             mock_review_service.get_review_summary.return_value = make_mock_review_summary()
 
@@ -301,10 +306,9 @@ class TestCrossEndpointErrorMappingFinal:
 
         return resp1, resp2, resp3
 
-    @patch("api.handler.create_ai_service")
-    def test_timeout_error_maps_to_504_all_endpoints(self, mock_factory):
+    def test_timeout_error_maps_to_504_all_endpoints(self):
         """TC-QG-010-001: AITimeoutError -> 全 3 エンドポイントで HTTP 504."""
-        resp1, resp2, resp3 = self._get_responses(mock_factory, AITimeoutError("timeout"))
+        resp1, resp2, resp3 = self._get_responses(AITimeoutError("timeout"))
 
         assert resp1["statusCode"] == 504
         assert resp2["statusCode"] == 504
@@ -313,50 +317,45 @@ class TestCrossEndpointErrorMappingFinal:
         assert json.loads(resp2["body"])["error"] == "AI service timeout"
         assert json.loads(resp3["body"])["error"] == "AI service timeout"
 
-    @patch("api.handler.create_ai_service")
-    def test_rate_limit_error_maps_to_429_all_endpoints(self, mock_factory):
+    def test_rate_limit_error_maps_to_429_all_endpoints(self):
         """TC-QG-010-002: AIRateLimitError -> 全 3 エンドポイントで HTTP 429."""
-        resp1, resp2, resp3 = self._get_responses(mock_factory, AIRateLimitError("rate limit"))
+        resp1, resp2, resp3 = self._get_responses(AIRateLimitError("rate limit"))
 
         assert resp1["statusCode"] == 429
         assert resp2["statusCode"] == 429
         assert resp3["statusCode"] == 429
         assert json.loads(resp1["body"])["error"] == "AI service rate limit exceeded"
 
-    @patch("api.handler.create_ai_service")
-    def test_provider_error_maps_to_503_all_endpoints(self, mock_factory):
+    def test_provider_error_maps_to_503_all_endpoints(self):
         """TC-QG-010-003: AIProviderError -> 全 3 エンドポイントで HTTP 503."""
-        resp1, resp2, resp3 = self._get_responses(mock_factory, AIProviderError("provider down"))
+        resp1, resp2, resp3 = self._get_responses(AIProviderError("provider down"))
 
         assert resp1["statusCode"] == 503
         assert resp2["statusCode"] == 503
         assert resp3["statusCode"] == 503
         assert json.loads(resp1["body"])["error"] == "AI service unavailable"
 
-    @patch("api.handler.create_ai_service")
-    def test_parse_error_maps_to_500_all_endpoints(self, mock_factory):
+    def test_parse_error_maps_to_500_all_endpoints(self):
         """TC-QG-010-004: AIParseError -> 全 3 エンドポイントで HTTP 500."""
-        resp1, resp2, resp3 = self._get_responses(mock_factory, AIParseError("invalid json"))
+        resp1, resp2, resp3 = self._get_responses(AIParseError("invalid json"))
 
         assert resp1["statusCode"] == 500
         assert resp2["statusCode"] == 500
         assert resp3["statusCode"] == 500
         assert json.loads(resp1["body"])["error"] == "AI service response parse error"
 
-    @patch("api.handler.create_ai_service")
-    def test_internal_error_maps_to_500_all_endpoints(self, mock_factory):
+    def test_internal_error_maps_to_500_all_endpoints(self):
         """TC-QG-010-005: AIInternalError -> 全 3 エンドポイントで HTTP 500."""
-        resp1, resp2, resp3 = self._get_responses(mock_factory, AIInternalError("internal failure"))
+        resp1, resp2, resp3 = self._get_responses(AIInternalError("internal failure"))
 
         assert resp1["statusCode"] == 500
         assert resp2["statusCode"] == 500
         assert resp3["statusCode"] == 500
         assert json.loads(resp1["body"])["error"] == "AI service error"
 
-    @patch("api.handler.create_ai_service")
-    def test_base_ai_service_error_maps_to_500_all_endpoints(self, mock_factory):
+    def test_base_ai_service_error_maps_to_500_all_endpoints(self):
         """TC-QG-010-006: AIServiceError (基底) -> 全 3 エンドポイントで HTTP 500."""
-        resp1, resp2, resp3 = self._get_responses(mock_factory, AIServiceError("generic error"))
+        resp1, resp2, resp3 = self._get_responses(AIServiceError("generic error"))
 
         assert resp1["statusCode"] == 500
         assert resp2["statusCode"] == 500
@@ -367,11 +366,13 @@ class TestCrossEndpointErrorMappingFinal:
         """TC-QG-010-007: create_ai_service() 初期化失敗 -> 全 3 エンドポイントで HTTP 503."""
         from api.handler import handler, grade_ai_handler, advice_handler
 
-        with patch("api.handler.create_ai_service") as mock_factory, \
+        with patch("api.handlers.ai_handler.create_ai_service") as mock_generate_factory, \
+             patch("api.handler.create_ai_service") as mock_standalone_factory, \
              patch("api.handler.card_service") as mock_card_service, \
              patch("api.handler.review_service") as mock_review_service:
 
-            mock_factory.side_effect = AIProviderError("Failed to initialize")
+            mock_generate_factory.side_effect = AIProviderError("Failed to initialize")
+            mock_standalone_factory.side_effect = AIProviderError("Failed to initialize")
             mock_card_service.get_card.return_value = make_mock_card()
             mock_review_service.get_review_summary.return_value = make_mock_review_summary()
 
@@ -446,7 +447,7 @@ class TestHandlerCoveragePaths:
 
         assert result == "jwt-header-user-id"
 
-    @patch("api.handler.create_ai_service")
+    @patch("api.handlers.ai_handler.create_ai_service")
     def test_generate_cards_json_decode_error_returns_400(self, mock_factory):
         """generate_cards エンドポイントが無効な JSON ボディに対して HTTP 400 を返す."""
         from api.handler import handler
@@ -480,7 +481,7 @@ class TestHandlerCoveragePaths:
         body = json.loads(response["body"])
         assert "error" in body
 
-    @patch("api.handler.create_ai_service")
+    @patch("api.handlers.ai_handler.create_ai_service")
     def test_handler_stage_prefix_injection(self, mock_factory):
         """main handler() が stage != $default 時に rawPath にステージプレフィックスを付与する."""
         from api.handler import handler
@@ -544,7 +545,7 @@ class TestHandlerCoveragePaths:
         body = json.loads(response["body"])
         assert body["error"] == "Internal Server Error"
 
-    @patch("api.handler.create_ai_service")
+    @patch("api.handlers.ai_handler.create_ai_service")
     def test_generate_cards_generic_exception_raises(self, mock_factory):
         """generate_cards エンドポイントが非 AIServiceError 例外をログして re-raise する."""
         import pytest

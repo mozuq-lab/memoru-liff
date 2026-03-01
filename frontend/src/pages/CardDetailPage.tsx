@@ -7,10 +7,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { CardForm } from '@/components/CardForm';
+import { DeckSelector } from '@/components/DeckSelector';
 import { Navigation } from '@/components/Navigation';
 import { Loading } from '@/components/common/Loading';
 import { Error } from '@/components/common/Error';
 import { cardsApi } from '@/services/api';
+import { useDecksContext } from '@/contexts/DecksContext';
 import type { Card } from '@/types';
 import { formatDueDate, getDueStatus } from '@/utils/date';
 
@@ -27,6 +29,7 @@ const INTERVAL_PRESET_DAYS = [1, 3, 7, 14, 30] as const;
 export const CardDetailPage = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { decks, fetchDecks } = useDecksContext();
   const [card, setCard] = useState<Card | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
@@ -37,6 +40,11 @@ export const CardDetailPage = () => {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   // 【状態追加】: 復習間隔調整APIの呼び出し中かどうかを管理する。プリセットボタンの disabled 制御に使用 🔵
   const [isAdjusting, setIsAdjusting] = useState(false);
+
+  // デッキ一覧を取得
+  useEffect(() => {
+    fetchDecks();
+  }, [fetchDecks]);
 
   // 【カード取得】
   const fetchCard = useCallback(async () => {
@@ -134,6 +142,29 @@ export const CardDetailPage = () => {
       setIsAdjusting(false);
     }
   }, [id]);
+
+  // 【デッキ変更ハンドラ】
+  // 【修正内容】: TASK-0092 で null 送信に対応。deckId が null の場合は明示的に null を送信し、
+  // バックエンド TASK-0085 の Sentinel パターン（deck_id を REMOVE）と連携する 🔵
+  // 【追加】: TASK-0097（REQ-203）デッキ変更成功後に fetchDecks() を呼び出し、
+  // DecksPage / DeckSummary の card_count / due_count を最新化する 🔵
+  const handleDeckChange = useCallback(async (deckId: string | null) => {
+    if (!id) return;
+
+    setError(null);
+    try {
+      // 【送信ロジック】: deckId=null の場合は { deck_id: null } を送信（明示的クリア）
+      // deckId=undefined なら送信しない（変更なし）、deckId='xxx' なら { deck_id: 'xxx' } を送信
+      const updatePayload = deckId === undefined ? {} : { deck_id: deckId };
+      const updatedCard = await cardsApi.updateCard(id, updatePayload);
+      setCard(updatedCard);
+      setSuccessMessage('デッキを変更しました');
+      // 【REQ-203】: デッキの card_count / due_count を更新するため fetchDecks を呼び出す 🔵
+      fetchDecks();
+    } catch (_err) {
+      setError('デッキの変更に失敗しました');
+    }
+  }, [id, fetchDecks]);
 
   // 【戻るハンドラ】
   const handleBack = () => {
@@ -279,6 +310,29 @@ export const CardDetailPage = () => {
                   {card.interval}日
                 </span>
               </div>
+            </div>
+
+            {/* デッキ変更 */}
+            <div className="bg-white rounded-lg shadow p-4 mb-4" data-testid="card-deck">
+              <p className="text-sm text-gray-600 mb-2">デッキ</p>
+              <DeckSelector
+                value={card.deck_id}
+                onChange={handleDeckChange}
+              />
+              {card.deck_id && (
+                <div className="mt-2 flex items-center">
+                  <div
+                    className="w-2 h-2 rounded-full mr-2"
+                    style={{
+                      backgroundColor:
+                        decks.find((d) => d.deck_id === card.deck_id)?.color || '#6B7280',
+                    }}
+                  />
+                  <span className="text-xs text-gray-500">
+                    {decks.find((d) => d.deck_id === card.deck_id)?.name || card.deck_id}
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* 復習間隔プリセットボタンセクション */}

@@ -8,6 +8,7 @@ import pytest
 
 from aws_lambda_powertools.event_handler.exceptions import UnauthorizedError
 
+import api.handler as _handler_module
 from api.handler import get_user_id_from_context, app
 
 
@@ -49,7 +50,7 @@ class TestGetUserIdFromContext:
 
         使用例:
             with mock_event_ctx(mock_event):
-                result = get_user_id_from_context()
+                result = get_user_id_from_context(_handler_module.app)
         """
         def _patch(mock_event):
             return _MockAppContext(mock_event)
@@ -74,7 +75,7 @@ class TestGetUserIdFromContext:
         mock_event = _make_event(authorizer=None, auth_header=f"Bearer {token}")
 
         with mock_event_ctx(mock_event):
-            result = get_user_id_from_context()
+            result = get_user_id_from_context(_handler_module.app)
 
         assert result == "test-user-123"  # 🔵 JWT ペイロードの sub が正確に返る
 
@@ -90,7 +91,7 @@ class TestGetUserIdFromContext:
         mock_event = _make_event(authorizer=authorizer)
 
         with mock_event_ctx(mock_event):
-            result = get_user_id_from_context()
+            result = get_user_id_from_context(_handler_module.app)
 
         assert result == "authorizer-user-456"  # 🔵 authorizer context から sub が取得される
         mock_event.get_header_value.assert_not_called()  # 🔵 JWT フォールバックは使用されない
@@ -110,7 +111,7 @@ class TestGetUserIdFromContext:
         mock_event = _make_event(authorizer=authorizer, auth_header=f"Bearer {token}")
 
         with mock_event_ctx(mock_event):
-            result = get_user_id_from_context()
+            result = get_user_id_from_context(_handler_module.app)
 
         assert result == "authorizer-user"  # 🔵 authorizer context が優先される
 
@@ -133,7 +134,7 @@ class TestGetUserIdFromContext:
 
         with mock_event_ctx(mock_event):
             with pytest.raises(UnauthorizedError):  # 🔵 本番環境ではフォールバック不使用
-                get_user_id_from_context()
+                get_user_id_from_context(_handler_module.app)
 
     def test_no_env_jwt_fallback_disabled(self, monkeypatch, mock_event_ctx):
         """TC-04: ENVIRONMENT未設定 + JWTヘッダーあり → UnauthorizedError.
@@ -150,7 +151,7 @@ class TestGetUserIdFromContext:
 
         with mock_event_ctx(mock_event):
             with pytest.raises(UnauthorizedError):  # 🔵 ENVIRONMENT 未設定はフォールバック無効
-                get_user_id_from_context()
+                get_user_id_from_context(_handler_module.app)
 
     # -------------------------------------------------------------------------
     # 異常系（dev 環境フォールバック失敗）
@@ -170,7 +171,7 @@ class TestGetUserIdFromContext:
 
         with mock_event_ctx(mock_event):
             with pytest.raises(UnauthorizedError):  # 🟡 Authorization ヘッダーなしは失敗
-                get_user_id_from_context()
+                get_user_id_from_context(_handler_module.app)
 
     def test_dev_env_no_bearer_prefix(self, monkeypatch, mock_event_ctx):
         """TC-06: dev環境 + "Bearer "プレフィックスなし → UnauthorizedError.
@@ -187,7 +188,7 @@ class TestGetUserIdFromContext:
 
         with mock_event_ctx(mock_event):
             with pytest.raises(UnauthorizedError):  # 🟡 Bearer プレフィックスなしはスキップ
-                get_user_id_from_context()
+                get_user_id_from_context(_handler_module.app)
 
     def test_dev_env_invalid_base64_jwt(self, monkeypatch, mock_event_ctx):
         """TC-07: dev環境 + 不正なbase64のJWT → UnauthorizedError.
@@ -206,7 +207,7 @@ class TestGetUserIdFromContext:
 
         with mock_event_ctx(mock_event):
             with pytest.raises(UnauthorizedError):  # 🟡 不正 base64 はデコードエラー → UnauthorizedError
-                get_user_id_from_context()
+                get_user_id_from_context(_handler_module.app)
 
     def test_dev_env_jwt_missing_sub(self, monkeypatch, mock_event_ctx):
         """TC-08: dev環境 + subクレームなしのJWT → UnauthorizedError.
@@ -223,7 +224,7 @@ class TestGetUserIdFromContext:
 
         with mock_event_ctx(mock_event):
             with pytest.raises(UnauthorizedError):  # 🟡 sub クレームなしは KeyError → UnauthorizedError
-                get_user_id_from_context()
+                get_user_id_from_context(_handler_module.app)
 
 
 # =============================================================================

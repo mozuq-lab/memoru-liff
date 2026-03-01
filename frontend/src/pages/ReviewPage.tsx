@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { FlipCard } from '@/components/FlipCard';
 import { GradeButtons } from '@/components/GradeButtons';
 import { ReviewProgress } from '@/components/ReviewProgress';
@@ -29,6 +29,8 @@ const buildReconfirmCard = (cardId: string, front: string, back: string, grade: 
 
 export const ReviewPage = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const deckId = searchParams.get('deck_id') || undefined;
 
   const [cards, setCards] = useState<DueCard[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -49,14 +51,14 @@ export const ReviewPage = () => {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await cardsApi.getDueCards();
+      const response = await cardsApi.getDueCards(undefined, deckId);
       setCards(response.due_cards);
     } catch {
       setError('復習カードの取得に失敗しました');
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [deckId]);
 
   useEffect(() => {
     fetchCards();
@@ -344,7 +346,9 @@ export const ReviewPage = () => {
         </header>
         <div className="flex-1 flex items-center justify-center px-6 text-center">
           <div>
-            <p className="text-lg text-gray-600 mb-4">復習対象のカードはありません</p>
+            <p className="text-lg text-gray-600 mb-4">
+              {deckId ? 'このデッキに復習対象のカードはありません' : '復習対象のカードはありません'}
+            </p>
             <button
               type="button"
               onClick={handleBack}

@@ -14,6 +14,9 @@ from models.card import Card
 # 【ロガー設定】: TransactionCanceledException などの内部エラーをログ出力するために必要 (EARS-009)
 logger = Logger()
 
+# Sentinel value to distinguish "not provided" from explicit None (null)
+_UNSET = object()
+
 
 class CardServiceError(Exception):
     """Base exception for card service errors."""
@@ -213,7 +216,7 @@ class CardService:
         card_id: str,
         front: Optional[str] = None,
         back: Optional[str] = None,
-        deck_id: Optional[str] = None,
+        deck_id=_UNSET,
         tags: Optional[List[str]] = None,
         interval: Optional[int] = None,
     ) -> Card:
@@ -247,6 +250,7 @@ class CardService:
 
         # Build update expression
         update_parts = []
+        remove_parts = []
         expression_values = {}
         expression_names = {}
 
@@ -262,10 +266,16 @@ class CardService:
             expression_names["#back"] = "back"
             card.back = back
 
-        if deck_id is not None:
+        if deck_id is None:
+            # Explicit null → REMOVE deck_id from DynamoDB
+            remove_parts.append("deck_id")
+            card.deck_id = None
+        elif deck_id is not _UNSET:
+            # New value → SET deck_id
             update_parts.append("deck_id = :deck_id")
             expression_values[":deck_id"] = deck_id
             card.deck_id = deck_id
+        # deck_id is _UNSET → no change
 
         if tags is not None:
             update_parts.append("tags = :tags")
@@ -291,7 +301,7 @@ class CardService:
             expression_values[":next_review_at"] = next_review_at.isoformat()
             card.next_review_at = next_review_at
 
-        if not update_parts:
+        if not update_parts and not remove_parts:
             return card
 
         now = datetime.now(timezone.utc)
@@ -300,12 +310,19 @@ class CardService:
         card.updated_at = now
 
         try:
-            update_expression = "SET " + ", ".join(update_parts)
+            # Build combined SET + REMOVE expression
+            update_expression = ""
+            if update_parts:
+                update_expression += "SET " + ", ".join(update_parts)
+            if remove_parts:
+                update_expression += " REMOVE " + ", ".join(remove_parts)
+
             update_kwargs = {
                 "Key": {"user_id": user_id, "card_id": card_id},
                 "UpdateExpression": update_expression,
-                "ExpressionAttributeValues": expression_values,
             }
+            if expression_values:
+                update_kwargs["ExpressionAttributeValues"] = expression_values
             if expression_names:
                 update_kwargs["ExpressionAttributeNames"] = expression_names
 
@@ -469,33 +486,45 @@ class CardService:
     def get_due_cards(
         self,
         user_id: str,
-        limit: int = 20,
+        limit: Optional[int] = None,
         before: Optional[datetime] = None,
     ) -> List[Card]:
         """Get cards due for review.
 
+        【設計方針】: limit=None の場合は DynamoDB に Limit を渡さず全件取得する。
+        呼び出し元（review_service）が deck_id フィルタ後に limit を適用するため、
+        このメソッドは limit なしで全件返すことで正確な total_due_count を計算できる。 🔵
+
         Args:
             user_id: The user's ID.
             limit: Maximum number of cards to return.
+                   None を指定した場合は全件取得する（デフォルト）。
+                   deck_id フィルタを上位層で行う場合は None を渡すこと。
             before: Get cards due before this time (defaults to now).
 
         Returns:
-            List of cards due for review.
+            List of cards due for review, oldest due first.
         """
         if before is None:
             before = datetime.now(timezone.utc)
 
         try:
-            response = self.table.query(
-                IndexName="user_id-due-index",
-                KeyConditionExpression="user_id = :user_id AND next_review_at <= :before",
-                ExpressionAttributeValues={
+            # 【クエリ引数構築】: GSI (user_id-due-index) を使い、期限切れカードを昇順で取得する
+            query_kwargs = {
+                "IndexName": "user_id-due-index",
+                "KeyConditionExpression": "user_id = :user_id AND next_review_at <= :before",
+                "ExpressionAttributeValues": {
                     ":user_id": user_id,
                     ":before": before.isoformat(),
                 },
-                Limit=limit,
-                ScanIndexForward=True,  # Oldest due first
-            )
+                "ScanIndexForward": True,  # 【昇順取得】: 期限が古い順（最も早く復習すべきカードを先頭に）
+            }
+            # 【Limit 条件付き設定】: limit=None の場合は DynamoDB に Limit を渡さず全件取得する 🔵
+            # limit が指定された場合のみ DynamoDB Query に Limit を付与し、レスポンスサイズを制限する。
+            if limit is not None:
+                query_kwargs["Limit"] = limit
+
+            response = self.table.query(**query_kwargs)
             return [Card.from_dynamodb_item(item) for item in response.get("Items", [])]
         except ClientError as e:
             raise CardServiceError(f"Failed to get due cards: {e}")
@@ -507,12 +536,16 @@ class CardService:
     ) -> int:
         """Get count of cards due for review.
 
+        【用途】: 通知サービス（notification_service）でユーザーの復習対象カード数を確認する際に使用する。
+        DynamoDB の SELECT COUNT を使用するため、全カードを取得するよりもコストが低い。
+        deck_id フィルタは不要なシンプルな件数取得に適している。 🔵
+
         Args:
             user_id: The user's ID.
             before: Get cards due before this time (defaults to now).
 
         Returns:
-            Number of cards due for review.
+            Number of cards due for review (deck_id フィルタなしの全件数).
         """
         if before is None:
             before = datetime.now(timezone.utc)

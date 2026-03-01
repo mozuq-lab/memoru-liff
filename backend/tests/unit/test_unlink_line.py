@@ -141,20 +141,20 @@ class TestUnlinkLineAPIHandler:
 
     def test_unlink_line_function_exists(self):
         """Test that unlink_line function is defined in handler module."""
-        from api import handler
+        from api.handlers import user_handler
 
         # Verify the function exists
-        assert hasattr(handler, "unlink_line")
-        assert callable(handler.unlink_line)
+        assert hasattr(user_handler, "unlink_line")
+        assert callable(user_handler.unlink_line)
 
     def test_unlink_line_function_calls_service(self):
         """Test that unlink_line function calls user_service.unlink_line with correct user_id."""
         from unittest.mock import patch, MagicMock
-        from api.handler import unlink_line, app, get_user_id_from_context
+        from api.handlers.user_handler import unlink_line
 
         # Setup: mock dependencies
-        with patch("api.handler.user_service") as mock_user_service, \
-             patch("api.handler.get_user_id_from_context") as mock_get_user_id:
+        with patch("api.handlers.user_handler.user_service") as mock_user_service, \
+             patch("api.handlers.user_handler.get_user_id_from_context") as mock_get_user_id:
 
             mock_get_user_id.return_value = "test-user-id"
             mock_user = MagicMock()
@@ -185,13 +185,13 @@ class TestUnlinkLineAPIHandler:
     def test_unlink_line_function_handles_not_linked_error(self):
         """Test that unlink_line function handles LineNotLinkedError with 400 response."""
         from unittest.mock import patch
-        from api.handler import unlink_line
+        from api.handlers.user_handler import unlink_line
         from services.user_service import LineNotLinkedError
         import json
 
         # Setup: mock dependencies
-        with patch("api.handler.user_service") as mock_user_service, \
-             patch("api.handler.get_user_id_from_context") as mock_get_user_id:
+        with patch("api.handlers.user_handler.user_service") as mock_user_service, \
+             patch("api.handlers.user_handler.get_user_id_from_context") as mock_get_user_id:
 
             mock_get_user_id.return_value = "test-user-id"
             mock_user_service.unlink_line.side_effect = LineNotLinkedError("LINE account not linked")
