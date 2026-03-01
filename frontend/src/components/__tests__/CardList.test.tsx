@@ -135,4 +135,31 @@ describe('CardList', () => {
       expect(screen.queryByRole('listitem')).not.toBeInTheDocument();
     });
   });
+
+  describe('highlightQuery', () => {
+    const renderWithHighlight = (cards: Card[], highlightQuery: string) => {
+      return render(
+        <MemoryRouter>
+          <CardList cards={cards} highlightQuery={highlightQuery} />
+        </MemoryRouter>
+      );
+    };
+
+    // CL-H01
+    it('highlightQueryでマッチ部分に<mark>タグが表示される', () => {
+      renderWithHighlight(mockCards, '質問1');
+
+      const marks = document.querySelectorAll('mark');
+      expect(marks.length).toBeGreaterThan(0);
+      expect(marks[0].textContent).toBe('質問1');
+    });
+
+    // CL-H02
+    it('highlightQueryが空文字で<mark>タグが表示されない', () => {
+      renderWithHighlight(mockCards, '');
+
+      const marks = document.querySelectorAll('mark');
+      expect(marks.length).toBe(0);
+    });
+  });
 });
