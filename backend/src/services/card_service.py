@@ -10,6 +10,7 @@ from boto3.dynamodb.types import TypeSerializer
 from botocore.exceptions import ClientError
 
 from models.card import Card
+from .srs import calculate_next_review_boundary
 
 # 【ロガー設定】: TransactionCanceledException などの内部エラーをログ出力するために必要 (EARS-009)
 logger = Logger()
@@ -219,6 +220,8 @@ class CardService:
         deck_id=_UNSET,
         tags: Optional[List[str]] = None,
         interval: Optional[int] = None,
+        user_timezone: Optional[str] = None,
+        day_start_hour: Optional[int] = None,
     ) -> Card:
         """Update a card.
 
@@ -295,8 +298,15 @@ class CardService:
             expression_names["#interval"] = "interval"
             card.interval = interval
 
-            # 【next_review_at 再計算】: 現在日時 + interval 日で next_review_at を計算する
-            next_review_at = datetime.now(timezone.utc) + timedelta(days=interval)
+            # 【next_review_at 再計算】: 日付境界時刻に正規化して計算する
+            if user_timezone is not None and day_start_hour is not None:
+                next_review_at = calculate_next_review_boundary(
+                    interval=interval,
+                    user_timezone=user_timezone,
+                    day_start_hour=day_start_hour,
+                )
+            else:
+                next_review_at = datetime.now(timezone.utc) + timedelta(days=interval)
             update_parts.append("next_review_at = :next_review_at")
             expression_values[":next_review_at"] = next_review_at.isoformat()
             card.next_review_at = next_review_at
