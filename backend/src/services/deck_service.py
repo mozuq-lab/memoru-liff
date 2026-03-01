@@ -71,7 +71,12 @@ class DeckService:
         description: Optional[str] = None,
         color: Optional[str] = None,
     ) -> Deck:
-        """Create a new deck.
+        """Create a new deck with atomic limit verification.
+
+        Uses a 3-step approach to prevent race conditions:
+        1. Optimistic check: Query(COUNT) to reject obvious over-limit
+        2. PutItem with ConditionExpression to prevent duplicate deck_id
+        3. Post-creation count verification with rollback if limit exceeded
 
         Args:
             user_id: The user's ID.
@@ -85,7 +90,7 @@ class DeckService:
         Raises:
             DeckLimitExceededError: If user exceeds deck limit.
         """
-        # Check deck count limit
+        # Step 1: Optimistic check
         current_count = self._get_deck_count(user_id)
         if current_count >= self.MAX_DECKS_PER_USER:
             raise DeckLimitExceededError(
@@ -101,11 +106,34 @@ class DeckService:
             created_at=now,
         )
 
+        # Step 2: PutItem with ConditionExpression to prevent duplicate deck_id
         try:
-            self.table.put_item(Item=deck.to_dynamodb_item())
-            return deck
+            self.table.put_item(
+                Item=deck.to_dynamodb_item(),
+                ConditionExpression="attribute_not_exists(user_id) AND attribute_not_exists(deck_id)",
+            )
         except ClientError as e:
+            if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                raise DeckLimitExceededError(
+                    f"Deck limit of {self.MAX_DECKS_PER_USER} exceeded"
+                )
             raise DeckServiceError(f"Failed to create deck: {e}")
+
+        # Step 3: Post-creation count verification (race detection)
+        post_count = self._get_deck_count(user_id)
+        if post_count > self.MAX_DECKS_PER_USER:
+            # Race detected: rollback by deleting the just-created deck
+            try:
+                self.table.delete_item(
+                    Key={"user_id": user_id, "deck_id": deck.deck_id}
+                )
+            except ClientError:
+                logger.warning(f"Failed to rollback deck {deck.deck_id} after race detection")
+            raise DeckLimitExceededError(
+                f"Deck limit of {self.MAX_DECKS_PER_USER} exceeded"
+            )
+
+        return deck
 
     def get_deck(self, user_id: str, deck_id: str) -> Deck:
         """Get a deck by ID.
