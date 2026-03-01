@@ -84,25 +84,13 @@ describe('DeckSelector', () => {
       expect(options[2]).toHaveTextContent('数学');
     });
 
-    it('「unassigned」疑似デッキはオプションから除外される', () => {
-      mockDecksContext.decks = [
-        ...mockDecks,
-        {
-          deck_id: 'unassigned',
-          user_id: 'user-1',
-          name: '未分類',
-          color: '#9CA3AF',
-          card_count: 2,
-          due_count: 0,
-          created_at: '2024-01-01T00:00:00Z',
-        },
-      ];
-
+    it('コンテキストのデッキがすべてオプションとして表示される', () => {
+      // バックエンドは 'unassigned' を返さないため、DecksContext のデッキをそのまま表示する
       const onChange = vi.fn();
       renderDeckSelector({ value: null, onChange });
 
       const options = screen.getAllByRole('option');
-      // 未分類 (select option) + 英語 + 数学 = 3 (unassigned pseudo-deck excluded)
+      // 未分類 (select option) + 英語 + 数学 = 3
       expect(options).toHaveLength(3);
     });
   });

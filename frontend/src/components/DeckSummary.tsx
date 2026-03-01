@@ -1,24 +1,23 @@
 /**
- * 【機能概要】: デッキサマリーコンポーネント（ホーム画面用）
- * 【実装方針】: 最大5件のデッキを due 数付きで表示、0件時はCTAメッセージ
+ * デッキサマリーコンポーネント（ホーム画面用）
+ * 最大5件のデッキを due 数付きで表示し、0件時は CTA メッセージを表示する。
  */
 import { Link, useNavigate } from 'react-router-dom';
 import { useDecksContext } from '@/contexts/DecksContext';
 
+/** ホーム画面に表示するデッキの最大件数 */
 const MAX_DISPLAY_DECKS = 5;
 
 /**
- * 【機能概要】: ホーム画面に表示するデッキサマリー
+ * ホーム画面に表示するデッキサマリー
+ * DecksContext からデッキ一覧を取得し、最大 MAX_DISPLAY_DECKS 件を表示する。
  */
 export const DeckSummary = () => {
   const { decks } = useDecksContext();
   const navigate = useNavigate();
 
-  // 「未分類」疑似デッキを除外
-  const regularDecks = decks.filter((d) => d.deck_id !== 'unassigned');
-
   // デッキ 0 件時の CTA メッセージ
-  if (regularDecks.length === 0) {
+  if (decks.length === 0) {
     return (
       <section className="bg-white rounded-lg shadow p-6" aria-label="デッキサマリー">
         <h2 className="text-lg font-semibold text-gray-700 mb-2">デッキ</h2>
@@ -35,8 +34,8 @@ export const DeckSummary = () => {
     );
   }
 
-  const displayDecks = regularDecks.slice(0, MAX_DISPLAY_DECKS);
-  const hasMore = regularDecks.length > MAX_DISPLAY_DECKS;
+  const displayDecks = decks.slice(0, MAX_DISPLAY_DECKS);
+  const hasMore = decks.length > MAX_DISPLAY_DECKS;
 
   return (
     <section className="bg-white rounded-lg shadow p-6" aria-label="デッキサマリー">

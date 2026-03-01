@@ -1,9 +1,16 @@
 /**
- * 【機能概要】: デッキ選択コンポーネント
- * 【実装方針】: ドロップダウンでデッキ一覧を表示、カラーインジケーター付き
+ * デッキ選択コンポーネント
+ * ドロップダウンでデッキ一覧を表示し、選択中デッキのカラーインジケーターを付与する。
  */
 import { useDecksContext } from '@/contexts/DecksContext';
 
+/**
+ * DeckSelector のプロパティ
+ * @property value - 現在選択中のデッキID（null は未分類）
+ * @property onChange - 選択変更時のコールバック
+ * @property className - 追加 CSS クラス
+ * @property disabled - 無効化フラグ
+ */
 interface DeckSelectorProps {
   value?: string | null;
   onChange: (deckId: string | null) => void;
@@ -12,8 +19,8 @@ interface DeckSelectorProps {
 }
 
 /**
- * 【機能概要】: デッキ選択ドロップダウン
- * 【実装方針】: DecksContext からデッキ一覧を取得して select で表示
+ * デッキ選択ドロップダウン
+ * DecksContext からデッキ一覧を取得して select 要素で表示する。
  */
 export const DeckSelector = ({
   value,
@@ -22,9 +29,6 @@ export const DeckSelector = ({
   disabled = false,
 }: DeckSelectorProps) => {
   const { decks } = useDecksContext();
-
-  // 「未分類」疑似デッキを除外
-  const regularDecks = decks.filter((d) => d.deck_id !== 'unassigned');
 
   const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const selectedValue = e.target.value;
@@ -41,7 +45,7 @@ export const DeckSelector = ({
         aria-label="デッキを選択"
       >
         <option value="">未分類</option>
-        {regularDecks.map((deck) => (
+        {decks.map((deck) => (
           <option key={deck.deck_id} value={deck.deck_id}>
             {deck.name}
           </option>
@@ -53,7 +57,7 @@ export const DeckSelector = ({
           className="absolute left-1 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full pointer-events-none"
           style={{
             backgroundColor:
-              regularDecks.find((d) => d.deck_id === value)?.color || '#6B7280',
+              decks.find((d) => d.deck_id === value)?.color || '#6B7280',
           }}
         />
       )}

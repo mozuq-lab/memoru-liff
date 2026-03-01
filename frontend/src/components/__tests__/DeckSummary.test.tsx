@@ -129,13 +129,13 @@ describe('DeckSummary', () => {
       expect(link.closest('a')).toHaveAttribute('href', '/decks');
     });
 
-    it('「unassigned」疑似デッキは除外される', () => {
+    it('バックエンドは unassigned を返さないためコンテキストのデッキをそのまま表示する', () => {
+      // バックエンドは 'unassigned' deck_id を返さない。
+      // コンテキストから受け取ったデッキをそのままレンダリングすることを確認する。
       mockDecksContext.decks = [
-        makeDeck({ deck_id: 'unassigned', name: '未分類' }),
         makeDeck({ deck_id: 'deck-1', name: '英語' }),
       ];
       renderDeckSummary();
-      // 「英語」は表示、「未分類」はフィルタされて CTA ではない通常表示
       expect(screen.getByText('英語')).toBeInTheDocument();
     });
   });
