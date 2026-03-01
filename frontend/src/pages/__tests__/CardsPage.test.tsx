@@ -76,7 +76,6 @@ const mockCards: Card[] = [
 ];
 
 const renderCardsPage = (locationState?: { message: string }, searchParams?: string) => {
-  const path = searchParams ? `/cards?${searchParams}` : '/cards';
   return render(
     <MemoryRouter initialEntries={[{ pathname: '/cards', search: searchParams ? `?${searchParams}` : '', state: locationState }]}>
       <CardsPage />
@@ -315,6 +314,7 @@ describe('TASK-0091: CardsPage deck_id フィルタ対応', () => {
           description: null,
           color: null,
           card_count: 10,
+          due_count: 0,
           created_at: '2024-01-01T00:00:00Z',
           updated_at: '2024-01-01T00:00:00Z',
         },

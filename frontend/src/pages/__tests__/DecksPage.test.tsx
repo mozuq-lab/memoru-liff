@@ -17,7 +17,7 @@ const mockDeleteDeck = vi.fn();
 const mockDecksContext = {
   decks: [] as Deck[],
   isLoading: false,
-  error: null,
+  error: null as Error | null,
   fetchDecks: mockFetchDecks,
   createDeck: mockCreateDeck,
   updateDeck: mockUpdateDeck,

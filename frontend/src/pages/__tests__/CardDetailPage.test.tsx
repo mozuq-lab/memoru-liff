@@ -683,7 +683,6 @@ describe('CardDetailPage', () => {
       });
 
       // 【初期状態確認】: 初期 deck_id が表示されている
-      const initialCard = mockCard;
       expect(screen.queryByTestId('card-detail')).toBeInTheDocument();
 
       // 【実際の処理実行】: デッキ変更を試みるが失敗する

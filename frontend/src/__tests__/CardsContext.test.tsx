@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, renderHook } from '@testing-library/react';
 import { CardsProvider, useCardsContext } from '@/contexts/CardsContext';
 import { cardsApi } from '@/services/api';
-import type { Card, DueCardsResponse } from '@/types';
+import type { Card } from '@/types';
 import type { ReactNode } from 'react';
 
 /**
@@ -28,6 +28,7 @@ describe('CardsContext', () => {
     vi.mocked(cardsApi.getDueCards).mockResolvedValue({
       due_cards: [],
       total_due_count: 0,
+      next_due_date: null,
     });
     vi.mocked(cardsApi.getDueCount).mockResolvedValue(0);
   });
@@ -348,9 +349,11 @@ describe('TASK-0091: CardsContext fetchCards/fetchDueCards deckId パラメー�
           back: 'Answer 1',
           deck_id: 'deck-abc-123',
           due_date: '2024-01-15',
+          overdue_days: 0,
         },
       ],
       total_due_count: 1,
+      next_due_date: '2024-01-15',
     });
     vi.mocked(cardsApi.getDueCount).mockResolvedValue(0);
   });
