@@ -561,6 +561,108 @@ describe('CardDetailPage', () => {
     });
 
     // ----------------------------------------------------------------
+    // TC-D07: デッキ変更成功後に fetchDecks が呼ばれる（REQ-203）
+    // ----------------------------------------------------------------
+    it('デッキ変更成功後に fetchDecks が呼ばれる', async () => {
+      // 【テスト目的】: デッキ変更保存後に DecksContext.fetchDecks() が呼ばれることを確認
+      // 【テスト内容】: handleDeckChange の成功フローで fetchDecks が呼び出されるかを検証
+      // 【期待される動作】: cardsApi.updateCard 成功後に mockFetchDecks が1回呼ばれる
+      // 🔵 要件定義 REQ-203・architecture.md セクション9 より
+
+      const user = userEvent.setup();
+
+      // 【テストデータ準備】: デッキ変更後のカードを返すよう設定
+      const updatedCard = { ...mockCard, deck_id: 'deck-2' };
+      mockUpdateCard.mockResolvedValue(updatedCard);
+
+      renderCardDetailPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('card-deck')).toBeInTheDocument();
+      });
+
+      // 【初期化確認】: fetchDecks の初期呼び出し回数を記録（useEffect による初回呼び出しを除外）
+      const initialCallCount = mockFetchDecks.mock.calls.length;
+
+      // 【実際の処理実行】: デッキを別のデッキに変更
+      const select = screen.getByRole('combobox') as HTMLSelectElement;
+      await user.selectOptions(select, 'deck-2');
+
+      // 【結果検証】: fetchDecks がデッキ変更後に追加で呼ばれること
+      await waitFor(() => {
+        expect(mockFetchDecks.mock.calls.length).toBeGreaterThan(initialCallCount); // 【確認内容】: fetchDecks が追加で呼ばれた 🔵
+      });
+    });
+
+    // ----------------------------------------------------------------
+    // TC-D08: 「未分類」選択（null送信）成功後に fetchDecks が呼ばれる（REQ-203）
+    // ----------------------------------------------------------------
+    it('「未分類」選択（deck_id=null）後に fetchDecks が呼ばれる', async () => {
+      // 【テスト目的】: deck_id を null に変更した場合も fetchDecks() が呼ばれることを確認
+      // 【テスト内容】: handleDeckChange(null) の成功フローで fetchDecks が呼び出されるかを検証
+      // 【期待される動作】: cardsApi.updateCard({ deck_id: null }) 成功後に mockFetchDecks が呼ばれる
+      // 🔵 要件定義 REQ-203 より
+
+      const user = userEvent.setup();
+
+      // 【テストデータ準備】: deck_id が null になったカードを返すよう設定
+      const updatedCard = { ...mockCard, deck_id: null };
+      mockUpdateCard.mockResolvedValue(updatedCard);
+
+      renderCardDetailPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('card-deck')).toBeInTheDocument();
+      });
+
+      // 【初期化確認】: fetchDecks の初期呼び出し回数を記録
+      const initialCallCount = mockFetchDecks.mock.calls.length;
+
+      // 【実際の処理実行】: 「未分類」（空文字列）を選択
+      const select = screen.getByRole('combobox') as HTMLSelectElement;
+      await user.selectOptions(select, '');
+
+      // 【結果検証】: fetchDecks が追加で呼ばれること
+      await waitFor(() => {
+        expect(mockFetchDecks.mock.calls.length).toBeGreaterThan(initialCallCount); // 【確認内容】: null送信成功後も fetchDecks が呼ばれる 🔵
+      });
+    });
+
+    // ----------------------------------------------------------------
+    // TC-D09: デッキ変更失敗時に fetchDecks が呼ばれない（REQ-203）
+    // ----------------------------------------------------------------
+    it('デッキ変更失敗時に fetchDecks が呼ばれない', async () => {
+      // 【テスト目的】: updateCard が失敗した場合は fetchDecks() が呼ばれないことを確認
+      // 【テスト内容】: handleDeckChange のエラーフローで fetchDecks が呼ばれないかを検証
+      // 【期待される動作】: cardsApi.updateCard が reject した場合、fetchDecks は呼ばれない
+      // 🔵 要件定義 REQ-203 より
+
+      const user = userEvent.setup();
+
+      // 【テストデータ準備】: API失敗を模擬
+      mockUpdateCard.mockRejectedValue(new Error('API Error'));
+
+      renderCardDetailPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('card-deck')).toBeInTheDocument();
+      });
+
+      // 【初期化確認】: fetchDecks の初期呼び出し回数を記録
+      const initialCallCount = mockFetchDecks.mock.calls.length;
+
+      // 【実際の処理実行】: デッキ変更を試みるが失敗する
+      const select = screen.getByRole('combobox') as HTMLSelectElement;
+      await user.selectOptions(select, 'deck-2');
+
+      // 【結果検証】: エラーが表示され、fetchDecks は追加で呼ばれていないこと
+      await waitFor(() => {
+        expect(screen.getByTestId('error-message')).toBeInTheDocument();
+      });
+      expect(mockFetchDecks.mock.calls.length).toBe(initialCallCount); // 【確認内容】: API失敗時は fetchDecks が呼ばれない 🔵
+    });
+
+    // ----------------------------------------------------------------
     // TC-D06: デッキ変更失敗時にカードデータは変更されない
     // ----------------------------------------------------------------
     it('デッキ変更失敗時にカードの deck_id が変更前の値のまま保持される', async () => {

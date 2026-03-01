@@ -146,6 +146,8 @@ export const CardDetailPage = () => {
   // 【デッキ変更ハンドラ】
   // 【修正内容】: TASK-0092 で null 送信に対応。deckId が null の場合は明示的に null を送信し、
   // バックエンド TASK-0085 の Sentinel パターン（deck_id を REMOVE）と連携する 🔵
+  // 【追加】: TASK-0097（REQ-203）デッキ変更成功後に fetchDecks() を呼び出し、
+  // DecksPage / DeckSummary の card_count / due_count を最新化する 🔵
   const handleDeckChange = useCallback(async (deckId: string | null) => {
     if (!id) return;
 
@@ -157,10 +159,12 @@ export const CardDetailPage = () => {
       const updatedCard = await cardsApi.updateCard(id, updatePayload);
       setCard(updatedCard);
       setSuccessMessage('デッキを変更しました');
+      // 【REQ-203】: デッキの card_count / due_count を更新するため fetchDecks を呼び出す 🔵
+      fetchDecks();
     } catch (_err) {
       setError('デッキの変更に失敗しました');
     }
-  }, [id]);
+  }, [id, fetchDecks]);
 
   // 【戻るハンドラ】
   const handleBack = () => {
