@@ -61,7 +61,7 @@ def create_deck():
         )
     except DeckLimitExceededError:
         return Response(
-            status_code=400,
+            status_code=409,
             content_type=content_types.APPLICATION_JSON,
             body=json.dumps({"error": "Deck limit exceeded. Maximum 50 decks per user."}),
         )

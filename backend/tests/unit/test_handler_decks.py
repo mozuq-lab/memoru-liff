@@ -93,7 +93,7 @@ class TestCreateDeckEndpoint:
         assert response["statusCode"] == 400
 
     def test_create_deck_limit_exceeded(self, api_gateway_event, lambda_context):
-        """デッキ数上限超過で 400 エラー."""
+        """デッキ数上限超過で 409 エラー."""
         event = api_gateway_event(
             method="POST",
             path="/decks",
@@ -106,9 +106,9 @@ class TestCreateDeckEndpoint:
 
             response = handler(event, lambda_context)
 
-        assert response["statusCode"] == 400
+        assert response["statusCode"] == 409
         body = json.loads(response["body"])
-        assert "limit" in body["error"].lower() or "Deck limit exceeded" in body["error"]
+        assert "Deck limit exceeded" in body["error"]
 
     def test_create_deck_invalid_color(self, api_gateway_event, lambda_context):
         """不正なカラーコードで 400 エラー."""

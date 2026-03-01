@@ -28,7 +28,7 @@
 
 ## 全体進捗
 
-- [ ] Phase 1: バックエンド基盤 + High修正
+- [x] Phase 1: バックエンド基盤 + High修正
 - [ ] Phase 2: バックエンド Medium/Low + フロントエンド High
 - [ ] Phase 3: フロントエンド Medium/Low + 統合テスト
 
@@ -50,7 +50,7 @@
 - [x] [TASK-0084: handler.py ルーター分割](TASK-0084.md) - 6h (TDD) 🔵
 - [x] [TASK-0085: Sentinel パターン導入 + deck_id REMOVE](TASK-0085.md) - 4h (TDD) 🔵
 - [x] [TASK-0086: デッキ数制限アトミック検証](TASK-0086.md) - 4h (TDD) 🔵
-- [ ] [TASK-0087: DeckLimitExceededError HTTP 409](TASK-0087.md) - 2h (TDD) 🔵
+- [x] [TASK-0087: DeckLimitExceededError HTTP 409](TASK-0087.md) - 2h (TDD) 🔵
 
 ### 依存関係
 
