@@ -1151,3 +1151,116 @@ class TestStrandsAdvice:
                 service.get_learning_advice(review_summary={})
 
             assert exc_info.value.__cause__ is not None
+
+
+# ---------------------------------------------------------------------------
+# Category: system_prompt 設定テスト
+# ---------------------------------------------------------------------------
+
+
+class TestStrandsSystemPrompt:
+    """各メソッドが適切な system_prompt を Agent に渡すことを検証する."""
+
+    def test_generate_cards_passes_card_generation_system_prompt(self):
+        """generate_cards が CARD_GENERATION_SYSTEM_PROMPT を Agent に渡す."""
+        from services.prompts.generate import CARD_GENERATION_SYSTEM_PROMPT
+
+        response_json = json.dumps({
+            "cards": [{"front": "Q", "back": "A", "tags": []}]
+        })
+        mock_agent_instance = _make_mock_agent_instance(response_json)
+
+        with patch("services.strands_service.Agent", return_value=mock_agent_instance) as mock_agent_cls, \
+             patch("services.strands_service.BedrockModel"):
+            service = StrandsAIService()
+            service.generate_cards(input_text="テストテキスト" * 5)
+
+        mock_agent_cls.assert_called_once()
+        call_kwargs = mock_agent_cls.call_args
+        assert call_kwargs[1].get("system_prompt") == CARD_GENERATION_SYSTEM_PROMPT
+
+    def test_grade_answer_passes_grading_system_prompt(self):
+        """grade_answer が GRADING_SYSTEM_PROMPT を Agent に渡す."""
+        from services.prompts.grading import GRADING_SYSTEM_PROMPT
+
+        response_json = json.dumps({"grade": 4, "reasoning": "Good answer"})
+        mock_agent_instance = _make_mock_agent_instance(response_json)
+
+        with patch("services.strands_service.Agent", return_value=mock_agent_instance) as mock_agent_cls, \
+             patch("services.strands_service.BedrockModel"):
+            service = StrandsAIService()
+            service.grade_answer(card_front="Q", card_back="A", user_answer="A")
+
+        mock_agent_cls.assert_called_once()
+        call_kwargs = mock_agent_cls.call_args
+        assert call_kwargs[1].get("system_prompt") == GRADING_SYSTEM_PROMPT
+
+    def test_get_learning_advice_passes_advice_system_prompt(self):
+        """get_learning_advice が ADVICE_SYSTEM_PROMPT を Agent に渡す."""
+        from services.prompts.advice import ADVICE_SYSTEM_PROMPT
+
+        response_json = json.dumps({
+            "advice_text": "Good", "weak_areas": [], "recommendations": []
+        })
+        mock_agent_instance = _make_mock_agent_instance(response_json)
+
+        with patch("services.strands_service.Agent", return_value=mock_agent_instance) as mock_agent_cls, \
+             patch("services.strands_service.BedrockModel"):
+            service = StrandsAIService()
+            service.get_learning_advice(review_summary={})
+
+        mock_agent_cls.assert_called_once()
+        call_kwargs = mock_agent_cls.call_args
+        assert call_kwargs[1].get("system_prompt") == ADVICE_SYSTEM_PROMPT
+
+
+# ---------------------------------------------------------------------------
+# Category: _handle_ai_errors コンテキストマネージャーテスト
+# ---------------------------------------------------------------------------
+
+
+class TestHandleAiErrors:
+    """_handle_ai_errors コンテキストマネージャーの動作検証."""
+
+    def test_ai_service_error_passes_through(self):
+        """既存の AIServiceError はそのまま再 raise される."""
+        from services.strands_service import _handle_ai_errors
+
+        with pytest.raises(AIParseError, match="test parse error"):
+            with _handle_ai_errors():
+                raise AIParseError("test parse error")
+
+    def test_timeout_error_mapped(self):
+        """TimeoutError は AITimeoutError にマッピングされる."""
+        from services.strands_service import _handle_ai_errors
+
+        with pytest.raises(AITimeoutError):
+            with _handle_ai_errors():
+                raise TimeoutError("timed out")
+
+    def test_connection_error_mapped(self):
+        """ConnectionError は AIProviderError にマッピングされる."""
+        from services.strands_service import _handle_ai_errors
+
+        with pytest.raises(AIProviderError):
+            with _handle_ai_errors():
+                raise ConnectionError("refused")
+
+    def test_generic_exception_mapped_to_ai_service_error(self):
+        """その他の例外は AIServiceError にマッピングされる."""
+        from services.strands_service import _handle_ai_errors
+
+        with pytest.raises(AIServiceError, match="Unexpected error"):
+            with _handle_ai_errors():
+                raise RuntimeError("something went wrong")
+
+    def test_exception_chain_preserved(self):
+        """例外チェーン (__cause__) が保持される."""
+        from services.strands_service import _handle_ai_errors
+
+        with pytest.raises(AITimeoutError) as exc_info:
+            with _handle_ai_errors():
+                raise TimeoutError("original")
+
+        assert exc_info.value.__cause__ is not None
+        assert str(exc_info.value.__cause__) == "original"

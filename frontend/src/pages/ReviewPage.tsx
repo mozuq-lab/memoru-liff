@@ -64,6 +64,19 @@ export const ReviewPage = () => {
     fetchCards();
   }, [fetchCards]);
 
+  // 【再採点モードガード】: regradeCardIndex が指すカードが cards に存在しない場合、
+  // 再採点を中止して完了画面に遷移する（render 内の setState を回避）
+  useEffect(() => {
+    if (regradeCardIndex !== null) {
+      const regradeResult = reviewResults[regradeCardIndex];
+      const regradeCard = cards.find((c) => c.card_id === regradeResult.cardId);
+      if (!regradeCard) {
+        setRegradeCardIndex(null);
+        setIsComplete(true);
+      }
+    }
+  }, [regradeCardIndex, reviewResults, cards]);
+
   /**
    * 【機能概要】: 採点またはスキップ後に次のカードへ進む、またはセッションを完了する
    * 【設計方針】: 通常カードを優先して消化し、全消化後に再確認キューへ遷移する
@@ -386,8 +399,7 @@ export const ReviewPage = () => {
     const regradeResult = reviewResults[regradeCardIndex];
     const regradeCard = cards.find((c) => c.card_id === regradeResult.cardId);
     if (!regradeCard) {
-      setRegradeCardIndex(null);
-      setIsComplete(true);
+      // useEffect で状態更新を行うため、ここでは null を返すのみ
       return null;
     }
     return (

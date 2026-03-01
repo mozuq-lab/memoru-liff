@@ -398,8 +398,8 @@ class TestHandlerCoveragePaths:
     """
 
     def test_get_user_id_from_event_rest_api_cognito_path(self):
-        """_get_user_id_from_event が REST API Cognito Authorizer 形式 (claims.claims.sub) を処理できる."""
-        from api.handler import _get_user_id_from_event
+        """get_user_id_from_event が REST API Cognito Authorizer 形式 (claims.claims.sub) を処理できる."""
+        from api.shared import get_user_id_from_event
 
         event = {
             "requestContext": {
@@ -408,12 +408,12 @@ class TestHandlerCoveragePaths:
                 }
             }
         }
-        result = _get_user_id_from_event(event)
+        result = get_user_id_from_event(event)
         assert result == "cognito-user-id"
 
     def test_get_user_id_from_event_direct_sub_path(self):
-        """_get_user_id_from_event が直接 sub フィールドを持つ authorizer 形式を処理できる."""
-        from api.handler import _get_user_id_from_event
+        """get_user_id_from_event が直接 sub フィールドを持つ authorizer 形式を処理できる."""
+        from api.shared import get_user_id_from_event
 
         event = {
             "requestContext": {
@@ -422,14 +422,14 @@ class TestHandlerCoveragePaths:
                 }
             }
         }
-        result = _get_user_id_from_event(event)
+        result = get_user_id_from_event(event)
         assert result == "direct-sub-user-id"
 
     def test_get_user_id_from_event_dev_jwt_fallback(self):
-        """_get_user_id_from_event が ENVIRONMENT=dev 時に Authorization ヘッダーの JWT を解析できる."""
+        """get_user_id_from_event が ENVIRONMENT=dev + AWS_SAM_LOCAL=true 時に JWT を解析できる."""
         import base64
         import json as _json
-        from api.handler import _get_user_id_from_event
+        from api.shared import get_user_id_from_event
 
         # Build a minimal JWT with sub claim
         header = base64.urlsafe_b64encode(b'{"alg":"RS256"}').rstrip(b"=").decode()
@@ -442,8 +442,8 @@ class TestHandlerCoveragePaths:
             "headers": {"authorization": f"Bearer {token}"},
         }
 
-        with patch.dict("os.environ", {"ENVIRONMENT": "dev"}):
-            result = _get_user_id_from_event(event)
+        with patch.dict("os.environ", {"ENVIRONMENT": "dev", "AWS_SAM_LOCAL": "true"}):
+            result = get_user_id_from_event(event)
 
         assert result == "jwt-header-user-id"
 
@@ -517,8 +517,8 @@ class TestHandlerCoveragePaths:
         assert event["rawPath"] == "/dev/cards/generate"
 
     def test_get_user_id_from_event_dev_jwt_fallback_exception(self):
-        """_get_user_id_from_event が ENVIRONMENT=dev で JWT デコード失敗時に None を返す."""
-        from api.handler import _get_user_id_from_event
+        """get_user_id_from_event が ENVIRONMENT=dev + AWS_SAM_LOCAL=true で JWT デコード失敗時に None を返す."""
+        from api.shared import get_user_id_from_event
 
         # Provide a malformed token that will fail base64 decoding
         event = {
@@ -526,8 +526,8 @@ class TestHandlerCoveragePaths:
             "headers": {"authorization": "Bearer bad.not-base64!@#.sig"},
         }
 
-        with patch.dict("os.environ", {"ENVIRONMENT": "dev"}):
-            result = _get_user_id_from_event(event)
+        with patch.dict("os.environ", {"ENVIRONMENT": "dev", "AWS_SAM_LOCAL": "true"}):
+            result = get_user_id_from_event(event)
 
         assert result is None
 

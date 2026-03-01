@@ -2,6 +2,7 @@
 
 import pytest
 from moto import mock_aws
+from unittest.mock import patch
 import boto3
 from datetime import datetime, timedelta, timezone
 
@@ -1312,3 +1313,154 @@ class TestUndoReview:
         reviews_table = review_service.reviews_table
         response = reviews_table.scan()
         assert len(response["Items"]) >= 1
+
+
+class TestGetNextDueDateFutureFilter:
+    """Tests for _get_next_due_date filtering future dates only (TASK-0110)."""
+
+    def test_next_due_date_returns_future_card(self, review_service, dynamodb_tables):
+        """_get_next_due_date は未来の next_review_at のみ返す。"""
+        now = datetime.now(timezone.utc)
+        table = dynamodb_tables.Table("memoru-cards-test")
+
+        # Card due in the past (should be excluded)
+        table.put_item(
+            Item={
+                "user_id": "u1", "card_id": "past-card", "front": "Q", "back": "A",
+                "next_review_at": (now - timedelta(hours=2)).isoformat(),
+                "interval": 1, "ease_factor": "2.5", "repetitions": 0,
+                "tags": [], "created_at": now.isoformat(),
+            }
+        )
+        # Card due in the future
+        future_date = now + timedelta(days=3)
+        table.put_item(
+            Item={
+                "user_id": "u1", "card_id": "future-card", "front": "Q2", "back": "A2",
+                "next_review_at": future_date.isoformat(),
+                "interval": 3, "ease_factor": "2.5", "repetitions": 1,
+                "tags": [], "created_at": now.isoformat(),
+            }
+        )
+
+        result = review_service._get_next_due_date("u1")
+
+        assert result == future_date.date().isoformat()
+
+    def test_next_due_date_returns_none_when_only_past(self, review_service, dynamodb_tables):
+        """過去のカードしかない場合は None を返す。"""
+        now = datetime.now(timezone.utc)
+        table = dynamodb_tables.Table("memoru-cards-test")
+
+        table.put_item(
+            Item={
+                "user_id": "u1", "card_id": "past-card", "front": "Q", "back": "A",
+                "next_review_at": (now - timedelta(hours=1)).isoformat(),
+                "interval": 1, "ease_factor": "2.5", "repetitions": 0,
+                "tags": [], "created_at": now.isoformat(),
+            }
+        )
+
+        result = review_service._get_next_due_date("u1")
+
+        assert result is None
+
+    def test_next_due_date_returns_none_when_no_cards(self, review_service, dynamodb_tables):
+        """カードがない場合は None を返す。"""
+        result = review_service._get_next_due_date("no-cards-user")
+        assert result is None
+
+
+class TestUpdateCardReviewDataListAppend:
+    """Tests for list_append usage in _update_card_review_data (TASK-0110)."""
+
+    def test_review_history_appended_atomically(self, review_service, sample_card, dynamodb_tables):
+        """submit_review で review_history が追加され、list_append で処理される。"""
+        # Submit two reviews
+        review_service.submit_review("test-user-id", "test-card-id", grade=4)
+        review_service.submit_review("test-user-id", "test-card-id", grade=3)
+
+        # Verify review_history has 2 entries
+        table = dynamodb_tables.Table("memoru-cards-test")
+        response = table.get_item(Key={"user_id": "test-user-id", "card_id": "test-card-id"})
+        history = response["Item"].get("review_history", [])
+
+        assert len(history) == 2
+        assert history[0]["grade"] == 4
+        assert history[1]["grade"] == 3
+
+    def test_review_history_created_when_missing(self, review_service, dynamodb_tables):
+        """review_history 属性がないカードでも if_not_exists で初期化される。"""
+        now = datetime.now(timezone.utc)
+        table = dynamodb_tables.Table("memoru-cards-test")
+
+        # Create card without review_history attribute
+        table.put_item(
+            Item={
+                "user_id": "u1", "card_id": "no-history-card", "front": "Q", "back": "A",
+                "next_review_at": now.isoformat(),
+                "interval": 1, "ease_factor": "2.5", "repetitions": 0,
+                "tags": [], "created_at": now.isoformat(),
+            }
+        )
+
+        review_service.submit_review("u1", "no-history-card", grade=5)
+
+        response = table.get_item(Key={"user_id": "u1", "card_id": "no-history-card"})
+        history = response["Item"].get("review_history", [])
+
+        assert len(history) == 1
+        assert history[0]["grade"] == 5
+
+
+class TestRecordReviewLogging:
+    """Tests for _record_review logging on failure (TASK-0110)."""
+
+    def test_record_review_failure_logs_warning(self, review_service, sample_card, monkeypatch):
+        """_record_review 失敗時に logger.warning が呼ばれることを確認する。"""
+        from botocore.exceptions import ClientError
+
+        def raise_client_error(**kwargs):
+            raise ClientError(
+                {"Error": {"Code": "InternalServerError", "Message": "Service unavailable"}},
+                "PutItem",
+            )
+
+        monkeypatch.setattr(review_service.reviews_table, "put_item", raise_client_error)
+
+        with patch("services.review_service.logger") as mock_logger:
+            # _record_review is called internally by submit_review
+            # but we can call it directly
+            review_service._record_review(
+                user_id="test-user-id",
+                card_id="test-card-id",
+                grade=4,
+                reviewed_at=datetime.now(timezone.utc),
+                ease_factor_before=2.5,
+                ease_factor_after=2.6,
+                interval_before=1,
+                interval_after=3,
+            )
+
+            mock_logger.warning.assert_called_once()
+            call_args = mock_logger.warning.call_args
+            assert "card_id" in call_args[1]["extra"]
+            assert call_args[1]["extra"]["card_id"] == "test-card-id"
+
+    def test_submit_review_succeeds_despite_record_failure(self, review_service, sample_card, monkeypatch):
+        """_record_review が失敗しても submit_review は成功する。"""
+        from botocore.exceptions import ClientError
+
+        def raise_client_error(**kwargs):
+            raise ClientError(
+                {"Error": {"Code": "InternalServerError", "Message": "fail"}},
+                "PutItem",
+            )
+
+        monkeypatch.setattr(review_service.reviews_table, "put_item", raise_client_error)
+
+        with patch("services.review_service.logger"):
+            result = review_service.submit_review("test-user-id", "test-card-id", grade=4)
+
+        assert result.card_id == "test-card-id"
+        assert result.grade == 4

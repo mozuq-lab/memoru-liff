@@ -1166,3 +1166,195 @@ class TestCardCountEndToEnd:
         # 【結果検証】: 残りのカードがまだアクセス可能であることを確認する
         remaining = card_service.get_card("test-user-id", cards[2].card_id)
         assert remaining.card_id == cards[2].card_id  # 【確認内容】: 3枚目のカードがまだ存在する 🔵
+
+
+class TestGetDueCardsPagination:
+    """Tests for get_due_cards pagination when limit=None (TASK-0109)."""
+
+    def test_pagination_collects_all_pages(self, card_service, monkeypatch):
+        """limit=None の場合、LastEvaluatedKey を追って全ページを収集する。"""
+        from models.card import Card
+
+        now = datetime.now(timezone.utc)
+        item1 = {
+            "user_id": "u1", "card_id": "c1", "front": "Q1", "back": "A1",
+            "next_review_at": now.isoformat(), "interval": 1, "ease_factor": "2.5",
+            "repetitions": 0, "tags": [], "created_at": now.isoformat(),
+        }
+        item2 = {
+            "user_id": "u1", "card_id": "c2", "front": "Q2", "back": "A2",
+            "next_review_at": now.isoformat(), "interval": 1, "ease_factor": "2.5",
+            "repetitions": 0, "tags": [], "created_at": now.isoformat(),
+        }
+
+        call_count = 0
+
+        def mock_query(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return {"Items": [item1], "LastEvaluatedKey": {"pk": "dummy"}}
+            else:
+                return {"Items": [item2]}
+
+        monkeypatch.setattr(card_service.table, "query", mock_query)
+
+        result = card_service.get_due_cards("u1", limit=None)
+
+        assert call_count == 2
+        assert len(result) == 2
+        assert result[0].card_id == "c1"
+        assert result[1].card_id == "c2"
+
+    def test_pagination_passes_exclusive_start_key(self, card_service, monkeypatch):
+        """2 ページ目のクエリに ExclusiveStartKey が含まれることを確認する。"""
+        captured_kwargs = []
+
+        now = datetime.now(timezone.utc)
+        item = {
+            "user_id": "u1", "card_id": "c1", "front": "Q", "back": "A",
+            "next_review_at": now.isoformat(), "interval": 1, "ease_factor": "2.5",
+            "repetitions": 0, "tags": [], "created_at": now.isoformat(),
+        }
+        call_count = 0
+
+        def mock_query(**kwargs):
+            nonlocal call_count
+            captured_kwargs.append(kwargs)
+            call_count += 1
+            if call_count == 1:
+                return {"Items": [item], "LastEvaluatedKey": {"pk": "key1"}}
+            else:
+                return {"Items": []}
+
+        monkeypatch.setattr(card_service.table, "query", mock_query)
+
+        card_service.get_due_cards("u1", limit=None)
+
+        assert "ExclusiveStartKey" not in captured_kwargs[0]
+        assert captured_kwargs[1]["ExclusiveStartKey"] == {"pk": "key1"}
+
+    def test_limit_specified_does_not_paginate(self, card_service, monkeypatch):
+        """limit が指定されている場合、ページネーションせず 1 回のクエリで返す。"""
+        now = datetime.now(timezone.utc)
+        item = {
+            "user_id": "u1", "card_id": "c1", "front": "Q", "back": "A",
+            "next_review_at": now.isoformat(), "interval": 1, "ease_factor": "2.5",
+            "repetitions": 0, "tags": [], "created_at": now.isoformat(),
+        }
+        call_count = 0
+
+        def mock_query(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            # Return LastEvaluatedKey even though limit is set
+            return {"Items": [item], "LastEvaluatedKey": {"pk": "dummy"}}
+
+        monkeypatch.setattr(card_service.table, "query", mock_query)
+
+        result = card_service.get_due_cards("u1", limit=5)
+
+        assert call_count == 1
+        assert len(result) == 1
+
+
+class TestDeleteCardReviewCleanup:
+    """Tests for review deletion pagination and logging in delete_card (TASK-0109)."""
+
+    def test_review_deletion_paginates(self, card_service, dynamodb_table, monkeypatch):
+        """レビュー削除がページネーションで全件削除することを確認する。"""
+        from models.card import Card
+
+        mock_card = Card(
+            user_id="test-user-id", front="Q", back="A",
+            created_at=datetime.now(timezone.utc),
+            next_review_at=datetime.now(timezone.utc),
+        )
+        monkeypatch.setattr(card_service, "get_card", lambda uid, cid: mock_card)
+
+        # Mock transact_write_items to succeed (card deletion transaction)
+        monkeypatch.setattr(card_service._client, "transact_write_items", lambda **kw: None)
+
+        reviews_table = dynamodb_table.Table("memoru-reviews-test")
+        deleted_keys = []
+        query_call_count = 0
+
+        def mock_reviews_query(**kwargs):
+            nonlocal query_call_count
+            query_call_count += 1
+            if query_call_count == 1:
+                return {
+                    "Items": [
+                        {"card_id": "c1", "reviewed_at": "2024-01-01T00:00:00"},
+                        {"card_id": "c1", "reviewed_at": "2024-01-02T00:00:00"},
+                    ],
+                    "LastEvaluatedKey": {"card_id": "c1", "reviewed_at": "2024-01-02T00:00:00"},
+                }
+            else:
+                return {
+                    "Items": [
+                        {"card_id": "c1", "reviewed_at": "2024-01-03T00:00:00"},
+                    ],
+                }
+
+        monkeypatch.setattr(reviews_table, "query", mock_reviews_query)
+
+        class MockBatchWriter:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def delete_item(self, Key):
+                deleted_keys.append(Key)
+
+        monkeypatch.setattr(reviews_table, "batch_writer", lambda: MockBatchWriter())
+
+        # Override dynamodb.Table to return our patched reviews_table
+        original_table_fn = card_service.dynamodb.Table
+
+        def patched_table(name):
+            if name == card_service.reviews_table_name:
+                return reviews_table
+            return original_table_fn(name)
+
+        monkeypatch.setattr(card_service.dynamodb, "Table", patched_table)
+
+        card_service.delete_card("test-user-id", "c1")
+
+        assert query_call_count == 2
+        assert len(deleted_keys) == 3
+
+    def test_review_deletion_failure_logs_warning(self, card_service, monkeypatch):
+        """レビュー削除失敗時に logger.warning が呼ばれることを確認する。"""
+        from unittest.mock import patch
+        from models.card import Card
+
+        mock_card = Card(
+            user_id="test-user-id", front="Q", back="A",
+            created_at=datetime.now(timezone.utc),
+            next_review_at=datetime.now(timezone.utc),
+        )
+        monkeypatch.setattr(card_service, "get_card", lambda uid, cid: mock_card)
+
+        # Mock transact_write_items to succeed (card deletion transaction)
+        monkeypatch.setattr(card_service._client, "transact_write_items", lambda **kw: None)
+
+        # Make Table() raise for reviews table
+        original_table_fn = card_service.dynamodb.Table
+
+        def exploding_table(name):
+            if name == card_service.reviews_table_name:
+                raise RuntimeError("DynamoDB connection error")
+            return original_table_fn(name)
+
+        monkeypatch.setattr(card_service.dynamodb, "Table", exploding_table)
+
+        with patch("services.card_service.logger") as mock_logger:
+            card_service.delete_card("test-user-id", "some-card")
+
+            mock_logger.warning.assert_called_once()
+            call_args = mock_logger.warning.call_args
+            assert "best-effort" in call_args[0][0].lower() or "failed" in call_args[0][0].lower()
+            assert call_args[1]["extra"]["card_id"] == "some-card"

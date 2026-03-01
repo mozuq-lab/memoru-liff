@@ -10,7 +10,8 @@ import json
 import os
 import re
 import time
-from typing import List
+from contextlib import contextmanager
+from typing import Generator, List
 
 from strands import Agent
 from strands.models import BedrockModel
@@ -37,6 +38,7 @@ from services.ai_service import (
 )
 from services.prompts import get_advice_prompt, get_card_generation_prompt, get_grading_prompt
 from services.prompts.advice import ADVICE_SYSTEM_PROMPT
+from services.prompts.generate import CARD_GENERATION_SYSTEM_PROMPT
 from services.prompts.grading import GRADING_SYSTEM_PROMPT
 
 # Bedrock のデフォルトモデル ID
@@ -47,6 +49,35 @@ _DEFAULT_OLLAMA_MODEL = "llama3.2"
 # model_used フィールドに使用するプロバイダー識別子
 _MODEL_USED_BEDROCK = "strands_bedrock"
 _MODEL_USED_OLLAMA = "strands_ollama"
+
+
+@contextmanager
+def _handle_ai_errors() -> Generator[None, None, None]:
+    """AI サービス呼び出しの共通例外ハンドリング.
+
+    Strands Agent 呼び出しで発生する例外を AIService 例外階層にマッピングする。
+    """
+    try:
+        yield
+    except AIServiceError:
+        raise
+    except TimeoutError as e:
+        raise AITimeoutError(f"Agent timed out: {e}") from e
+    except ConnectionError as e:
+        raise AIProviderError(f"Provider connection error: {e}") from e
+    except Exception as e:
+        error_str = str(e)
+
+        if _is_rate_limit_error(e):
+            raise AIRateLimitError(f"Rate limit exceeded: {e}") from e
+
+        if "timeout" in error_str.lower() or "timed out" in error_str.lower():
+            raise AITimeoutError(f"Agent timed out: {e}") from e
+
+        if "connection" in error_str.lower() or "connect" in type(e).__name__.lower():
+            raise AIProviderError(f"Provider connection error: {e}") from e
+
+        raise AIServiceError(f"Unexpected error: {e}") from e
 
 
 class StrandsAIService:
@@ -120,8 +151,7 @@ class StrandsAIService:
         """
         start_time = time.time()
 
-        try:
-            # プロンプトを生成
+        with _handle_ai_errors():
             user_prompt = get_card_generation_prompt(
                 input_text=input_text,
                 card_count=card_count,
@@ -129,11 +159,9 @@ class StrandsAIService:
                 language=language,
             )
 
-            # Strands Agent を作成して呼び出す
-            agent = Agent(model=self.model)
+            agent = Agent(model=self.model, system_prompt=CARD_GENERATION_SYSTEM_PROMPT)
             response = agent(user_prompt)
 
-            # レスポンスをテキストに変換して解析
             response_text = str(response)
             cards = self._parse_generation_result(response_text)
 
@@ -145,32 +173,6 @@ class StrandsAIService:
                 model_used=self.model_used,
                 processing_time_ms=processing_time_ms,
             )
-
-        except AIServiceError:
-            # 既にマッピング済みの例外はそのまま再 raise
-            raise
-        except TimeoutError as e:
-            raise AITimeoutError(f"Agent timed out: {e}") from e
-        except ConnectionError as e:
-            raise AIProviderError(f"Provider connection error: {e}") from e
-        except Exception as e:
-            # botocore.exceptions.ClientError などの SDK 固有例外を処理
-            error_str = str(e)
-
-            # ClientError (botocore) のレート制限チェック
-            if _is_rate_limit_error(e):
-                raise AIRateLimitError(f"Rate limit exceeded: {e}") from e
-
-            # タイムアウト関連エラーのチェック
-            if "timeout" in error_str.lower() or "timed out" in error_str.lower():
-                raise AITimeoutError(f"Agent timed out: {e}") from e
-
-            # 接続エラー関連チェック（エラーメッセージと例外クラス名を確認）
-            if "connection" in error_str.lower() or "connect" in type(e).__name__.lower():
-                raise AIProviderError(f"Provider connection error: {e}") from e
-
-            # その他の予期しない例外を AIServiceError にラップ
-            raise AIServiceError(f"Unexpected error: {e}") from e
 
     def _parse_generation_result(self, response_text: str) -> List[GeneratedCard]:
         """Strands Agent のレスポンステキストをカードリストに変換する.
@@ -274,8 +276,7 @@ class StrandsAIService:
         """
         start_time = time.time()
 
-        try:
-            # プロンプトを生成
+        with _handle_ai_errors():
             user_prompt = get_grading_prompt(
                 card_front=card_front,
                 card_back=card_back,
@@ -283,11 +284,9 @@ class StrandsAIService:
                 language=language,
             )
 
-            # Strands Agent を作成して呼び出す
-            agent = Agent(model=self.model)
+            agent = Agent(model=self.model, system_prompt=GRADING_SYSTEM_PROMPT)
             response = agent(user_prompt)
 
-            # レスポンスをテキストに変換して解析
             response_text = str(response)
             grade, reasoning = self._parse_grading_result(response_text)
 
@@ -299,32 +298,6 @@ class StrandsAIService:
                 model_used=self.model_used,
                 processing_time_ms=processing_time_ms,
             )
-
-        except AIServiceError:
-            # 既にマッピング済みの例外はそのまま再 raise
-            raise
-        except TimeoutError as e:
-            raise AITimeoutError(f"Agent timed out: {e}") from e
-        except ConnectionError as e:
-            raise AIProviderError(f"Provider connection error: {e}") from e
-        except Exception as e:
-            # botocore.exceptions.ClientError などの SDK 固有例外を処理
-            error_str = str(e)
-
-            # ClientError (botocore) のレート制限チェック
-            if _is_rate_limit_error(e):
-                raise AIRateLimitError(f"Rate limit exceeded: {e}") from e
-
-            # タイムアウト関連エラーのチェック
-            if "timeout" in error_str.lower() or "timed out" in error_str.lower():
-                raise AITimeoutError(f"Agent timed out: {e}") from e
-
-            # 接続エラー関連チェック（エラーメッセージと例外クラス名を確認）
-            if "connection" in error_str.lower() or "connect" in type(e).__name__.lower():
-                raise AIProviderError(f"Provider connection error: {e}") from e
-
-            # その他の予期しない例外を AIServiceError にラップ
-            raise AIServiceError(f"Unexpected error: {e}") from e
 
     def _parse_grading_result(self, response_text: str) -> tuple[int, str]:
         """Strands Agent のレスポンステキストから採点結果を抽出する.
@@ -403,18 +376,15 @@ class StrandsAIService:
         """
         start_time = time.time()
 
-        try:
-            # プロンプトを生成
+        with _handle_ai_errors():
             user_prompt = get_advice_prompt(
                 review_summary=review_summary,
                 language=language,
             )
 
-            # Strands Agent を作成して呼び出す
             agent = Agent(model=self.model, system_prompt=ADVICE_SYSTEM_PROMPT)
             response = agent(user_prompt)
 
-            # レスポンスをテキストに変換して解析
             response_text = str(response)
             advice_text, weak_areas, recommendations = self._parse_advice_result(response_text)
 
@@ -427,32 +397,6 @@ class StrandsAIService:
                 model_used=self.model_used,
                 processing_time_ms=processing_time_ms,
             )
-
-        except AIServiceError:
-            # 既にマッピング済みの例外はそのまま再 raise
-            raise
-        except TimeoutError as e:
-            raise AITimeoutError(f"Agent timed out: {e}") from e
-        except ConnectionError as e:
-            raise AIProviderError(f"Provider connection error: {e}") from e
-        except Exception as e:
-            # botocore.exceptions.ClientError などの SDK 固有例外を処理
-            error_str = str(e)
-
-            # ClientError (botocore) のレート制限チェック
-            if _is_rate_limit_error(e):
-                raise AIRateLimitError(f"Rate limit exceeded: {e}") from e
-
-            # タイムアウト関連エラーのチェック
-            if "timeout" in error_str.lower() or "timed out" in error_str.lower():
-                raise AITimeoutError(f"Agent timed out: {e}") from e
-
-            # 接続エラー関連チェック（エラーメッセージと例外クラス名を確認）
-            if "connection" in error_str.lower() or "connect" in type(e).__name__.lower():
-                raise AIProviderError(f"Provider connection error: {e}") from e
-
-            # その他の予期しない例外を AIServiceError にラップ
-            raise AIServiceError(f"Unexpected error: {e}") from e
 
     def _parse_advice_result(self, response_text: str) -> tuple[str, List[str], List[str]]:
         """Strands Agent のレスポンステキストからアドバイス結果を抽出する.

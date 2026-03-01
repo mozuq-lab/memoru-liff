@@ -366,16 +366,25 @@ class CardService:
         # クエリで全レビューを取得し、バッチ削除する（ベストエフォート）。
         try:
             reviews_table = self.dynamodb.Table(self.reviews_table_name)
-            response = reviews_table.query(
-                KeyConditionExpression="card_id = :cid",
-                ExpressionAttributeValues={":cid": card_id},
-                ProjectionExpression="card_id, reviewed_at",
-            )
+            query_kwargs = {
+                "KeyConditionExpression": "card_id = :cid",
+                "ExpressionAttributeValues": {":cid": card_id},
+                "ProjectionExpression": "card_id, reviewed_at",
+            }
             with reviews_table.batch_writer() as batch:
-                for item in response.get("Items", []):
-                    batch.delete_item(Key={"card_id": item["card_id"], "reviewed_at": item["reviewed_at"]})
-        except Exception:
-            pass  # Reviews cleanup is best-effort
+                while True:
+                    response = reviews_table.query(**query_kwargs)
+                    for item in response.get("Items", []):
+                        batch.delete_item(Key={"card_id": item["card_id"], "reviewed_at": item["reviewed_at"]})
+                    last_key = response.get("LastEvaluatedKey")
+                    if not last_key:
+                        break
+                    query_kwargs["ExclusiveStartKey"] = last_key
+        except Exception as e:
+            logger.warning(
+                "Failed to delete reviews for card (best-effort)",
+                extra={"card_id": card_id, "error": str(e)},
+            )
 
         try:
             client = self._client
@@ -524,8 +533,20 @@ class CardService:
             if limit is not None:
                 query_kwargs["Limit"] = limit
 
-            response = self.table.query(**query_kwargs)
-            return [Card.from_dynamodb_item(item) for item in response.get("Items", [])]
+            # 【ページネーション】: limit=None の場合は LastEvaluatedKey で全件取得する
+            if limit is None:
+                all_items = []
+                while True:
+                    response = self.table.query(**query_kwargs)
+                    all_items.extend(response.get("Items", []))
+                    last_key = response.get("LastEvaluatedKey")
+                    if not last_key:
+                        break
+                    query_kwargs["ExclusiveStartKey"] = last_key
+                return [Card.from_dynamodb_item(item) for item in all_items]
+            else:
+                response = self.table.query(**query_kwargs)
+                return [Card.from_dynamodb_item(item) for item in response.get("Items", [])]
         except ClientError as e:
             raise CardServiceError(f"Failed to get due cards: {e}")
 

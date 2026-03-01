@@ -155,6 +155,23 @@ class TestUserServiceLinkLine:
         with pytest.raises(UserAlreadyLinkedError):
             user_service.link_line("test-user-id", "U1234567890abcdef1234567890abcdef")
 
+    def test_link_line_relink_same_id(self, user_service, dynamodb_table):
+        """Test re-linking the same LINE ID succeeds (idempotent)."""
+        table = dynamodb_table.Table("memoru-users-test")
+        line_user_id = "U1234567890abcdef1234567890abcdef"
+        table.put_item(
+            Item={
+                "user_id": "test-user-id",
+                "line_user_id": line_user_id,
+                "settings": {"notification_time": "09:00", "timezone": "Asia/Tokyo"},
+                "created_at": "2024-01-01T00:00:00",
+            }
+        )
+
+        # Re-linking same LINE ID should succeed
+        user = user_service.link_line("test-user-id", line_user_id)
+        assert user.line_user_id == line_user_id
+
     def test_link_line_id_already_used_by_another_user(self, user_service, dynamodb_table):
         """Test linking LINE ID that's already used by another user."""
         # Setup: create two users, one with LINE linked
@@ -179,6 +196,26 @@ class TestUserServiceLinkLine:
         # Execute & Assert: user-2 tries to use the same LINE ID
         with pytest.raises(LineUserIdAlreadyUsedError):
             user_service.link_line("user-2", line_user_id)
+
+    def test_link_line_condition_expression_prevents_overwrite(self, user_service, dynamodb_table):
+        """ConditionExpression が別 LINE ID への上書きを防ぐことを確認。"""
+        table = dynamodb_table.Table("memoru-users-test")
+        table.put_item(
+            Item={
+                "user_id": "test-user-id",
+                "line_user_id": "Uoriginal",
+                "settings": {"notification_time": "09:00", "timezone": "Asia/Tokyo"},
+                "created_at": "2024-01-01T00:00:00",
+            }
+        )
+
+        # Attempt to link a different LINE ID should fail via ConditionExpression
+        with pytest.raises(UserAlreadyLinkedError):
+            user_service.link_line("test-user-id", "Unew_different_id")
+
+        # Original LINE ID should be preserved
+        user = user_service.get_user("test-user-id")
+        assert user.line_user_id == "Uoriginal"
 
 
 class TestUserServiceUpdateSettings:

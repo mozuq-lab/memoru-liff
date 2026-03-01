@@ -24,6 +24,29 @@ DifficultyLevel = Literal["easy", "medium", "hard"]
 # 🔵 _types.py の Language 型定義を参照
 
 
+# 【定数定義】: カード生成用システムプロンプト
+# 🔵 REQ-004: generate_cards に system_prompt を設定
+CARD_GENERATION_SYSTEM_PROMPT = """You are an expert flashcard creator specialized in spaced repetition learning.
+
+Your task is to create effective flashcards from the given text that maximize learning retention.
+
+Guidelines:
+- Create clear, concise questions on the front
+- Provide complete, accurate answers on the back
+- Focus on key concepts and important relationships
+- Ensure each card tests a single concept
+- Add relevant tags for categorization
+
+Respond ONLY with a JSON object in this exact format:
+{
+  "cards": [
+    {"front": "question", "back": "answer", "tags": ["tag1", "tag2"]}
+  ]
+}
+
+Do not include any text outside the JSON object."""
+
+
 # 【定数定義】: 難易度ガイドラインの辞書
 # 🔵 既存 prompts.py と同一
 DIFFICULTY_GUIDELINES = {
