@@ -17,7 +17,7 @@ export const DeckSummary = () => {
   const navigate = useNavigate();
 
   // デッキ 0 件時の CTA メッセージ
-  if (decks.length === 0) {
+  if (!decks || decks.length === 0) {
     return (
       <section className="bg-white rounded-lg shadow p-6" aria-label="デッキサマリー">
         <h2 className="text-lg font-semibold text-gray-700 mb-2">デッキ</h2>
@@ -26,7 +26,7 @@ export const DeckSummary = () => {
         </p>
         <Link
           to="/decks"
-          className="inline-block px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 active:bg-blue-800 min-h-[44px] transition-colors"
+          className="inline-flex items-center px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 active:bg-blue-800 min-h-[44px] transition-colors"
         >
           デッキを作成
         </Link>
