@@ -57,14 +57,6 @@ const mockCards: Card[] = [
   },
 ];
 
-// テスト用の今日日付をモック
-vi.mock("@/utils/date", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/utils/date")>();
-  return {
-    ...actual,
-  };
-});
-
 describe("useCardSearch", () => {
   beforeEach(() => {
     vi.useFakeTimers();

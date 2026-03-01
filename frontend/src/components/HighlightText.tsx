@@ -13,10 +13,7 @@ interface HighlightTextProps {
   className?: string;
 }
 
-/**
- * 文字列を NFKC 正規化して小文字に変換する（全角・半角・大小文字を統一）
- */
-const normalize = (str: string): string => str.normalize('NFKC').toLowerCase();
+import { normalize } from "@/utils/text";
 
 /**
  * H-3 fix: 元テキスト ⇔ 正規化テキストのインデックスマッピングを構築する。

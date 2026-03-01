@@ -3,7 +3,8 @@
  * 【実装方針】: useMemo で filteredCards を計算し、依存変化時のみ再計算
  * 【テスト対応】: TDD - useCardSearch.test.ts
  */
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
+import { normalize } from "@/utils/text";
 import type {
   Card,
   ReviewStatusFilter,
@@ -37,9 +38,6 @@ interface UseCardSearchReturn {
   /** すべてのフィルターをリセット */
   reset: () => void;
 }
-
-/** 文字列を NFKC 正規化して小文字に変換（全角・半角・大小文字統一） */
-const normalize = (str: string): string => str.normalize("NFKC").toLowerCase();
 
 /** カードの復習状態を判定する */
 const getReviewStatus = (card: Card, today: string): ReviewStatusFilter => {
@@ -109,12 +107,12 @@ export const useCardSearch = ({
     return result;
   }, [cards, query, reviewStatus, sortBy, sortOrder]);
 
-  const reset = () => {
+  const reset = useCallback(() => {
     setQuery("");
     setReviewStatus("all");
     setSortBy("created_at");
     setSortOrder("desc");
-  };
+  }, []);
 
   return {
     query,
