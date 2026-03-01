@@ -13,6 +13,7 @@
 # 🔵 既存 services.prompts の後方互換性維持
 from .generate import (
     get_card_generation_prompt,
+    CARD_GENERATION_SYSTEM_PROMPT,
     DIFFICULTY_GUIDELINES,
     DifficultyLevel,
     Language,
@@ -38,6 +39,7 @@ from .advice import (
 __all__ = [
     # generate.py から
     "get_card_generation_prompt",
+    "CARD_GENERATION_SYSTEM_PROMPT",
     "DIFFICULTY_GUIDELINES",
     "DifficultyLevel",
     "Language",
