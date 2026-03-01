@@ -94,7 +94,7 @@ TASK-0085 → TASK-0092
 
 ### タスク一覧
 
-- [ ] [TASK-0093: App.tsx Provider 順序修正](TASK-0093.md) - 2h (TDD) 🟡
+- [x] [TASK-0093: App.tsx Provider 順序修正](TASK-0093.md) - 2h (TDD) 🟡
 - [ ] [TASK-0094: DeckFormModal 差分送信](TASK-0094.md) - 4h (TDD) 🔵
 - [ ] [TASK-0095: unassigned フィルタ削除](TASK-0095.md) - 1h (DIRECT) 🔵
 - [ ] [TASK-0096: JSDoc コメントスタイル統一](TASK-0096.md) - 2h (DIRECT) 🟡
