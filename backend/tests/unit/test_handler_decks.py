@@ -51,7 +51,7 @@ class TestCreateDeckEndpoint:
 
         mock_deck = _make_deck(name="新しいデッキ", description="説明", color="#FF5733")
 
-        with patch("api.handler.deck_service") as mock_service:
+        with patch("api.handlers.decks_handler.deck_service") as mock_service:
             mock_service.create_deck.return_value = mock_deck
             from api.handler import handler
 
@@ -70,7 +70,7 @@ class TestCreateDeckEndpoint:
             body={"description": "名前なし"},
         )
 
-        with patch("api.handler.deck_service"):
+        with patch("api.handlers.decks_handler.deck_service"):
             from api.handler import handler
 
             response = handler(event, lambda_context)
@@ -85,7 +85,7 @@ class TestCreateDeckEndpoint:
             body={"name": ""},
         )
 
-        with patch("api.handler.deck_service"):
+        with patch("api.handlers.decks_handler.deck_service"):
             from api.handler import handler
 
             response = handler(event, lambda_context)
@@ -100,7 +100,7 @@ class TestCreateDeckEndpoint:
             body={"name": "超過デッキ"},
         )
 
-        with patch("api.handler.deck_service") as mock_service:
+        with patch("api.handlers.decks_handler.deck_service") as mock_service:
             mock_service.create_deck.side_effect = DeckLimitExceededError("Limit exceeded")
             from api.handler import handler
 
@@ -118,7 +118,7 @@ class TestCreateDeckEndpoint:
             body={"name": "テスト", "color": "invalid"},
         )
 
-        with patch("api.handler.deck_service"):
+        with patch("api.handlers.decks_handler.deck_service"):
             from api.handler import handler
 
             response = handler(event, lambda_context)
@@ -143,12 +143,10 @@ class TestListDecksEndpoint:
 
         mock_deck = _make_deck()
 
-        with patch("api.handler.deck_service") as mock_service, \
-             patch("api.handler.card_service") as mock_card_service:
+        with patch("api.handlers.decks_handler.deck_service") as mock_service:
             mock_service.list_decks.return_value = [mock_deck]
             mock_service.get_deck_card_counts.return_value = {"deck-123": 5}
             mock_service.get_deck_due_counts.return_value = {"deck-123": 2}
-            mock_card_service.list_cards.return_value = ([], None)
             from api.handler import handler
 
             response = handler(event, lambda_context)
@@ -165,12 +163,10 @@ class TestListDecksEndpoint:
             path="/decks",
         )
 
-        with patch("api.handler.deck_service") as mock_service, \
-             patch("api.handler.card_service") as mock_card_service:
+        with patch("api.handlers.decks_handler.deck_service") as mock_service:
             mock_service.list_decks.return_value = []
             mock_service.get_deck_card_counts.return_value = {}
             mock_service.get_deck_due_counts.return_value = {}
-            mock_card_service.list_cards.return_value = ([], None)
             from api.handler import handler
 
             response = handler(event, lambda_context)
@@ -199,7 +195,7 @@ class TestUpdateDeckEndpoint:
 
         mock_deck = _make_deck(name="更新後の名前")
 
-        with patch("api.handler.deck_service") as mock_service:
+        with patch("api.handlers.decks_handler.deck_service") as mock_service:
             mock_service.update_deck.return_value = mock_deck
             mock_service.get_deck_card_counts.return_value = {"deck-123": 5}
             mock_service.get_deck_due_counts.return_value = {"deck-123": 2}
@@ -220,7 +216,7 @@ class TestUpdateDeckEndpoint:
             path_parameters={"deck_id": "nonexistent"},
         )
 
-        with patch("api.handler.deck_service") as mock_service:
+        with patch("api.handlers.decks_handler.deck_service") as mock_service:
             mock_service.update_deck.side_effect = DeckNotFoundError("Not found")
             from api.handler import handler
 
@@ -237,7 +233,7 @@ class TestUpdateDeckEndpoint:
             path_parameters={"deck_id": "deck-123"},
         )
 
-        with patch("api.handler.deck_service"):
+        with patch("api.handlers.decks_handler.deck_service"):
             from api.handler import handler
 
             response = handler(event, lambda_context)
@@ -261,7 +257,7 @@ class TestDeleteDeckEndpoint:
             path_parameters={"deck_id": "deck-123"},
         )
 
-        with patch("api.handler.deck_service") as mock_service:
+        with patch("api.handlers.decks_handler.deck_service") as mock_service:
             mock_service.delete_deck.return_value = None
             from api.handler import handler
 
@@ -277,7 +273,7 @@ class TestDeleteDeckEndpoint:
             path_parameters={"deck_id": "nonexistent"},
         )
 
-        with patch("api.handler.deck_service") as mock_service:
+        with patch("api.handlers.decks_handler.deck_service") as mock_service:
             mock_service.delete_deck.side_effect = DeckNotFoundError("Not found")
             from api.handler import handler
 
@@ -309,7 +305,7 @@ class TestGetDueCardsWithDeckId:
             "next_due_date": None,
         }
 
-        with patch("api.handler.review_service") as mock_service:
+        with patch("api.handlers.review_handler.review_service") as mock_service:
             mock_service.get_due_cards.return_value = mock_response
             from api.handler import handler
 
@@ -336,7 +332,7 @@ class TestGetDueCardsWithDeckId:
             "next_due_date": None,
         }
 
-        with patch("api.handler.review_service") as mock_service:
+        with patch("api.handlers.review_handler.review_service") as mock_service:
             mock_service.get_due_cards.return_value = mock_response
             from api.handler import handler
 

@@ -83,7 +83,7 @@ class TestFactoryIntegration:
 
         # When
         # 【実際の処理実行】: handler を通じて generate_cards エンドポイントを呼び出す
-        with patch("api.handler.create_ai_service") as mock_factory:
+        with patch("api.handlers.ai_handler.create_ai_service") as mock_factory:
             mock_service = MagicMock()
             mock_service.generate_cards.return_value = MagicMock(
                 cards=[MagicMock(front="Q1", back="A1", suggested_tags=["tag1"])],
@@ -127,7 +127,7 @@ class TestFactoryIntegration:
 
         # When
         # 【実際の処理実行】: create_ai_service をモックして引数伝播を検証
-        with patch("api.handler.create_ai_service") as mock_factory:
+        with patch("api.handlers.ai_handler.create_ai_service") as mock_factory:
             mock_service = MagicMock()
             mock_service.generate_cards.return_value = MagicMock(
                 cards=[MagicMock(front="Q", back="A", suggested_tags=[])],
@@ -356,7 +356,7 @@ class TestGenerateCardsCompatibility:
             user_id="test-user-789",
         )
 
-        with patch("api.handler.create_ai_service") as mock_factory:
+        with patch("api.handlers.ai_handler.create_ai_service") as mock_factory:
             mock_service = MagicMock()
             mock_service.generate_cards.return_value = MagicMock(
                 cards=[
@@ -414,7 +414,7 @@ class TestGenerateCardsCompatibility:
             },
         )
 
-        with patch("api.handler.create_ai_service") as mock_factory:
+        with patch("api.handlers.ai_handler.create_ai_service") as mock_factory:
             from services.ai_service import AITimeoutError
             mock_service = MagicMock()
             mock_service.generate_cards.side_effect = AITimeoutError("timeout")
@@ -446,7 +446,7 @@ class TestGenerateCardsCompatibility:
             },
         )
 
-        with patch("api.handler.create_ai_service") as mock_factory:
+        with patch("api.handlers.ai_handler.create_ai_service") as mock_factory:
             from services.ai_service import AIRateLimitError
             mock_service = MagicMock()
             mock_service.generate_cards.side_effect = AIRateLimitError("rate limit")
@@ -478,7 +478,7 @@ class TestGenerateCardsCompatibility:
             },
         )
 
-        with patch("api.handler.create_ai_service") as mock_factory:
+        with patch("api.handlers.ai_handler.create_ai_service") as mock_factory:
             from services.ai_service import AIProviderError
             # 【テストデータ準備】: ファクトリ自体が初期化失敗する AIProviderError を送出
             mock_factory.side_effect = AIProviderError("Failed to initialize AI service")

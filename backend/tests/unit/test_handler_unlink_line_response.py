@@ -36,7 +36,7 @@ class TestUnlinkLineResponse:
             user_id="test-user-id",
         )
 
-        with patch("api.handler.user_service") as mock_user_service:
+        with patch("api.handlers.user_handler.user_service") as mock_user_service:
             # unlink_line が User オブジェクトを返すようにモック
             # (GREEN フェーズ後の期待される戻り値型)
             mock_user = MagicMock()
@@ -94,7 +94,7 @@ class TestUnlinkLineResponse:
             user_id="test-user-id",
         )
 
-        with patch("api.handler.user_service") as mock_user_service:
+        with patch("api.handlers.user_handler.user_service") as mock_user_service:
             mock_user = MagicMock()
             mock_response = MagicMock()
             mock_response.model_dump.return_value = {

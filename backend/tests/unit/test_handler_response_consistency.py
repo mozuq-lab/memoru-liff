@@ -44,7 +44,7 @@ class TestResponseConsistency:
             user_id="test-user-id",
         )
 
-        with patch("api.handler.user_service") as mock_user_service:
+        with patch("api.handlers.user_handler.user_service") as mock_user_service:
             mock_user = MagicMock()
             mock_response = MagicMock()
             mock_response.model_dump.return_value = {
@@ -79,7 +79,7 @@ class TestResponseConsistency:
             user_id="test-user-id",
         )
 
-        with patch("api.handler.user_service") as mock_user_service:
+        with patch("api.handlers.user_handler.user_service") as mock_user_service:
             mock_user2 = MagicMock()
             mock_response2 = MagicMock()
             mock_response2.model_dump.return_value = {

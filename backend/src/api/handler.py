@@ -1,162 +1,53 @@
-"""Main API handler for Memoru LIFF application."""
+"""Main API handler for Memoru LIFF application.
 
-import base64
+Routes API Gateway events to domain-specific handlers via Lambda Powertools Router.
+Standalone Lambda handlers (grade_ai, advice) remain in this file.
+"""
+
 import dataclasses
 import json
-import os
 from typing import Any
 
 from aws_lambda_powertools import Logger, Tracer
-from aws_lambda_powertools.event_handler import APIGatewayHttpResolver, Response, content_types
-from aws_lambda_powertools.event_handler.exceptions import NotFoundError, UnauthorizedError
+from aws_lambda_powertools.event_handler import APIGatewayHttpResolver
 from aws_lambda_powertools.logging import correlation_paths
 from aws_lambda_powertools.utilities.typing import LambdaContext
-from pydantic import ValidationError
 
-from models.user import LinkLineResponse, UserSettingsRequest
-from models.card import CreateCardRequest, UpdateCardRequest, CardListResponse
-from models.deck import CreateDeckRequest, UpdateDeckRequest, DeckListResponse
-from services.user_service import (
-    UserService,
-    UserNotFoundError,
-    UserAlreadyLinkedError,
-    LineUserIdAlreadyUsedError,
-    LineNotLinkedError,
-)
-from services.card_service import (
-    CardService,
-    CardNotFoundError,
-    CardLimitExceededError,
-)
-from services.deck_service import (
-    DeckService,
-    DeckNotFoundError,
-    DeckLimitExceededError,
-)
-from services.review_service import (
-    ReviewService,
-    InvalidGradeError,
-    NoReviewHistoryError,
-)
-from services.line_service import LineService
-from models.review import ReviewRequest
-from models.generate import (
-    GenerateCardsRequest,
-    GenerateCardsResponse,
-    GeneratedCardResponse,
-    GenerationInfoResponse,
-)
-from models.advice import LearningAdviceResponse
+from api.shared import get_user_id_from_context, map_ai_error_to_http
+from api.handlers.user_handler import router as user_router
+from api.handlers.cards_handler import router as cards_router
+from api.handlers.decks_handler import router as decks_router
+from api.handlers.review_handler import router as review_router
+from api.handlers.ai_handler import router as ai_router
+
+# Standalone handler dependencies
 from models.grading import GradeAnswerRequest, GradeAnswerResponse
-from services.ai_service import (
-    create_ai_service,
-    AIServiceError,
-    AITimeoutError,
-    AIRateLimitError,
-    AIInternalError,
-    AIParseError,
-    AIProviderError,
-)
+from models.advice import LearningAdviceResponse
+from pydantic import ValidationError
+from services.card_service import CardService, CardNotFoundError
+from services.review_service import ReviewService
+from services.ai_service import create_ai_service, AIServiceError
+import base64
+import os
 
 logger = Logger()
 tracer = Tracer()
 app = APIGatewayHttpResolver()
 
-# Initialize services
-user_service = UserService()
+# Register domain routers
+app.include_router(user_router)
+app.include_router(cards_router)
+app.include_router(decks_router)
+app.include_router(review_router)
+app.include_router(ai_router)
+
+# Services for standalone Lambda handlers
 card_service = CardService()
-deck_service = DeckService()
 review_service = ReviewService()
-line_service = LineService()
 
 
-def _map_ai_error_to_http(error: AIServiceError) -> Response:
-    """AI サービス例外を適切な HTTP レスポンスにマッピングする。
-
-    API 仕様 api-endpoints.md に基づき、各例外タイプに対してセマンティックな
-    HTTP ステータスコードを返す。
-
-    Args:
-        error: AI サービス層から送出された例外
-
-    Returns:
-        適切な HTTP ステータスコードとエラーメッセージを含む Response オブジェクト
-    """
-    if isinstance(error, AITimeoutError):
-        # 【タイムアウト】: AI 処理が制限時間内に完了しなかった場合 → 504 Gateway Timeout
-        return Response(
-            status_code=504,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "AI service timeout"}),
-        )
-    if isinstance(error, AIRateLimitError):
-        # 【レートリミット】: API 呼び出し上限超過 → 429 Too Many Requests
-        return Response(
-            status_code=429,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "AI service rate limit exceeded"}),
-        )
-    if isinstance(error, AIProviderError):
-        # 【プロバイダー障害】: AI サービス自体が利用不可 → 503 Service Unavailable
-        return Response(
-            status_code=503,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "AI service unavailable"}),
-        )
-    if isinstance(error, AIParseError):
-        # 【レスポンス解析失敗】: AI 出力の JSON パース失敗 → 500 Internal Server Error
-        return Response(
-            status_code=500,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "AI service response parse error"}),
-        )
-    # 【その他の AI エラー】: AIInternalError を含む未分類エラー → 500 Internal Server Error
-    return Response(
-        status_code=500,
-        content_type=content_types.APPLICATION_JSON,
-        body=json.dumps({"error": "AI service error"}),
-    )
-
-
-def get_user_id_from_context() -> str:
-    """Extract user_id from JWT claims in request context.
-
-    Returns:
-        User ID from JWT claims.
-
-    Raises:
-        UnauthorizedError: If user_id cannot be extracted.
-    """
-    try:
-        # For HTTP API with JWT Authorizer
-        claims = app.current_event.request_context.authorizer
-        if claims and "jwt" in claims:
-            return claims["jwt"]["claims"]["sub"]
-        # For REST API with Cognito Authorizer
-        if claims and "claims" in claims:
-            return claims["claims"]["sub"]
-        # Direct claims access
-        if claims and "sub" in claims:
-            return claims["sub"]
-    except (KeyError, TypeError, AttributeError) as e:
-        logger.warning(f"Failed to extract user_id from authorizer context: {e}")
-
-    # Dev environment fallback: decode JWT from Authorization header directly.
-    # In production, API Gateway JWT Authorizer validates tokens before Lambda is invoked.
-    # SAM local does not apply JWT Authorizer, so we decode the payload here.
-    if os.environ.get("ENVIRONMENT") == "dev":
-        try:
-            auth_header = app.current_event.get_header_value("Authorization")
-            if auth_header and auth_header.startswith("Bearer "):
-                token = auth_header.split(" ", 1)[1]
-                payload = token.split(".")[1]
-                payload += "=" * (4 - len(payload) % 4)
-                decoded = json.loads(base64.urlsafe_b64decode(payload))
-                return decoded["sub"]
-        except Exception as e:
-            logger.error(f"Failed to decode JWT from Authorization header: {e}")
-
-    raise UnauthorizedError("Unable to extract user ID from token")
+# Keep backward compatibility alias
+_map_ai_error_to_http = map_ai_error_to_http
 
 
 def _get_user_id_from_event(event: dict) -> str | None:
@@ -164,12 +55,6 @@ def _get_user_id_from_event(event: dict) -> str | None:
 
     Used by standalone Lambda handlers that receive raw API Gateway events
     (not routed through APIGatewayHttpResolver).
-
-    Args:
-        event: Raw API Gateway HTTP API v2 event dict.
-
-    Returns:
-        user_id string if found, None otherwise.
     """
     try:
         claims = event.get("requestContext", {}).get("authorizer", {})
@@ -182,7 +67,6 @@ def _get_user_id_from_event(event: dict) -> str | None:
     except (KeyError, TypeError, AttributeError):
         pass
 
-    # Dev environment fallback: decode JWT from Authorization header directly.
     if os.environ.get("ENVIRONMENT") == "dev":
         try:
             auth_header = (event.get("headers") or {}).get("authorization", "")
@@ -199,647 +83,12 @@ def _get_user_id_from_event(event: dict) -> str | None:
 
 
 def _make_lambda_response(status_code: int, body: dict) -> dict:
-    """Create a Lambda proxy integration response dict.
-
-    Args:
-        status_code: HTTP status code.
-        body: Response body dict (will be JSON-serialized).
-
-    Returns:
-        Lambda proxy integration response dict.
-    """
+    """Create a Lambda proxy integration response dict."""
     return {
         "statusCode": status_code,
         "headers": {"Content-Type": "application/json"},
         "body": json.dumps(body),
     }
-
-
-# =============================================================================
-# User Endpoints
-# =============================================================================
-
-
-@app.get("/users/me")
-@tracer.capture_method
-def get_current_user():
-    """Get current user information."""
-    user_id = get_user_id_from_context()
-    logger.info(f"Getting user info for user_id: {user_id}")
-
-    try:
-        user = user_service.get_or_create_user(user_id)
-        return user.to_response().model_dump(mode="json")
-    except Exception as e:
-        logger.error(f"Error getting user: {e}")
-        raise
-
-
-@app.post("/users/link-line")
-@tracer.capture_method
-def link_line_account():
-    """Link LINE account to current user."""
-    user_id = get_user_id_from_context()
-    logger.info(f"Linking LINE account for user_id: {user_id}")
-
-    try:
-        body = app.current_event.json_body
-    except json.JSONDecodeError:
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid JSON body"}),
-        )
-
-    # Validate id_token presence and non-empty
-    id_token = body.get("id_token") if body else None
-    if not id_token:
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "id_token is required"}),
-        )
-
-    try:
-        # Ensure user exists
-        user_service.get_or_create_user(user_id)
-        # Verify LINE ID token and get line_user_id
-        line_user_id = line_service.verify_id_token(id_token)
-        # Link LINE account with verified line_user_id
-        user_service.link_line(user_id, line_user_id)
-        return LinkLineResponse(success=True, message="LINE account linked successfully").model_dump()
-    except UnauthorizedError:
-        raise
-    except UserAlreadyLinkedError:
-        return Response(
-            status_code=409,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "User is already linked to a LINE account"}),
-        )
-    except LineUserIdAlreadyUsedError:
-        return Response(
-            status_code=409,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "This LINE account is already linked to another user"}),
-        )
-    except Exception as e:
-        logger.error(f"Error linking LINE account: {e}")
-        raise
-
-
-@app.put("/users/me/settings")
-@tracer.capture_method
-def update_user_settings():
-    """Update current user settings."""
-    user_id = get_user_id_from_context()
-    logger.info(f"Updating settings for user_id: {user_id}")
-
-    try:
-        body = app.current_event.json_body
-        request = UserSettingsRequest(**body)
-    except ValidationError as e:
-        logger.warning(f"Validation error: {e}")
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid request", "details": e.errors()}),
-        )
-    except json.JSONDecodeError:
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid JSON body"}),
-        )
-
-    try:
-        # Ensure user exists
-        user_service.get_or_create_user(user_id)
-        # Update settings
-        user = user_service.update_settings(
-            user_id,
-            notification_time=request.notification_time,
-            timezone=request.timezone,
-        )
-        return {"success": True, "data": user.to_response().model_dump(mode="json")}
-    except UserNotFoundError:
-        raise NotFoundError("User not found")
-    except Exception as e:
-        logger.error(f"Error updating settings: {e}")
-        raise
-
-
-@app.post("/users/me/unlink-line")
-@tracer.capture_method
-def unlink_line():
-    """Unlink LINE account from current user."""
-    user_id = get_user_id_from_context()
-    logger.info(f"Unlinking LINE account for user_id: {user_id}")
-
-    try:
-        user = user_service.unlink_line(user_id)
-        return {"success": True, "data": user.to_response().model_dump(mode="json")}
-    except LineNotLinkedError:
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "LINE account not linked"}),
-        )
-    except Exception as e:
-        logger.error(f"Error unlinking LINE account: {e}")
-        raise
-
-
-# =============================================================================
-# AI Card Generation Endpoints
-# =============================================================================
-
-
-@app.post("/cards/generate")
-@tracer.capture_method
-def generate_cards():
-    """Generate flashcards from input text using AI."""
-    user_id = get_user_id_from_context()
-    logger.info(f"Generating cards for user_id: {user_id}")
-
-    try:
-        body = app.current_event.json_body
-        request = GenerateCardsRequest(**body)
-    except ValidationError as e:
-        logger.warning(f"Validation error: {e}")
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid request", "details": e.errors()}),
-        )
-    except json.JSONDecodeError:
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid JSON body"}),
-        )
-
-    try:
-        # 【ファクトリーパターン】: USE_STRANDS 環境変数に基づき適切な AI サービスを選択
-        # USE_STRANDS=false → BedrockAIService、USE_STRANDS=true → StrandsAIService
-        ai_service = create_ai_service()
-        result = ai_service.generate_cards(
-            input_text=request.input_text,
-            card_count=request.card_count,
-            difficulty=request.difficulty,
-            language=request.language,
-        )
-        logger.info(
-            f"Card generation succeeded: model={result.model_used}, "
-            f"cards={len(result.cards)}, time_ms={result.processing_time_ms}"
-        )
-
-        response = GenerateCardsResponse(
-            generated_cards=[
-                GeneratedCardResponse(
-                    front=card.front,
-                    back=card.back,
-                    suggested_tags=card.suggested_tags,
-                )
-                for card in result.cards
-            ],
-            generation_info=GenerationInfoResponse(
-                input_length=result.input_length,
-                model_used=result.model_used,
-                processing_time_ms=result.processing_time_ms,
-            ),
-        )
-        return response.model_dump(mode="json")
-
-    except AIServiceError as e:
-        # 【AI エラーマッピング】: 全 AI サービス例外を統一的な HTTP レスポンスに変換
-        logger.warning(f"AI service error for user_id {user_id}: {type(e).__name__}: {e}")
-        return _map_ai_error_to_http(e)
-    except Exception as e:
-        logger.error(f"Error generating cards: {e}")
-        raise
-
-
-# =============================================================================
-# Card Endpoints
-# =============================================================================
-
-
-@app.get("/cards")
-@tracer.capture_method
-def list_cards():
-    """List cards for the current user."""
-    user_id = get_user_id_from_context()
-    logger.info(f"Listing cards for user_id: {user_id}")
-
-    # Get query parameters
-    params = app.current_event.query_string_parameters or {}
-    limit = min(int(params.get("limit", 50)), 100)
-    cursor = params.get("cursor")
-    deck_id = params.get("deck_id")
-
-    try:
-        cards, next_cursor = card_service.list_cards(
-            user_id=user_id,
-            limit=limit,
-            cursor=cursor,
-            deck_id=deck_id,
-        )
-        return CardListResponse(
-            cards=[card.to_response() for card in cards],
-            total=len(cards),
-            next_cursor=next_cursor,
-        ).model_dump(mode="json")
-    except Exception as e:
-        logger.error(f"Error listing cards: {e}")
-        raise
-
-
-@app.post("/cards")
-@tracer.capture_method
-def create_card():
-    """Create a new card."""
-    user_id = get_user_id_from_context()
-    logger.info(f"Creating card for user_id: {user_id}")
-
-    try:
-        body = app.current_event.json_body
-        request = CreateCardRequest(**body)
-    except ValidationError as e:
-        logger.warning(f"Validation error: {e}")
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid request", "details": e.errors()}),
-        )
-    except json.JSONDecodeError:
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid JSON body"}),
-        )
-
-    try:
-        # 【ユーザー存在保証】: カード作成前にユーザーレコードの存在を保証する (EARS-015)
-        # 新規ユーザーはcard_count属性を持たないが、Fix 1 (if_not_exists) で安全に処理される
-        # 既存ユーザーの場合はそのまま返される (冪等性保証)
-        # 🔵 信頼性レベル: 青信号 - CR-02で handler.py L361 のユーザー存在保証不足が特定されている
-        user_service.get_or_create_user(user_id)
-
-        card = card_service.create_card(
-            user_id=user_id,
-            front=request.front,
-            back=request.back,
-            deck_id=request.deck_id,
-            tags=request.tags,
-        )
-        return Response(
-            status_code=201,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps(card.to_response().model_dump(mode="json")),
-        )
-    except CardLimitExceededError:
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Card limit exceeded. Maximum 2000 cards per user."}),
-        )
-    except Exception as e:
-        logger.error(f"Error creating card: {e}")
-        raise
-
-
-@app.get("/cards/<card_id>")
-@tracer.capture_method
-def get_card(card_id: str):
-    """Get a specific card."""
-    user_id = get_user_id_from_context()
-    logger.info(f"Getting card {card_id} for user_id: {user_id}")
-
-    try:
-        card = card_service.get_card(user_id, card_id)
-        return card.to_response().model_dump(mode="json")
-    except CardNotFoundError:
-        raise NotFoundError(f"Card not found: {card_id}")
-    except Exception as e:
-        logger.error(f"Error getting card: {e}")
-        raise
-
-
-@app.put("/cards/<card_id>")
-@tracer.capture_method
-def update_card(card_id: str):
-    """Update a card."""
-    user_id = get_user_id_from_context()
-    logger.info(f"Updating card {card_id} for user_id: {user_id}")
-
-    try:
-        body = app.current_event.json_body
-        request = UpdateCardRequest(**body)
-    except ValidationError as e:
-        logger.warning(f"Validation error: {e}")
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid request", "details": e.errors()}),
-        )
-    except json.JSONDecodeError:
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid JSON body"}),
-        )
-
-    try:
-        # 【interval パラメータ追加】: リクエストの interval をサービス層に渡す
-        # 【実装方針】: request.interval が None の場合は interval 関連フィールドを更新しない（後方互換性）
-        # 🔵 信頼性レベル: 要件定義 REQ-002, REQ-401, architecture.md handler拡張セクションより
-        card = card_service.update_card(
-            user_id=user_id,
-            card_id=card_id,
-            front=request.front,
-            back=request.back,
-            deck_id=request.deck_id,
-            tags=request.tags,
-            interval=request.interval,
-        )
-        return card.to_response().model_dump(mode="json")
-    except CardNotFoundError:
-        raise NotFoundError(f"Card not found: {card_id}")
-    except Exception as e:
-        logger.error(f"Error updating card: {e}")
-        raise
-
-
-@app.delete("/cards/<card_id>")
-@tracer.capture_method
-def delete_card(card_id: str):
-    """Delete a card."""
-    user_id = get_user_id_from_context()
-    logger.info(f"Deleting card {card_id} for user_id: {user_id}")
-
-    try:
-        card_service.delete_card(user_id, card_id)
-        return Response(
-            status_code=204,
-            content_type=content_types.APPLICATION_JSON,
-            body="",
-        )
-    except CardNotFoundError:
-        raise NotFoundError(f"Card not found: {card_id}")
-    except Exception as e:
-        logger.error(f"Error deleting card: {e}")
-        raise
-
-
-# =============================================================================
-# Deck Endpoints
-# =============================================================================
-
-
-@app.post("/decks")
-@tracer.capture_method
-def create_deck():
-    """Create a new deck."""
-    user_id = get_user_id_from_context()
-    logger.info(f"Creating deck for user_id: {user_id}")
-
-    try:
-        body = app.current_event.json_body
-        request = CreateDeckRequest(**body)
-    except ValidationError as e:
-        logger.warning(f"Validation error: {e}")
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid request", "details": str(e)}),
-        )
-    except json.JSONDecodeError:
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid JSON body"}),
-        )
-
-    try:
-        deck = deck_service.create_deck(
-            user_id=user_id,
-            name=request.name,
-            description=request.description,
-            color=request.color,
-        )
-        return Response(
-            status_code=201,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps(deck.to_response().model_dump(mode="json")),
-        )
-    except DeckLimitExceededError:
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Deck limit exceeded. Maximum 50 decks per user."}),
-        )
-    except Exception as e:
-        logger.error(f"Error creating deck: {e}")
-        raise
-
-
-@app.get("/decks")
-@tracer.capture_method
-def list_decks():
-    """List all decks for the current user."""
-    user_id = get_user_id_from_context()
-    logger.info(f"Listing decks for user_id: {user_id}")
-
-    try:
-        decks = deck_service.list_decks(user_id)
-
-        # Get card counts and due counts for all decks
-        deck_ids = [d.deck_id for d in decks]
-        card_counts = deck_service.get_deck_card_counts(user_id, deck_ids)
-        due_counts = deck_service.get_deck_due_counts(user_id, deck_ids)
-
-        return DeckListResponse(
-            decks=[
-                d.to_response(
-                    card_count=card_counts.get(d.deck_id, 0),
-                    due_count=due_counts.get(d.deck_id, 0),
-                )
-                for d in decks
-            ],
-            total=len(decks),
-        ).model_dump(mode="json")
-    except Exception as e:
-        logger.error(f"Error listing decks: {e}")
-        raise
-
-
-@app.put("/decks/<deck_id>")
-@tracer.capture_method
-def update_deck(deck_id: str):
-    """Update a deck."""
-    user_id = get_user_id_from_context()
-    logger.info(f"Updating deck {deck_id} for user_id: {user_id}")
-
-    try:
-        body = app.current_event.json_body
-        request = UpdateDeckRequest(**body)
-    except ValidationError as e:
-        logger.warning(f"Validation error: {e}")
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid request", "details": str(e)}),
-        )
-    except json.JSONDecodeError:
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid JSON body"}),
-        )
-
-    try:
-        deck = deck_service.update_deck(
-            user_id=user_id,
-            deck_id=deck_id,
-            name=request.name,
-            description=request.description,
-            color=request.color,
-        )
-        # Get updated counts
-        card_counts = deck_service.get_deck_card_counts(user_id, [deck_id])
-        due_counts = deck_service.get_deck_due_counts(user_id, [deck_id])
-
-        return deck.to_response(
-            card_count=card_counts.get(deck_id, 0),
-            due_count=due_counts.get(deck_id, 0),
-        ).model_dump(mode="json")
-    except DeckNotFoundError:
-        raise NotFoundError(f"Deck not found: {deck_id}")
-    except Exception as e:
-        logger.error(f"Error updating deck: {e}")
-        raise
-
-
-@app.delete("/decks/<deck_id>")
-@tracer.capture_method
-def delete_deck(deck_id: str):
-    """Delete a deck."""
-    user_id = get_user_id_from_context()
-    logger.info(f"Deleting deck {deck_id} for user_id: {user_id}")
-
-    try:
-        deck_service.delete_deck(user_id, deck_id)
-        return Response(
-            status_code=204,
-            content_type=content_types.APPLICATION_JSON,
-            body="",
-        )
-    except DeckNotFoundError:
-        raise NotFoundError(f"Deck not found: {deck_id}")
-    except Exception as e:
-        logger.error(f"Error deleting deck: {e}")
-        raise
-
-
-# =============================================================================
-# Review Endpoints
-# =============================================================================
-
-
-@app.get("/cards/due")
-@tracer.capture_method
-def get_due_cards():
-    """Get cards due for review."""
-    user_id = get_user_id_from_context()
-    logger.info(f"Getting due cards for user_id: {user_id}")
-
-    # Get query parameters
-    params = app.current_event.query_string_parameters or {}
-    limit = min(int(params.get("limit", 20)), 100)
-    include_future = params.get("include_future", "false").lower() == "true"
-    deck_id = params.get("deck_id")
-
-    try:
-        response = review_service.get_due_cards(
-            user_id=user_id,
-            limit=limit,
-            include_future=include_future,
-            deck_id=deck_id,
-        )
-        return response.model_dump(mode="json")
-    except Exception as e:
-        logger.error(f"Error getting due cards: {e}")
-        raise
-
-
-@app.post("/reviews/<card_id>")
-@tracer.capture_method
-def submit_review(card_id: str):
-    """Submit a review for a card."""
-    user_id = get_user_id_from_context()
-    logger.info(f"Submitting review for card {card_id} by user_id: {user_id}")
-
-    try:
-        body = app.current_event.json_body
-        request = ReviewRequest(**body)
-    except ValidationError as e:
-        logger.warning(f"Validation error: {e}")
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid request", "details": e.errors()}),
-        )
-    except json.JSONDecodeError:
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid JSON body"}),
-        )
-
-    try:
-        response = review_service.submit_review(
-            user_id=user_id,
-            card_id=card_id,
-            grade=request.grade,
-        )
-        return response.model_dump(mode="json")
-    except CardNotFoundError:
-        raise NotFoundError(f"Card not found: {card_id}")
-    except InvalidGradeError as e:
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": str(e)}),
-        )
-    except Exception as e:
-        logger.error(f"Error submitting review: {e}")
-        raise
-
-
-@app.post("/reviews/<card_id>/undo")
-@tracer.capture_method
-def undo_review(card_id: str):
-    """Undo the latest review for a card."""
-    user_id = get_user_id_from_context()
-    logger.info(f"Undoing review for card {card_id} by user_id: {user_id}")
-
-    try:
-        response = review_service.undo_review(
-            user_id=user_id,
-            card_id=card_id,
-        )
-        return response.model_dump(mode="json")
-    except CardNotFoundError:
-        raise NotFoundError(f"Card not found: {card_id}")
-    except NoReviewHistoryError as e:
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": str(e)}),
-        )
-    except Exception as e:
-        logger.error(f"Error undoing review: {e}")
-        raise
 
 
 # =============================================================================
@@ -851,16 +100,12 @@ def grade_ai_handler(event: dict, context: Any) -> dict:
     """POST /reviews/{cardId}/grade-ai の Lambda ハンドラー。
 
     独立 Lambda 関数として API Gateway HTTP API v2 イベントを直接受け取る。
-    pathParameters.cardId (camelCase) からカード ID を取得し、
-    requestContext.authorizer.jwt.claims.sub からユーザー ID を取得する。
     """
     try:
-        # 1. Extract user_id from JWT claims
         user_id = _get_user_id_from_event(event)
         if not user_id:
             return _make_lambda_response(401, {"error": "Unauthorized"})
 
-        # 2. Extract card_id from pathParameters (camelCase: cardId)
         path_params = event.get("pathParameters") or {}
         card_id = path_params.get("cardId")
         if not card_id:
@@ -871,7 +116,6 @@ def grade_ai_handler(event: dict, context: Any) -> dict:
             f"user_answer_length={len((event.get('body') or ''))}"
         )
 
-        # 3. Parse and validate request body
         body_str = event.get("body") or ""
         try:
             body_dict = json.loads(body_str)
@@ -879,23 +123,19 @@ def grade_ai_handler(event: dict, context: Any) -> dict:
         except json.JSONDecodeError:
             return _make_lambda_response(400, {"error": "Invalid request body"})
         except ValidationError as e:
-            # Use model_dump_json to get JSON-safe error details from Pydantic
             try:
                 details = json.loads(e.json())
             except Exception:
                 details = []
             return _make_lambda_response(400, {"error": "Invalid request body", "details": details})
 
-        # 4. Get language from query string parameters (default "ja")
         language = (event.get("queryStringParameters") or {}).get("language", "ja")
 
-        # 5. Get card from CardService
         try:
             card = card_service.get_card(user_id, card_id)
         except CardNotFoundError:
             return _make_lambda_response(404, {"error": "Not Found"})
 
-        # 6. Call AI service to grade the answer
         try:
             ai_service = create_ai_service()
             result = ai_service.grade_answer(
@@ -913,7 +153,6 @@ def grade_ai_handler(event: dict, context: Any) -> dict:
                 "body": ai_response.body,
             }
 
-        # 7. Build and return GradeAnswerResponse
         logger.info(
             f"Grade AI succeeded: card_id={card_id}, grade={result.grade}, "
             f"model={result.model_used}"
@@ -939,27 +178,19 @@ def advice_handler(event: dict, context: Any) -> dict:
     """GET /advice の Lambda ハンドラー。
 
     独立 Lambda 関数として API Gateway HTTP API v2 イベントを直接受け取る。
-    requestContext.authorizer.jwt.claims.sub からユーザー ID を取得し、
-    ReviewService から復習サマリーを取得して AI アドバイスを生成する。
     """
     try:
-        # 1. Extract user_id from JWT claims
         user_id = _get_user_id_from_event(event)
         if not user_id:
             return _make_lambda_response(401, {"error": "Unauthorized"})
 
         logger.info(f"Advice request: user_id={user_id}")
 
-        # 2. Get language from query string parameters (default "ja")
         language = (event.get("queryStringParameters") or {}).get("language", "ja")
 
-        # 3. Get review summary from ReviewService
         review_summary = review_service.get_review_summary(user_id)
-
-        # 4. Convert ReviewSummary dataclass to dict for AI service
         review_summary_dict = dataclasses.asdict(review_summary)
 
-        # 5. Call AI service to get learning advice
         try:
             ai_service = create_ai_service()
             result = ai_service.get_learning_advice(
@@ -977,7 +208,6 @@ def advice_handler(event: dict, context: Any) -> dict:
                 "body": ai_response.body,
             }
 
-        # 6. Build and return LearningAdviceResponse
         logger.info(
             f"Advice succeeded: user_id={user_id}, model={result.model_used}, "
             f"time_ms={result.processing_time_ms}"
@@ -1014,9 +244,6 @@ def advice_handler(event: dict, context: Any) -> dict:
 @tracer.capture_lambda_handler
 def handler(event: dict, context: LambdaContext) -> dict:
     """Lambda handler for API Gateway events."""
-    # SAM local sends stage="dev" but rawPath="/path" without "/dev" prefix.
-    # Powertools strips "/{stage}" from rawPath, breaking routing.
-    # Fix: prepend stage prefix so stripping produces the correct path.
     stage = event.get("requestContext", {}).get("stage", "$default")
     raw_path = event.get("rawPath", "/")
     if stage != "$default" and not raw_path.startswith(f"/{stage}"):
