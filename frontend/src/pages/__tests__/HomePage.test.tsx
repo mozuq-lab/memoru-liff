@@ -49,6 +49,19 @@ vi.mock('@/contexts/AuthContext', () => ({
   useAuthContext: () => mockAuthContext,
 }));
 
+// DecksContext モック
+vi.mock('@/contexts/DecksContext', () => ({
+  useDecksContext: () => ({
+    decks: [],
+    isLoading: false,
+    error: null,
+    fetchDecks: vi.fn(),
+    createDeck: vi.fn(),
+    updateDeck: vi.fn(),
+    deleteDeck: vi.fn(),
+  }),
+}));
+
 const renderHomePage = () => {
   return render(
     <MemoryRouter>
