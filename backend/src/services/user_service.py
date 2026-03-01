@@ -134,6 +134,8 @@ class UserService:
     def link_line(self, user_id: str, line_user_id: str) -> User:
         """Link LINE account to user.
 
+        Uses ConditionExpression for atomic update to prevent race conditions.
+
         Args:
             user_id: The user's unique identifier.
             line_user_id: LINE User ID to link.
@@ -143,27 +145,26 @@ class UserService:
 
         Raises:
             UserNotFoundError: If user does not exist.
-            UserAlreadyLinkedError: If user is already linked to LINE.
-            LineUserIdAlreadyUsedError: If LINE user ID is already used.
+            UserAlreadyLinkedError: If user is already linked to a different LINE account.
+            LineUserIdAlreadyUsedError: If LINE user ID is already used by another user.
         """
-        # Check if LINE user ID is already used by another user
+        # Check if LINE user ID is already used by another user (via GSI)
         existing_user = self.get_user_by_line_id(line_user_id)
         if existing_user and existing_user.user_id != user_id:
-            raise LineUserIdAlreadyUsedError(f"LINE user ID is already linked to another account")
+            raise LineUserIdAlreadyUsedError("LINE user ID is already linked to another account")
 
-        # Get current user
+        # Verify user exists
         user = self.get_user(user_id)
 
-        # Check if user is already linked to a different LINE account
-        if user.line_user_id and user.line_user_id != line_user_id:
-            raise UserAlreadyLinkedError("User is already linked to a LINE account")
-
-        # Update user with LINE user ID
+        # Atomic update with ConditionExpression:
+        # - attribute_not_exists(line_user_id): first-time linking
+        # - line_user_id = :line_id: re-linking the same LINE ID
         try:
             now = datetime.now(dt_timezone.utc)
             self.table.update_item(
                 Key={"user_id": user_id},
                 UpdateExpression="SET line_user_id = :line_id, updated_at = :updated_at",
+                ConditionExpression="attribute_not_exists(line_user_id) OR line_user_id = :line_id",
                 ExpressionAttributeValues={
                     ":line_id": line_user_id,
                     ":updated_at": now.isoformat(),
@@ -173,6 +174,8 @@ class UserService:
             user.updated_at = now
             return user
         except ClientError as e:
+            if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                raise UserAlreadyLinkedError("User is already linked to a LINE account")
             raise UserServiceError(f"Failed to link LINE account: {e}")
 
     def get_user_by_line_id(self, line_user_id: str) -> Optional[User]:

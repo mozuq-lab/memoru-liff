@@ -45,7 +45,7 @@
 | [ ] | [TASK-0110: review_service 改善](TASK-0110.md) | 6h | REQ-009,011,015,017 🔵 |
 | [x] | [TASK-0111: 構造化ログ移行](TASK-0111.md) | 3h | REQ-012 🔵 |
 | [x] | [TASK-0112: 重複データクラス削除](TASK-0112.md) | 2h | REQ-013 🔵 |
-| [ ] | [TASK-0113: link_line 原子的更新](TASK-0113.md) | 3h | REQ-016 🔵 |
+| [x] | [TASK-0113: link_line 原子的更新](TASK-0113.md) | 3h | REQ-016 🔵 |
 
 ### 依存関係
 
