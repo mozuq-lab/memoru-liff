@@ -4,7 +4,7 @@
  * 【テスト対応】: TASK-0016 テストケース1〜8
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { CardsPage } from '../CardsPage';
 import type { Card } from '@/types';
@@ -217,6 +217,125 @@ describe('CardsPage', () => {
       renderCardsPage({ message: '3枚のカードを保存しました' });
 
       expect(screen.getByTestId('success-message')).toHaveTextContent('3枚のカードを保存しました');
+    });
+  });
+
+  describe('検索・フィルター統合テスト', () => {
+    const searchCards: Card[] = [
+      {
+        card_id: 's1',
+        user_id: 'u1',
+        front: 'Apple リンゴ',
+        back: '赤い果物',
+        tags: [],
+        ease_factor: 2.5,
+        interval: 1,
+        repetitions: 0, // new
+        next_review_at: null,
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: null,
+      },
+      {
+        card_id: 's2',
+        user_id: 'u1',
+        front: 'Banana バナナ',
+        back: '黄色い果物',
+        tags: [],
+        ease_factor: 1.8,
+        interval: 3,
+        repetitions: 2,
+        next_review_at: '2024-01-10', // due（期日超過）
+        created_at: '2024-01-05T00:00:00Z',
+        updated_at: null,
+      },
+      {
+        card_id: 's3',
+        user_id: 'u1',
+        front: 'Cherry さくらんぼ',
+        back: '赤い小さな果物',
+        tags: [],
+        ease_factor: 3.0,
+        interval: 10,
+        repetitions: 5,
+        next_review_at: '2024-02-01', // learning（未来）
+        created_at: '2024-01-10T00:00:00Z',
+        updated_at: null,
+      },
+    ];
+
+    // CP-S01
+    it('検索バーが表示される', () => {
+      mockCardsContext.cards = searchCards;
+      renderCardsPage();
+
+      expect(screen.getByTestId('search-bar-input')).toBeInTheDocument();
+    });
+
+    // CP-S02
+    it('検索バー入力でカードがフィルタリングされる', () => {
+      mockCardsContext.cards = searchCards;
+      renderCardsPage();
+
+      const searchInput = screen.getByTestId('search-bar-input');
+      fireEvent.change(searchInput, { target: { value: 'Apple' } });
+
+      // highlightQuery により <mark> で分割されるため testid で確認
+      expect(screen.getByTestId('card-item-s1')).toBeInTheDocument();
+      expect(screen.queryByTestId('card-item-s2')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('card-item-s3')).not.toBeInTheDocument();
+    });
+
+    // CP-S03
+    it('検索0件時に「該当するカードがありません」が表示される', () => {
+      mockCardsContext.cards = searchCards;
+      renderCardsPage();
+
+      const searchInput = screen.getByTestId('search-bar-input');
+      fireEvent.change(searchInput, { target: { value: '存在しないキーワードXYZ' } });
+
+      expect(screen.getByText('該当するカードがありません')).toBeInTheDocument();
+    });
+
+    // CP-S04
+    it('FilterChipsでカードがフィルタリングされる', () => {
+      mockCardsContext.cards = searchCards;
+      renderCardsPage();
+
+      // 「新規」フィルタを選択
+      fireEvent.click(screen.getByTestId('filter-chip-new'));
+
+      // new（repetitions===0）は s1 のみ
+      expect(screen.getByText('Apple リンゴ')).toBeInTheDocument();
+      expect(screen.queryByText('Banana バナナ')).not.toBeInTheDocument();
+      expect(screen.queryByText('Cherry さくらんぼ')).not.toBeInTheDocument();
+    });
+
+    // CP-S05
+    it('タブ切替時にフィルター状態がリセットされる', () => {
+      mockCardsContext.cards = searchCards;
+      mockCardsContext.dueCards = [searchCards[1]]; // Banana のみ due
+      renderCardsPage();
+
+      // 検索入力
+      const searchInput = screen.getByTestId('search-bar-input');
+      fireEvent.change(searchInput, { target: { value: 'Apple' } });
+      expect(screen.getByTestId('card-item-s1')).toBeInTheDocument();
+
+      // タブ切替で復習対象へ
+      fireEvent.click(screen.getByTestId('tab-due'));
+
+      // リセットされて検索欄が空になる
+      expect(screen.getByTestId('search-bar-input')).toHaveValue('');
+    });
+
+    // CP-S06
+    it('復習対象タブではFilterChipsが非表示', () => {
+      mockCardsContext.dueCards = [searchCards[1]];
+      renderCardsPage(undefined, 'tab=due');
+
+      expect(screen.queryByTestId('filter-chip-all')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('filter-chip-due')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('filter-chip-new')).not.toBeInTheDocument();
     });
   });
 });

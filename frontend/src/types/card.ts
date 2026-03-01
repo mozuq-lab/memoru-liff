@@ -146,3 +146,42 @@ export interface DueCardsResponse {
   total_due_count: number;
   next_due_date: string | null;
 }
+
+// ===== カード検索・フィルター・ソート型定義 =====
+
+/**
+ * カードの復習状態フィルター
+ * - 'all': すべてのカード
+ * - 'new': repetitions === 0
+ * - 'due': repetitions > 0 かつ next_review_at <= 今日
+ * - 'learning': repetitions > 0 かつ next_review_at > 今日
+ */
+export type ReviewStatusFilter = 'all' | 'new' | 'due' | 'learning';
+
+/**
+ * カードのソートキー
+ * - 'created_at': 作成日順
+ * - 'next_review_at': 次回復習日順（null は末尾）
+ * - 'ease_factor': 習熟度順（低い = 苦手なカード）
+ */
+export type SortByOption = 'created_at' | 'next_review_at' | 'ease_factor';
+
+/**
+ * ソート方向
+ */
+export type SortOrder = 'asc' | 'desc';
+
+/**
+ * カード検索・フィルター・ソートの状態
+ * useCardSearch フックが管理する状態の型
+ */
+export interface CardFilterState {
+  /** キーワード検索文字列（空文字 = フィルターなし） */
+  query: string;
+  /** 復習状態フィルター */
+  reviewStatus: ReviewStatusFilter;
+  /** ソートキー */
+  sortBy: SortByOption;
+  /** ソート方向 */
+  sortOrder: SortOrder;
+}
