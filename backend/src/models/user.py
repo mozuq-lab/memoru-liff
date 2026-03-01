@@ -25,6 +25,7 @@ class UserSettingsRequest(BaseModel):
 
     notification_time: Optional[str] = Field(None, description="Notification time in HH:MM format")
     timezone: Optional[str] = Field(None, description="IANA timezone string")
+    day_start_hour: Optional[int] = Field(None, description="Hour when user's day starts (0-23)")
 
     @field_validator("notification_time")
     @classmethod
@@ -57,6 +58,16 @@ class UserSettingsRequest(BaseModel):
             raise ValueError("Invalid timezone format.")
         return v
 
+    @field_validator("day_start_hour")
+    @classmethod
+    def validate_day_start_hour(cls, v: Optional[int]) -> Optional[int]:
+        """Validate day start hour (0-23)."""
+        if v is None:
+            return v
+        if not 0 <= v <= 23:
+            raise ValueError("day_start_hour must be between 0 and 23.")
+        return v
+
 
 class UserSettingsResponse(BaseModel):
     """Response model for user settings update."""
@@ -74,6 +85,7 @@ class UserResponse(BaseModel):
     line_linked: bool = False
     notification_time: Optional[str] = None
     timezone: str = "Asia/Tokyo"
+    day_start_hour: int = 4
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -85,7 +97,7 @@ class User(BaseModel):
     line_user_id: Optional[str] = None
     display_name: Optional[str] = None
     picture_url: Optional[str] = None
-    settings: dict = Field(default_factory=lambda: {"notification_time": "09:00", "timezone": "Asia/Tokyo"})
+    settings: dict = Field(default_factory=lambda: {"notification_time": "09:00", "timezone": "Asia/Tokyo", "day_start_hour": 4})
     last_notified_date: Optional[str] = None  # YYYY-MM-DD format
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: Optional[datetime] = None
@@ -99,6 +111,7 @@ class User(BaseModel):
             line_linked=self.line_user_id is not None,
             notification_time=self.settings.get("notification_time"),
             timezone=self.settings.get("timezone", "Asia/Tokyo"),
+            day_start_hour=self.settings.get("day_start_hour", 4),
             created_at=self.created_at,
             updated_at=self.updated_at,
         )

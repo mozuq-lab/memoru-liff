@@ -242,6 +242,26 @@ class TestUserServiceUpdateSettings:
         assert user.settings["notification_time"] == "18:00"
         assert user.settings["timezone"] == "America/New_York"
 
+    def test_update_day_start_hour(self, user_service, dynamodb_table):
+        """Test updating day_start_hour setting."""
+        # Setup: create a user
+        table = dynamodb_table.Table("memoru-users-test")
+        table.put_item(
+            Item={
+                "user_id": "test-user-id",
+                "settings": {"notification_time": "09:00", "timezone": "Asia/Tokyo", "day_start_hour": 4},
+                "created_at": "2024-01-01T00:00:00",
+            }
+        )
+
+        # Execute
+        user = user_service.update_settings("test-user-id", day_start_hour=14)
+
+        # Assert
+        assert user.settings["day_start_hour"] == 14
+        assert user.settings["notification_time"] == "09:00"  # Unchanged
+        assert user.updated_at is not None
+
     def test_update_settings_user_not_found(self, user_service):
         """Test updating settings for non-existent user."""
         with pytest.raises(UserNotFoundError):

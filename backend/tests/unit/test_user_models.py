@@ -81,6 +81,34 @@ class TestUserSettingsRequest:
         request = UserSettingsRequest()
         assert request.notification_time is None
         assert request.timezone is None
+        assert request.day_start_hour is None
+
+    def test_valid_day_start_hour(self):
+        """Test valid day_start_hour values."""
+        request = UserSettingsRequest(day_start_hour=4)
+        assert request.day_start_hour == 4
+
+    def test_day_start_hour_zero(self):
+        """Test day_start_hour=0 (midnight)."""
+        request = UserSettingsRequest(day_start_hour=0)
+        assert request.day_start_hour == 0
+
+    def test_day_start_hour_23(self):
+        """Test day_start_hour=23 (maximum)."""
+        request = UserSettingsRequest(day_start_hour=23)
+        assert request.day_start_hour == 23
+
+    def test_invalid_day_start_hour_negative(self):
+        """Test invalid day_start_hour below range."""
+        with pytest.raises(ValidationError) as exc_info:
+            UserSettingsRequest(day_start_hour=-1)
+        assert "day_start_hour must be between 0 and 23" in str(exc_info.value)
+
+    def test_invalid_day_start_hour_too_high(self):
+        """Test invalid day_start_hour above range."""
+        with pytest.raises(ValidationError) as exc_info:
+            UserSettingsRequest(day_start_hour=24)
+        assert "day_start_hour must be between 0 and 23" in str(exc_info.value)
 
 
 class TestUser:
@@ -94,7 +122,7 @@ class TestUser:
             user_id="test-user-id",
             line_user_id="U1234567890abcdef1234567890abcdef",
             display_name="Test User",
-            settings={"notification_time": "10:00", "timezone": "Asia/Tokyo"},
+            settings={"notification_time": "10:00", "timezone": "Asia/Tokyo", "day_start_hour": 5},
             created_at=datetime(2024, 1, 1, 0, 0, 0),
         )
         response = user.to_response()
@@ -103,6 +131,7 @@ class TestUser:
         assert response.line_linked is True
         assert response.notification_time == "10:00"
         assert response.timezone == "Asia/Tokyo"
+        assert response.day_start_hour == 5
 
     def test_to_response_no_line_linked(self):
         """Test conversion when LINE is not linked."""
@@ -114,6 +143,19 @@ class TestUser:
         )
         response = user.to_response()
         assert response.line_linked is False
+        assert response.day_start_hour == 4  # default
+
+    def test_to_response_day_start_hour_default_for_legacy_user(self):
+        """Test day_start_hour defaults to 4 for existing users without the setting."""
+        from datetime import datetime
+
+        user = User(
+            user_id="test-user-id",
+            settings={"notification_time": "09:00", "timezone": "Asia/Tokyo"},
+            created_at=datetime(2024, 1, 1, 0, 0, 0),
+        )
+        response = user.to_response()
+        assert response.day_start_hour == 4
 
     def test_to_dynamodb_item(self):
         """Test conversion to DynamoDB item."""
