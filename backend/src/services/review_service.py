@@ -20,7 +20,7 @@ from models.review import (
 )
 from .ai_service import ReviewSummary
 from .card_service import CardNotFoundError, CardService, CardServiceError
-from .srs import ReviewHistoryEntry, SM2Result, add_review_history, calculate_sm2
+from .srs import ReviewHistoryEntry, SM2Result, add_review_history, calculate_next_review_boundary, calculate_sm2
 
 
 class ReviewServiceError(Exception):
@@ -85,6 +85,8 @@ class ReviewService:
         user_id: str,
         card_id: str,
         grade: int,
+        user_timezone: str = "Asia/Tokyo",
+        day_start_hour: int = 4,
     ) -> ReviewResponse:
         """Submit a review for a card and update SRS parameters.
 
@@ -92,6 +94,8 @@ class ReviewService:
             user_id: The user's ID.
             card_id: The card's ID.
             grade: Review grade (0-5).
+            user_timezone: User's IANA timezone string for day boundary normalization.
+            day_start_hour: Hour when user's "day" starts (0-23).
 
         Returns:
             ReviewResponse with previous and updated states.
@@ -120,6 +124,19 @@ class ReviewService:
             repetitions=card.repetitions,
             ease_factor=card.ease_factor,
             interval=card.interval,
+        )
+
+        # Normalize next_review_at to user's day boundary
+        normalized_next_review_at = calculate_next_review_boundary(
+            interval=result.interval,
+            user_timezone=user_timezone,
+            day_start_hour=day_start_hour,
+        )
+        result = SM2Result(
+            repetitions=result.repetitions,
+            ease_factor=result.ease_factor,
+            interval=result.interval,
+            next_review_at=normalized_next_review_at,
         )
 
         # Update card with new parameters

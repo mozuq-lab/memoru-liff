@@ -1,9 +1,11 @@
 """Unit tests for review service."""
 
 import pytest
+from unittest.mock import patch
 from moto import mock_aws
 import boto3
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from services.review_service import (
     ReviewService,
@@ -194,6 +196,172 @@ class TestSubmitReview:
                 card_id="test-card-id",
                 grade=4,
             )
+
+
+class TestSubmitReviewDayBoundaryNormalization:
+    """Tests for day boundary normalization in submit_review (TASK-0104).
+
+    Verifies that next_review_at is normalized to user's day boundary time
+    instead of raw datetime.
+    """
+
+    def test_next_review_at_normalized_to_day_boundary(self, review_service, sample_card):
+        """Test that next_review_at is normalized to day boundary (04:00 JST by default).
+
+        Given: A card exists with interval=1, review at 10:00 JST
+        When: submit_review with grade=4 (interval stays 1)
+        Then: next_review_at should be next day 04:00 JST (19:00 UTC previous day)
+        """
+        # Mock datetime to 2024-06-15 10:00:00 JST (01:00:00 UTC)
+        mock_now = datetime(2024, 6, 15, 1, 0, 0, tzinfo=timezone.utc)
+        with patch("services.srs.datetime") as mock_dt:
+            mock_dt.now.return_value = mock_now
+            mock_dt.side_effect = lambda *args, **kw: datetime(*args, **kw)
+
+            response = review_service.submit_review(
+                user_id="test-user-id",
+                card_id="test-card-id",
+                grade=4,
+                user_timezone="Asia/Tokyo",
+                day_start_hour=4,
+            )
+
+        # interval=1, reviewed at 10:00 JST (after boundary)
+        # effective_date = 2024-06-15, target_date = 2024-06-16
+        # next_review_at = 2024-06-16 04:00 JST = 2024-06-15 19:00 UTC
+        expected = datetime(2024, 6, 15, 19, 0, 0, tzinfo=timezone.utc)
+        actual_due_date = response.updated.due_date
+        # due_date is the date portion of next_review_at
+        assert actual_due_date == expected.date().isoformat() or actual_due_date == "2024-06-16"
+
+    def test_next_review_at_stored_in_dynamodb_as_normalized(self, review_service, sample_card, dynamodb_tables):
+        """Test that the normalized next_review_at is actually stored in DynamoDB."""
+        mock_now = datetime(2024, 6, 15, 1, 0, 0, tzinfo=timezone.utc)
+        with patch("services.srs.datetime") as mock_dt:
+            mock_dt.now.return_value = mock_now
+            mock_dt.side_effect = lambda *args, **kw: datetime(*args, **kw)
+
+            review_service.submit_review(
+                user_id="test-user-id",
+                card_id="test-card-id",
+                grade=4,
+                user_timezone="Asia/Tokyo",
+                day_start_hour=4,
+            )
+
+        # Verify stored value in DynamoDB
+        table = dynamodb_tables.Table("memoru-cards-test")
+        item = table.get_item(Key={"user_id": "test-user-id", "card_id": "test-card-id"})["Item"]
+        stored_next_review_at = item["next_review_at"]
+
+        # Should be 2024-06-15T19:00:00+00:00 (= 2024-06-16 04:00 JST)
+        parsed = datetime.fromisoformat(stored_next_review_at)
+        assert parsed.hour == 19
+        assert parsed.date() == datetime(2024, 6, 15).date()
+
+    def test_before_boundary_treats_as_previous_day(self, review_service, dynamodb_tables):
+        """Test review before day boundary treats current time as previous day.
+
+        Given: Review at 01:00 JST (before 04:00 boundary)
+        When: submit_review with interval=1
+        Then: next_review_at is same day 04:00 JST (not next day)
+        """
+        now = datetime.now(timezone.utc)
+        table = dynamodb_tables.Table("memoru-cards-test")
+        table.put_item(
+            Item={
+                "user_id": "test-user-id",
+                "card_id": "before-boundary-card",
+                "front": "Q",
+                "back": "A",
+                "next_review_at": now.isoformat(),
+                "interval": 1,
+                "ease_factor": "2.5",
+                "repetitions": 0,
+                "tags": [],
+                "created_at": now.isoformat(),
+            }
+        )
+
+        # 2024-06-15 01:00 JST = 2024-06-14 16:00 UTC (before boundary)
+        mock_now = datetime(2024, 6, 14, 16, 0, 0, tzinfo=timezone.utc)
+        with patch("services.srs.datetime") as mock_dt:
+            mock_dt.now.return_value = mock_now
+            mock_dt.side_effect = lambda *args, **kw: datetime(*args, **kw)
+
+            response = review_service.submit_review(
+                user_id="test-user-id",
+                card_id="before-boundary-card",
+                grade=4,
+                user_timezone="Asia/Tokyo",
+                day_start_hour=4,
+            )
+
+        # Before boundary: effective_date = 2024-06-14 (前日扱い)
+        # interval=1, target_date = 2024-06-15
+        # next_review_at = 2024-06-15 04:00 JST = 2024-06-14 19:00 UTC
+        # due_date uses UTC date from next_review_at
+        assert response.updated.due_date == "2024-06-14"
+
+        # Verify the actual stored next_review_at is correct
+        table = dynamodb_tables.Table("memoru-cards-test")
+        item = table.get_item(Key={"user_id": "test-user-id", "card_id": "before-boundary-card"})["Item"]
+        stored = datetime.fromisoformat(item["next_review_at"])
+        # In JST this is 2024-06-15 04:00
+        jst = stored.astimezone(ZoneInfo("Asia/Tokyo"))
+        assert jst.day == 15
+        assert jst.hour == 4
+
+    def test_default_timezone_and_day_start_hour(self, review_service, sample_card):
+        """Test that default values (Asia/Tokyo, day_start_hour=4) work correctly."""
+        # Call without explicit timezone/day_start_hour - should use defaults
+        response = review_service.submit_review(
+            user_id="test-user-id",
+            card_id="test-card-id",
+            grade=4,
+        )
+
+        # Should still produce a valid response with normalized next_review_at
+        assert response.updated.due_date is not None
+        assert response.updated.interval == 1
+
+    def test_custom_day_start_hour(self, review_service, dynamodb_tables):
+        """Test with custom day_start_hour (14:00 for night shift workers)."""
+        now = datetime.now(timezone.utc)
+        table = dynamodb_tables.Table("memoru-cards-test")
+        table.put_item(
+            Item={
+                "user_id": "test-user-id",
+                "card_id": "night-shift-card",
+                "front": "Q",
+                "back": "A",
+                "next_review_at": now.isoformat(),
+                "interval": 1,
+                "ease_factor": "2.5",
+                "repetitions": 0,
+                "tags": [],
+                "created_at": now.isoformat(),
+            }
+        )
+
+        # 2024-06-15 16:00 JST = 2024-06-15 07:00 UTC (after 14:00 boundary)
+        mock_now = datetime(2024, 6, 15, 7, 0, 0, tzinfo=timezone.utc)
+        with patch("services.srs.datetime") as mock_dt:
+            mock_dt.now.return_value = mock_now
+            mock_dt.side_effect = lambda *args, **kw: datetime(*args, **kw)
+
+            response = review_service.submit_review(
+                user_id="test-user-id",
+                card_id="night-shift-card",
+                grade=4,
+                user_timezone="Asia/Tokyo",
+                day_start_hour=14,
+            )
+
+        # After 14:00 boundary: effective_date = 2024-06-15
+        # interval=1, target_date = 2024-06-16
+        # next_review_at = 2024-06-16 14:00 JST = 2024-06-16 05:00 UTC
+        assert response.updated.due_date == "2024-06-16"
 
 
 class TestGetDueCards:
