@@ -26,7 +26,7 @@ const CHIPS: { value: ReviewStatusFilter; label: string; testId: string }[] = [
  */
 export const FilterChips = ({ value, onChange }: FilterChipsProps) => {
   return (
-    <div className="flex gap-2 flex-wrap" role="group" aria-label="復習状態フィルター">
+    <div className="flex gap-2 flex-wrap" role="radiogroup" aria-label="復習状態フィルター">
       {CHIPS.map((chip) => {
         const isSelected = value === chip.value;
         return (

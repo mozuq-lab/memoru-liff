@@ -23,6 +23,10 @@ const SORT_BY_OPTIONS: { value: SortByOption; label: string }[] = [
   { value: 'ease_factor', label: '習熟度' },
 ];
 
+/** 型ガード: 文字列が有効な SortByOption か判定する */
+const isSortByOption = (value: string): value is SortByOption =>
+  SORT_BY_OPTIONS.some((option) => option.value === value);
+
 /**
  * カードソートコンポーネント。
  * ソートキーのドロップダウンとソート方向のトグルボタンを提供する。
@@ -43,7 +47,12 @@ export const SortSelect = ({
       <select
         data-testid="sort-by-select"
         value={sortBy}
-        onChange={(e) => onSortByChange(e.target.value as SortByOption)}
+        onChange={(e) => {
+          const value = e.target.value;
+          if (isSortByOption(value)) {
+            onSortByChange(value);
+          }
+        }}
         aria-label="ソートキー"
         className="text-xs border border-gray-300 rounded px-2 py-1 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
       >

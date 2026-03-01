@@ -126,7 +126,9 @@ export const CardsPage = () => {
         {/* 検索・フィルター・ソート（モバイル縦並び） */}
         <div className="mt-3 flex flex-col gap-2">
           <SearchBar value={query} onChange={setQuery} />
-          <FilterChips value={reviewStatus} onChange={setReviewStatus} />
+          {activeTab !== "due" && (
+            <FilterChips value={reviewStatus} onChange={setReviewStatus} />
+          )}
           <SortSelect
             sortBy={sortBy}
             sortOrder={sortOrder}
