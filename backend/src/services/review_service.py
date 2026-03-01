@@ -383,31 +383,54 @@ class ReviewService:
     ) -> DueCardsResponse:
         """Get cards due for review.
 
+        【設計方針】: 全復習対象カードを取得してから limit を適用する。
+        これにより total_due_count が limit に影響されず正確な総数を返すことができる。
+        deck_id フィルタはアプリケーション層で適用し、DynamoDB クエリは全件取得する。
+        🔵 REQ-005: total_due_count は limit パラメータに影響されない正確な総数を返す
+
         Args:
             user_id: The user's ID.
-            limit: Maximum number of cards to return.
+            limit: Maximum number of cards to return in due_cards.
+                   total_due_count はこの値に影響されず、フィルタ後の全件数を返す。
             include_future: Include cards with future due dates.
             deck_id: Optional filter by deck ID.
+                     指定した場合、total_due_count はそのデッキ内の復習対象カード総数を返す。
 
         Returns:
             DueCardsResponse with due cards and metadata.
+            - due_cards: limit で制限されたカードリスト
+            - total_due_count: deck_id フィルタ後・limit 適用前の全件数（REQ-005）
+            - next_due_date: due_cards が空の場合に次の復習予定日を返す
         """
         now = datetime.now(timezone.utc)
 
-        # Get due cards using card service
-        due_cards = self.card_service.get_due_cards(
+        # 【全件取得】: limit を渡さず全復習対象カードを取得する
+        # deck_id フィルタはアプリケーション層で適用されるため、
+        # DynamoDB Query レベルで limit を適用すると deck_id フィルタ前にカードが失われる。
+        # limit=None により全件を取得し、アプリケーション層で deck_id フィルタと limit を適用する。 🔵
+        all_due_cards = self.card_service.get_due_cards(
             user_id=user_id,
-            limit=limit,
+            limit=None,  # 【全件取得】: DynamoDB Query レベルの切り詰めを防ぎ、正確な総数を計算する 🔵
             before=now if not include_future else None,
         )
 
-        # Filter by deck_id if specified
+        # 【deck_id フィルタ】: deck_id が指定された場合はアプリケーション層でフィルタを適用 🔵
+        # DynamoDB の FilterExpression ではなくアプリケーション層で処理することで、
+        # クエリコスト（読み取りキャパシティ）を最小化しつつ正確なフィルタを実現する。
         if deck_id is not None:
-            due_cards = [c for c in due_cards if c.deck_id == deck_id]
+            all_due_cards = [c for c in all_due_cards if c.deck_id == deck_id]
 
-        # Convert to response format
+        # 【total_due_count 計算】: limit 適用前に全件数を記録する（REQ-005）🔵
+        # deck_id フィルタ後・limit 適用前のリスト長が正確な復習対象カード総数となる。
+        total_due_count = len(all_due_cards)
+
+        # 【limit 適用】: 返却カードのみ limit で制限する（total_due_count には影響しない）🔵
+        limited_cards = all_due_cards[:limit]
+
+        # 【レスポンス形式変換】: Card モデルから DueCardInfo に変換する
         due_card_infos: List[DueCardInfo] = []
-        for card in due_cards:
+        for card in limited_cards:
+            # 【超過日数計算】: next_review_at から現在までの経過日数（0以上）を計算する
             overdue_days = 0
             if card.next_review_at:
                 delta = now - card.next_review_at
@@ -424,17 +447,8 @@ class ReviewService:
                 )
             )
 
-        # Get total due count (independent of limit)
-        # When deck_id filter is active, count only the filtered cards
-        if deck_id is not None:
-            total_due_count = len(due_card_infos)
-        else:
-            total_due_count = self.card_service.get_due_card_count(
-                user_id=user_id,
-                before=now if not include_future else None,
-            )
-
-        # Get next due date if no cards are due now
+        # 【次回復習日取得】: 復習対象カードがない場合に次の復習予定日を返す
+        # due_cards が空（全カード復習済み or カードなし）の場合のみクエリを実行する。
         next_due_date = None
         if not due_card_infos:
             next_due_date = self._get_next_due_date(user_id)

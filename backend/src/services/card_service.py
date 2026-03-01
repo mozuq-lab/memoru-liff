@@ -486,33 +486,45 @@ class CardService:
     def get_due_cards(
         self,
         user_id: str,
-        limit: int = 20,
+        limit: Optional[int] = None,
         before: Optional[datetime] = None,
     ) -> List[Card]:
         """Get cards due for review.
 
+        【設計方針】: limit=None の場合は DynamoDB に Limit を渡さず全件取得する。
+        呼び出し元（review_service）が deck_id フィルタ後に limit を適用するため、
+        このメソッドは limit なしで全件返すことで正確な total_due_count を計算できる。 🔵
+
         Args:
             user_id: The user's ID.
             limit: Maximum number of cards to return.
+                   None を指定した場合は全件取得する（デフォルト）。
+                   deck_id フィルタを上位層で行う場合は None を渡すこと。
             before: Get cards due before this time (defaults to now).
 
         Returns:
-            List of cards due for review.
+            List of cards due for review, oldest due first.
         """
         if before is None:
             before = datetime.now(timezone.utc)
 
         try:
-            response = self.table.query(
-                IndexName="user_id-due-index",
-                KeyConditionExpression="user_id = :user_id AND next_review_at <= :before",
-                ExpressionAttributeValues={
+            # 【クエリ引数構築】: GSI (user_id-due-index) を使い、期限切れカードを昇順で取得する
+            query_kwargs = {
+                "IndexName": "user_id-due-index",
+                "KeyConditionExpression": "user_id = :user_id AND next_review_at <= :before",
+                "ExpressionAttributeValues": {
                     ":user_id": user_id,
                     ":before": before.isoformat(),
                 },
-                Limit=limit,
-                ScanIndexForward=True,  # Oldest due first
-            )
+                "ScanIndexForward": True,  # 【昇順取得】: 期限が古い順（最も早く復習すべきカードを先頭に）
+            }
+            # 【Limit 条件付き設定】: limit=None の場合は DynamoDB に Limit を渡さず全件取得する 🔵
+            # limit が指定された場合のみ DynamoDB Query に Limit を付与し、レスポンスサイズを制限する。
+            if limit is not None:
+                query_kwargs["Limit"] = limit
+
+            response = self.table.query(**query_kwargs)
             return [Card.from_dynamodb_item(item) for item in response.get("Items", [])]
         except ClientError as e:
             raise CardServiceError(f"Failed to get due cards: {e}")
@@ -524,12 +536,16 @@ class CardService:
     ) -> int:
         """Get count of cards due for review.
 
+        【用途】: 通知サービス（notification_service）でユーザーの復習対象カード数を確認する際に使用する。
+        DynamoDB の SELECT COUNT を使用するため、全カードを取得するよりもコストが低い。
+        deck_id フィルタは不要なシンプルな件数取得に適している。 🔵
+
         Args:
             user_id: The user's ID.
             before: Get cards due before this time (defaults to now).
 
         Returns:
-            Number of cards due for review.
+            Number of cards due for review (deck_id フィルタなしの全件数).
         """
         if before is None:
             before = datetime.now(timezone.utc)

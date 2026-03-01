@@ -305,6 +305,366 @@ class TestGetDueCards:
         assert response.due_cards[0].overdue_days >= 2  # At least 2 days overdue
 
 
+def _put_due_card(dynamodb, user_id: str, card_id: str, due_offset_hours: int = -1, deck_id: str = None):
+    """due カードを DynamoDB に投入するヘルパー関数。
+
+    Args:
+        dynamodb: moto DynamoDB resource
+        user_id: ユーザーID
+        card_id: カードID
+        due_offset_hours: 現在時刻からの offset（負値 = 過去 = due 状態）
+        deck_id: デッキID（None の場合はデッキなし）
+    """
+    now = datetime.now(timezone.utc)
+    item = {
+        "user_id": user_id,
+        "card_id": card_id,
+        "front": f"Question for {card_id}",
+        "back": f"Answer for {card_id}",
+        "next_review_at": (now + timedelta(hours=due_offset_hours)).isoformat(),
+        "interval": 1,
+        "ease_factor": "2.5",
+        "repetitions": 0,
+        "tags": [],
+        "created_at": now.isoformat(),
+    }
+    if deck_id is not None:
+        item["deck_id"] = deck_id
+    dynamodb.Table("memoru-cards-test").put_item(Item=item)
+
+
+class TestGetDueCardsTotalDueCountFix:
+    """TASK-0088: total_due_count が limit に影響されない正確な総数を返すことを検証するテスト群。
+
+    バグの内容:
+    - バグ1: card_service.get_due_cards() に limit が渡されており、DynamoDB Query レベルで
+             カードが切り詰められてしまい、deck_id フィルタ前にカードが失われる。
+    - バグ2: deck_id フィルタ時の total_due_count が limit 後のリスト長（due_card_infos）
+             を使っており、実際の全件数を反映しない。
+    """
+
+    # ------------------------------------------------------------------
+    # TC-001: 正常系 - deck_id なし・limit < 全件数
+    # ------------------------------------------------------------------
+    def test_tc001_total_due_count_without_deck_id_limit_less_than_total(
+        self, review_service, dynamodb_tables
+    ):
+        """TC-001: deck_id なし・limit=10 で20件の復習対象カードがある場合、total_due_count=20 を返す。
+
+        【テスト目的】: total_due_count が limit に影響されず正確な全件数を返すことを確認
+        【テスト内容】: 20件の復習対象カードに対して limit=10 で get_due_cards を呼び出す
+        【期待される動作】: total_due_count=20（全件数）, len(due_cards)=10（limit 適用後）
+        🔵 REQ-005 受け入れ基準に直接対応
+        """
+        # 【テストデータ準備】: 復習対象カード20件を DynamoDB に投入（next_review_at を過去日に設定）
+        # 【初期条件設定】: 全カードの next_review_at を現在時刻より前に設定し、復習対象とする
+        for i in range(20):
+            _put_due_card(dynamodb_tables, "test-user-id", f"card-tc001-{i}", due_offset_hours=-(i + 1))
+
+        # 【実際の処理実行】: review_service.get_due_cards() を limit=10, deck_id=None で呼び出す
+        # 【処理内容】: card_service から全復習対象カードを取得し、total_due_count 計算後に limit 適用
+        response = review_service.get_due_cards("test-user-id", limit=10)
+
+        # 【結果検証】: total_due_count が limit 前の全件数を返していること
+        # 【期待値確認】: total_due_count=20（全件数）, len(due_cards)=10（limit 適用後）
+        assert response.total_due_count == 20  # 【確認内容】: 全件数20が返されること（limit=10 に影響されない）🔵
+        assert len(response.due_cards) == 10  # 【確認内容】: limit=10 で返却カードが10件に制限されること
+
+    # ------------------------------------------------------------------
+    # TC-002: 正常系 - deck_id あり・limit > デッキ内カード数
+    # ------------------------------------------------------------------
+    def test_tc002_total_due_count_with_deck_id_limit_greater_than_deck_cards(
+        self, review_service, dynamodb_tables
+    ):
+        """TC-002: deck_id フィルタ付き・limit(10) > デッキ内カード数(5) の場合の total_due_count。
+
+        【テスト目的】: deck_id フィルタが total_due_count に正しく反映されることを確認
+        【テスト内容】: デッキA内5件 + デッキB内3件、limit=10、deck_id="deck-a" で呼び出す
+        【期待される動作】: total_due_count=5（デッキA内件数）, due_cards=5件（全件返却）
+        🔵 要件定義 パターン2 に直接対応
+        """
+        # 【テストデータ準備】: デッキA内5件 + デッキB内3件を投入
+        # 【初期条件設定】: 複数デッキの due カードを混在させ、フィルタの正確性を確認する
+        for i in range(5):
+            _put_due_card(dynamodb_tables, "test-user-id", f"card-deck-a-{i}", due_offset_hours=-(i + 1), deck_id="deck-a")
+        for i in range(3):
+            _put_due_card(dynamodb_tables, "test-user-id", f"card-deck-b-{i}", due_offset_hours=-(i + 1), deck_id="deck-b")
+
+        # 【実際の処理実行】: deck_id="deck-a"、limit=10 で get_due_cards を呼び出す
+        response = review_service.get_due_cards("test-user-id", limit=10, deck_id="deck-a")
+
+        # 【結果検証】: デッキA内の件数のみがカウントされ、デッキBのカードは含まれないこと
+        assert response.total_due_count == 5  # 【確認内容】: デッキA内全5件（デッキBの3件を含まない）🔵
+        assert len(response.due_cards) == 5  # 【確認内容】: limit(10) >= デッキ内件数(5) なので全件返却
+
+    # ------------------------------------------------------------------
+    # TC-003: 正常系 - deck_id あり・limit < デッキ内カード数（バグ2の直接検証）
+    # ------------------------------------------------------------------
+    def test_tc003_total_due_count_with_deck_id_limit_less_than_deck_cards(
+        self, review_service, dynamodb_tables
+    ):
+        """TC-003: deck_id フィルタ付き・limit(10) < デッキ内カード数(15) の場合の total_due_count。
+
+        【テスト目的】: バグ2（deck_id フィルタ時の total_due_count が limit 後のリスト長）の修正を検証
+        【テスト内容】: デッキB内15件 + デッキA内3件、limit=10、deck_id="deck-b" で呼び出す
+        【期待される動作】: total_due_count=15（デッキB内全件数）, due_cards=10件（limit 適用後）
+        🔵 要件定義 パターン3 に直接対応。バグ2 の根本原因の修正を検証
+        """
+        # 【テストデータ準備】: デッキB内15件（due状態）+ デッキA内3件を投入
+        # 【初期条件設定】: limit < デッキ内カード数となるよう15件を用意する
+        for i in range(15):
+            _put_due_card(dynamodb_tables, "test-user-id", f"card-deck-b-tc003-{i}", due_offset_hours=-(i + 1), deck_id="deck-b-tc003")
+        for i in range(3):
+            _put_due_card(dynamodb_tables, "test-user-id", f"card-deck-a-tc003-{i}", due_offset_hours=-(i + 1), deck_id="deck-a-tc003")
+
+        # 【実際の処理実行】: deck_id="deck-b-tc003"、limit=10 で get_due_cards を呼び出す
+        response = review_service.get_due_cards("test-user-id", limit=10, deck_id="deck-b-tc003")
+
+        # 【結果検証】: total_due_count が limit(10) ではなくデッキ内全件数(15) を返すこと
+        # これが現在のバグ（バグ2）: total_due_count = len(due_card_infos) = 10（limit後）になっている
+        assert response.total_due_count == 15  # 【確認内容】: limit に影響されないデッキ内全15件 🔵
+        assert len(response.due_cards) == 10   # 【確認内容】: limit=10 で返却カードが10件に制限されること
+
+    # ------------------------------------------------------------------
+    # TC-004: 正常系 - deck_id なし・limit >= 全件数
+    # ------------------------------------------------------------------
+    def test_tc004_total_due_count_without_deck_id_limit_gte_total(
+        self, review_service, dynamodb_tables
+    ):
+        """TC-004: limit(20) >= 全件数(15) の場合に total_due_count と due_cards の件数が一致。
+
+        【テスト目的】: limit が全件数以上の場合でも total_due_count が正確であることを確認
+        【テスト内容】: 復習対象15件、limit=20 で get_due_cards を呼び出す
+        【期待される動作】: total_due_count=15, due_cards=15件（全件返却）
+        🔵 要件定義 パターン4 に直接対応
+        """
+        # 【テストデータ準備】: 復習対象カード15件を投入
+        for i in range(15):
+            _put_due_card(dynamodb_tables, "test-user-id", f"card-tc004-{i}", due_offset_hours=-(i + 1))
+
+        # 【実際の処理実行】: limit=20（全件数より大きい）で呼び出す
+        response = review_service.get_due_cards("test-user-id", limit=20)
+
+        # 【結果検証】: limit >= 全件数なので全件返却、total_due_count も全件数と一致
+        assert response.total_due_count == 15  # 【確認内容】: total_due_count が15件 🔵
+        assert len(response.due_cards) == 15   # 【確認内容】: due_cards も15件（全件返却）
+
+    # ------------------------------------------------------------------
+    # TC-005: 正常系 - card_service に limit なしで全件取得（バグ1の検証）
+    # ------------------------------------------------------------------
+    def test_tc005_card_service_called_without_limit_for_total_count(
+        self, review_service, dynamodb_tables
+    ):
+        """TC-005: card_service.get_due_cards に limit が渡されず全件取得されることの確認。
+
+        【テスト目的】: バグ1（card_service.get_due_cards に limit が渡されている問題）の修正を検証
+        【テスト内容】: 復習対象10件、limit=5 で get_due_cards を呼び出す
+        【期待される動作】: total_due_count=10（全件数）, due_cards=5件（limit 適用後）
+        🔵 要件定義 セクション3 バグ1 の根本原因分析に直接対応
+        """
+        # 【テストデータ準備】: 復習対象カード10件を投入
+        # 【前提条件確認】: 旧実装では card_service に limit=5 が渡されるため、10件の内5件しか取得できない
+        for i in range(10):
+            _put_due_card(dynamodb_tables, "test-user-id", f"card-tc005-{i}", due_offset_hours=-(i + 1))
+
+        # 【実際の処理実行】: limit=5 で呼び出す（旧実装では card_service に limit=5 が渡される）
+        response = review_service.get_due_cards("test-user-id", limit=5)
+
+        # 【結果検証】: card_service が全件(10) を取得し、total_due_count=10、返却カードのみ limit(5) で制限
+        assert response.total_due_count == 10  # 【確認内容】: card_service レベルで切り詰められていない 🔵
+        assert len(response.due_cards) == 5    # 【確認内容】: limit=5 で返却カードが5件に制限されること
+
+    # ------------------------------------------------------------------
+    # TC-006: 異常系 - 存在しない deck_id を指定した場合
+    # ------------------------------------------------------------------
+    def test_tc006_nonexistent_deck_id_returns_empty_response(
+        self, review_service, dynamodb_tables
+    ):
+        """TC-006: 存在しないデッキIDを指定した場合に空レスポンスが返る。
+
+        【テスト目的】: 存在しない deck_id でも例外が発生しないことを確認
+        【テスト内容】: 別デッキの due カード5件がある状態で deck_id="non-existent" を指定する
+        【期待される動作】: total_due_count=0, due_cards=[], エラーなし
+        🟡 要件定義 パターン6 から妥当な推測
+        """
+        # 【テストデータ準備】: 別デッキの due カード5件を投入（指定 deck_id とは無関係）
+        for i in range(5):
+            _put_due_card(dynamodb_tables, "test-user-id", f"card-other-{i}", due_offset_hours=-(i + 1), deck_id="deck-other")
+
+        # 【実際の処理実行】: 存在しない deck_id で呼び出す
+        response = review_service.get_due_cards("test-user-id", limit=10, deck_id="non-existent-deck")
+
+        # 【結果検証】: エラーなし、空のレスポンスが返ること
+        assert response.total_due_count == 0  # 【確認内容】: 該当カードなしで0件 🟡
+        assert len(response.due_cards) == 0   # 【確認内容】: due_cards は空リスト
+
+    # ------------------------------------------------------------------
+    # TC-007: 異常系 - 復習対象カードが0件の場合
+    # ------------------------------------------------------------------
+    def test_tc007_zero_due_cards_returns_next_due_date(
+        self, review_service, dynamodb_tables
+    ):
+        """TC-007: 復習対象カードがない場合に total_due_count=0 と next_due_date が返る。
+
+        【テスト目的】: 復習完了状態での total_due_count と next_due_date の正確性を確認
+        【テスト内容】: 未来日の復習カード1件がある状態で get_due_cards を呼び出す
+        【期待される動作】: total_due_count=0, due_cards=[], next_due_date is not None
+        🔵 要件定義 パターン7・既存テスト test_get_due_cards_empty に対応
+        """
+        # 【テストデータ準備】: 未来の復習日を持つカード1件を投入（due 状態でない）
+        now = datetime.now(timezone.utc)
+        dynamodb_tables.Table("memoru-cards-test").put_item(Item={
+            "user_id": "test-user-id",
+            "card_id": "future-card-tc007",
+            "front": "Future Question",
+            "back": "Future Answer",
+            "next_review_at": (now + timedelta(days=1)).isoformat(),
+            "interval": 1,
+            "ease_factor": "2.5",
+            "repetitions": 0,
+            "tags": [],
+            "created_at": now.isoformat(),
+        })
+
+        # 【実際の処理実行】: deck_id=None で呼び出す（due カードは0件）
+        response = review_service.get_due_cards("test-user-id", limit=10)
+
+        # 【結果検証】: 空リスト + 次回復習日の適切な返却
+        assert response.total_due_count == 0        # 【確認内容】: due 状態のカードが0件 🔵
+        assert len(response.due_cards) == 0         # 【確認内容】: due_cards は空リスト
+        assert response.next_due_date is not None   # 【確認内容】: 次の復習日が設定されていること
+
+    # ------------------------------------------------------------------
+    # TC-008: 境界値 - limit=2（小さい値）の場合
+    # ------------------------------------------------------------------
+    def test_tc008_small_limit_returns_correct_total_count(
+        self, review_service, dynamodb_tables
+    ):
+        """TC-008: limit=2（小さい値）の場合に total_due_count が全件数を返す。
+
+        【テスト目的】: 小さい limit 値での total_due_count の正確性を確認
+        【テスト内容】: 復習対象10件、limit=2 で get_due_cards を呼び出す
+        【期待される動作】: total_due_count=10（全件数）, due_cards=2件
+        🟡 要件定義 パターン5 から妥当な推測
+        注意: DynamoDB Query の Limit パラメータは 1 以上が必須のため、limit=0 は扱わない
+        """
+        # 【テストデータ準備】: 復習対象カード10件を投入
+        for i in range(10):
+            _put_due_card(dynamodb_tables, "test-user-id", f"card-tc008-{i}", due_offset_hours=-(i + 1))
+
+        # 【実際の処理実行】: limit=2（小さい値）で呼び出す
+        response = review_service.get_due_cards("test-user-id", limit=2)
+
+        # 【結果検証】: due_cards は2件のみだが total_due_count は全件数を返す
+        assert response.total_due_count == 10  # 【確認内容】: limit=2 でも全件数10が返されること 🟡
+        assert len(response.due_cards) == 2    # 【確認内容】: limit=2 で2件のみ返却
+
+    # ------------------------------------------------------------------
+    # TC-009: 境界値 - limit=1 の場合
+    # ------------------------------------------------------------------
+    def test_tc009_limit_one_returns_single_card_with_correct_total(
+        self, review_service, dynamodb_tables
+    ):
+        """TC-009: limit=1（最小有効値）の場合に total_due_count が全件数を返す。
+
+        【テスト目的】: limit 最小有効値での total_due_count の正確性を確認
+        【テスト内容】: 復習対象5件、limit=1 で get_due_cards を呼び出す
+        【期待される動作】: total_due_count=5（全件数）, due_cards=1件
+        🟡 要件定義から妥当な推測（boundary として重要）
+        """
+        # 【テストデータ準備】: 復習対象カード5件を投入
+        for i in range(5):
+            _put_due_card(dynamodb_tables, "test-user-id", f"card-tc009-{i}", due_offset_hours=-(i + 1))
+
+        # 【実際の処理実行】: limit=1 で呼び出す（due_cards は1件のみ返却）
+        response = review_service.get_due_cards("test-user-id", limit=1)
+
+        # 【結果検証】: due_cards は1件のみ、total_due_count は全件数
+        assert response.total_due_count == 5  # 【確認内容】: limit=1 でも全件数5が返されること 🟡
+        assert len(response.due_cards) == 1   # 【確認内容】: limit=1 で1件のみ返却
+
+    # ------------------------------------------------------------------
+    # TC-010: 境界値 - deck_id フィルタで全カードが除外される場合
+    # ------------------------------------------------------------------
+    def test_tc010_deck_id_filter_excludes_all_cards_returns_zero(
+        self, review_service, dynamodb_tables
+    ):
+        """TC-010: deck_id フィルタで該当カード0件の場合に total_due_count=0 を返す。
+
+        【テスト目的】: deck_id フィルタ後の0件境界でのカウント正確性を確認
+        【テスト内容】: 別デッキの due カード5件がある状態で deck_id="deck-empty" を指定する
+        【期待される動作】: total_due_count=0, due_cards=[]
+        🟡 要件定義パターン6 と組み合わせた妥当な推測
+        """
+        # 【テストデータ準備】: 全カードを "deck-other-tc010" に属させ、"deck-empty-tc010" は空にする
+        for i in range(5):
+            _put_due_card(dynamodb_tables, "test-user-id", f"card-other-tc010-{i}", due_offset_hours=-(i + 1), deck_id="deck-other-tc010")
+
+        # 【実際の処理実行】: フィルタ結果が0件となる deck_id を指定
+        response = review_service.get_due_cards("test-user-id", limit=10, deck_id="deck-empty-tc010")
+
+        # 【結果検証】: フィルタ後0件でも total_due_count=0 が正確に返される
+        assert response.total_due_count == 0  # 【確認内容】: フィルタ後0件で total_due_count=0 🟡
+        assert len(response.due_cards) == 0   # 【確認内容】: due_cards は空リスト
+
+    # ------------------------------------------------------------------
+    # TC-011: 境界値 - deck_id + limit でバグ1検証（card_service レベルの切り詰め）
+    # ------------------------------------------------------------------
+    def test_tc011_deck_id_with_limit_card_service_level_truncation_bug(
+        self, review_service, dynamodb_tables
+    ):
+        """TC-011: deck_id フィルタ時に card_service レベルの limit でカードが切り詰められないこと。
+
+        【テスト目的】: バグ1（card_service に limit が渡される）を deck_id と組み合わせて検証
+        【テスト内容】: デッキA内4件（due日が古い順）+ デッキB内4件、limit=5、deck_id="deck-b-tc011"
+        【期待される動作】: total_due_count=4（デッキB内全件数）, due_cards=4件
+        🔵 要件定義 セクション3 バグ1 の根本原因分析に直接対応
+
+        旧実装では card_service に limit=5 が渡され、DynamoDB GSI ソート順（古い順）で
+        先頭5件が取得される。デッキA内4件が古い場合、5件中デッキBは1件のみとなり、
+        deck_id="deck-b-tc011" フィルタ後の total_due_count=1 となってしまう（正解は4）。
+        """
+        # 【テストデータ準備】: デッキAのカードを古い due 日、デッキBをやや新しい due 日に設定
+        # GSI ソート（古い順）でデッキAが先に取得されやすくする
+        for i in range(4):
+            # deck-a-tc011: より古い due 日（20〜23時間前）
+            _put_due_card(dynamodb_tables, "test-user-id", f"card-a-tc011-{i}", due_offset_hours=-(20 + i), deck_id="deck-a-tc011")
+        for i in range(4):
+            # deck-b-tc011: やや新しい due 日（1〜4時間前）
+            _put_due_card(dynamodb_tables, "test-user-id", f"card-b-tc011-{i}", due_offset_hours=-(1 + i), deck_id="deck-b-tc011")
+
+        # 【実際の処理実行】: deck_id="deck-b-tc011"、limit=5 で呼び出す
+        response = review_service.get_due_cards("test-user-id", limit=5, deck_id="deck-b-tc011")
+
+        # 【結果検証】: card_service が全件(8件) を取得し、deck_id フィルタ後4件、limit(5) >= 4件なので全件返却
+        assert response.total_due_count == 4  # 【確認内容】: card_service レベルで切り詰められていない 🔵
+        assert len(response.due_cards) == 4   # 【確認内容】: デッキB内4件が全て返却される
+
+    # ------------------------------------------------------------------
+    # TC-012: 境界値 - limit=100（API 上限値）での total_due_count 正確性
+    # ------------------------------------------------------------------
+    def test_tc012_limit_max_100_with_larger_total_returns_correct_count(
+        self, review_service, dynamodb_tables
+    ):
+        """TC-012: limit=100（API 上限）の場合に total_due_count が正確な全件数を返す。
+
+        【テスト目的】: limit 上限値での total_due_count 正確性の確認
+        【テスト内容】: 復習対象120件、limit=100 で get_due_cards を呼び出す
+        【期待される動作】: total_due_count=120（全件数）, due_cards=100件（limit 適用後）
+        🟡 limit=100 は要件定義セクション2から。120件テストは妥当な推測
+        """
+        # 【テストデータ準備】: 復習対象カード120件を投入（limit=100 を超える件数）
+        for i in range(120):
+            _put_due_card(dynamodb_tables, "test-user-id", f"card-tc012-{i}", due_offset_hours=-(i + 1))
+
+        # 【実際の処理実行】: limit=100（API 上限値）で呼び出す
+        response = review_service.get_due_cards("test-user-id", limit=100)
+
+        # 【結果検証】: limit 上限値でも total_due_count は実際の全件数を返す
+        assert response.total_due_count == 120  # 【確認内容】: 全件数120が返されること（limit=100 に影響されない）🟡
+        assert len(response.due_cards) == 100   # 【確認内容】: limit=100 で返却カードが100件に制限されること
+
+
 class TestReviewIntegration:
     """Integration tests for review workflow."""
 
