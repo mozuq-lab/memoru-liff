@@ -96,8 +96,8 @@ TASK-0085 → TASK-0092
 
 - [x] [TASK-0093: App.tsx Provider 順序修正](TASK-0093.md) - 2h (TDD) 🟡
 - [ ] [TASK-0094: DeckFormModal 差分送信](TASK-0094.md) - 4h (TDD) 🔵
-- [ ] [TASK-0095: unassigned フィルタ削除](TASK-0095.md) - 1h (DIRECT) 🔵
-- [ ] [TASK-0096: JSDoc コメントスタイル統一](TASK-0096.md) - 2h (DIRECT) 🟡
+- [x] [TASK-0095: unassigned フィルタ削除](TASK-0095.md) - 1h (DIRECT) 🔵
+- [x] [TASK-0096: JSDoc コメントスタイル統一](TASK-0096.md) - 2h (DIRECT) 🟡
 - [ ] [TASK-0097: CardDetailPage fetchDecks 呼び出し](TASK-0097.md) - 2h (TDD) 🔵
 - [ ] [TASK-0098: 統合テスト](TASK-0098.md) - 4h (TDD) 🟡
 

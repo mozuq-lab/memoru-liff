@@ -2,6 +2,16 @@ import { createContext, useContext, useState, useCallback, useMemo, type ReactNo
 import type { Deck, CreateDeckRequest, UpdateDeckRequest } from '@/types';
 import { decksApi } from '@/services/api';
 
+/**
+ * DecksContext が提供する値の型定義
+ * @property decks - デッキ一覧
+ * @property isLoading - データ取得中フラグ
+ * @property error - 最後に発生したエラー
+ * @property fetchDecks - デッキ一覧を再取得する
+ * @property createDeck - 新しいデッキを作成する
+ * @property updateDeck - デッキを更新する
+ * @property deleteDeck - デッキを削除する（カードは未分類に移動）
+ */
 interface DecksContextType {
   decks: Deck[];
   isLoading: boolean;
@@ -14,10 +24,17 @@ interface DecksContextType {
 
 const DecksContext = createContext<DecksContextType | undefined>(undefined);
 
+/**
+ * DecksProvider のプロパティ
+ */
 interface DecksProviderProps {
   children: ReactNode;
 }
 
+/**
+ * デッキ状態を管理する Context プロバイダー
+ * デッキの取得・作成・更新・削除操作を子コンポーネントに提供する。
+ */
 export const DecksProvider = ({ children }: DecksProviderProps) => {
   const [decks, setDecks] = useState<Deck[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -73,6 +90,11 @@ export const DecksProvider = ({ children }: DecksProviderProps) => {
   );
 };
 
+/**
+ * DecksContext にアクセスするカスタムフック
+ * DecksProvider の外で使用した場合はエラーをスローする。
+ * @returns DecksContextType - デッキ操作メソッドと状態
+ */
 export const useDecksContext = (): DecksContextType => {
   const context = useContext(DecksContext);
   if (context === undefined) {

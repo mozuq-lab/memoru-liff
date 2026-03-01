@@ -8,6 +8,11 @@ import { Loading } from '@/components/common/Loading';
 import { Error } from '@/components/common/Error';
 import type { Deck, CreateDeckRequest, UpdateDeckRequest } from '@/types';
 
+/**
+ * デッキ管理ページ
+ * デッキの一覧表示・作成・編集・削除を行う。
+ * 削除時はカードを未分類に移動し、カード一覧を再取得する。
+ */
 export const DecksPage = () => {
   const navigate = useNavigate();
   const { decks, isLoading, error, fetchDecks, createDeck, updateDeck, deleteDeck } = useDecksContext();
@@ -18,30 +23,36 @@ export const DecksPage = () => {
   const [editingDeck, setEditingDeck] = useState<Deck | undefined>(undefined);
   const [deletingDeckId, setDeletingDeckId] = useState<string | null>(null);
 
-  // 初期データ取得
+  /** マウント時にデッキ一覧とカード一覧を取得する */
   useEffect(() => {
     fetchDecks();
     fetchCards();
   }, [fetchDecks, fetchCards]);
 
-  // 未分類カード数
+  /** deck_id を持たないカード（未分類）の件数 */
   const uncategorizedCount = cards.filter((c) => !c.deck_id).length;
 
-  // デッキ作成
+  /** デッキ作成モーダルを開く */
   const handleCreate = useCallback(() => {
     setModalMode('create');
     setEditingDeck(undefined);
     setModalOpen(true);
   }, []);
 
-  // デッキ編集
+  /**
+   * デッキ編集モーダルを開く
+   * @param deck - 編集対象のデッキ
+   */
   const handleEdit = useCallback((deck: Deck) => {
     setModalMode('edit');
     setEditingDeck(deck);
     setModalOpen(true);
   }, []);
 
-  // フォーム送信
+  /**
+   * モーダルのフォーム送信ハンドラ
+   * modalMode に応じて createDeck または updateDeck を呼び出す。
+   */
   const handleFormSubmit = useCallback(
     async (data: CreateDeckRequest | UpdateDeckRequest) => {
       if (modalMode === 'create') {
@@ -53,7 +64,10 @@ export const DecksPage = () => {
     [modalMode, editingDeck, createDeck, updateDeck]
   );
 
-  // デッキ削除確認
+  /**
+   * デッキ削除を確定する
+   * 削除後にカード一覧を再取得して deck_id が null に更新されたカードを反映する。
+   */
   const handleDeleteConfirm = useCallback(async () => {
     if (!deletingDeckId) return;
     try {

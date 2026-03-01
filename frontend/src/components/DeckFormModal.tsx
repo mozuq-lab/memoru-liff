@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import type { Deck, CreateDeckRequest, UpdateDeckRequest } from '@/types';
 
+/** カラーパレットに表示するプリセットカラー一覧 */
 const PRESET_COLORS = [
   '#3B82F6', // blue
   '#EF4444', // red
@@ -21,6 +22,14 @@ interface DeckFormInitialValues {
   color: string | null;
 }
 
+/**
+ * DeckFormModal のプロパティ
+ * @property mode - 'create'（新規作成）または 'edit'（編集）
+ * @property deck - 編集対象のデッキ（edit モード時に使用）
+ * @property isOpen - モーダルの表示状態
+ * @property onClose - モーダルを閉じるコールバック
+ * @property onSubmit - フォーム送信時のコールバック
+ */
 interface DeckFormModalProps {
   mode: 'create' | 'edit';
   deck?: Deck;
@@ -29,6 +38,12 @@ interface DeckFormModalProps {
   onSubmit: (data: CreateDeckRequest | UpdateDeckRequest) => Promise<void>;
 }
 
+/**
+ * デッキ作成・編集モーダルコンポーネント
+ *
+ * edit モードでは差分送信を行い、変更されたフィールドのみ payload に含める。
+ * カラーの選択解除は null として送信し、バックエンドで REMOVE される。
+ */
 export const DeckFormModal = ({ mode, deck, isOpen, onClose, onSubmit }: DeckFormModalProps) => {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -65,6 +80,10 @@ export const DeckFormModal = ({ mode, deck, isOpen, onClose, onSubmit }: DeckFor
 
   if (!isOpen) return null;
 
+  /**
+   * フォーム送信ハンドラ
+   * create モードは全フィールドを送信、edit モードは初期値との差分のみ送信する。
+   */
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
