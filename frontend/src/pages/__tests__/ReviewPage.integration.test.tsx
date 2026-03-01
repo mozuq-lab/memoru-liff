@@ -543,7 +543,7 @@ describe('ReviewPage 統合テスト', () => {
       await waitForComplete();
 
       // When: Undo ボタンクリック
-      const undoButton = screen.getByLabelText('質問1 の採点を取り消す');
+      const undoButton = screen.getByLabelText('質問1 を再採点する');
       await user.click(undoButton);
 
       // Then: 再採点モードに遷移
@@ -593,7 +593,7 @@ describe('ReviewPage 統合テスト', () => {
       await waitForComplete();
 
       // When: Undo
-      const undoButton = screen.getByLabelText('質問1 の採点を取り消す');
+      const undoButton = screen.getByLabelText('質問1 を再採点する');
       await user.click(undoButton);
 
       // Then: 再採点モードに遷移
@@ -644,7 +644,7 @@ describe('ReviewPage 統合テスト', () => {
       await waitForComplete();
 
       // When: カード1を Undo
-      const undoButton = screen.getByLabelText('質問1 の採点を取り消す');
+      const undoButton = screen.getByLabelText('質問1 を再採点する');
       await user.click(undoButton);
 
       // Then: 再採点モードに遷移

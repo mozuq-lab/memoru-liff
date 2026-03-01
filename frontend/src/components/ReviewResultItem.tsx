@@ -56,7 +56,14 @@ export const ReviewResultItem = ({
           </p>
         )}
         {result.type === 'reconfirmed' && (
-          <p className="text-xs text-green-600 mt-0.5">覚えた✔</p>
+          <>
+            {result.nextReviewDate && (
+              <p className="text-xs text-gray-500 mt-0.5">
+                次回: {result.nextReviewDate}
+              </p>
+            )}
+            <p className="text-xs text-gray-500 mt-0.5">再確認済み</p>
+          </>
         )}
         {result.type === 'skipped' && (
           <p className="text-xs text-gray-400 mt-0.5">スキップ</p>
@@ -73,7 +80,7 @@ export const ReviewResultItem = ({
             type="button"
             onClick={() => onUndo(index)}
             disabled={isUndoing}
-            aria-label={`${result.front} の採点を取り消す`}
+            aria-label={`${result.front} を再採点する`}
             className={`min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg text-sm text-gray-500 hover:bg-gray-100 active:bg-gray-200 transition-colors ${
               isUndoing ? 'opacity-50 cursor-not-allowed' : ''
             }`}
@@ -84,7 +91,7 @@ export const ReviewResultItem = ({
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
               </svg>
             ) : (
-              <span className="text-xs">取消</span>
+              <span className="text-xs">再採点</span>
             )}
           </button>
         )}
