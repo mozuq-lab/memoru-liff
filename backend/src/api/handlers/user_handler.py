@@ -118,6 +118,7 @@ def update_user_settings():
             user_id,
             notification_time=request.notification_time,
             timezone=request.timezone,
+            day_start_hour=request.day_start_hour,
         )
         return {"success": True, "data": user.to_response().model_dump(mode="json")}
     except UserNotFoundError:

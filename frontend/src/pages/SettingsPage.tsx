@@ -21,6 +21,11 @@ const NOTIFICATION_TIMES = [
   { value: '21:00', label: '21:00' },
 ];
 
+const DAY_START_HOURS = Array.from({ length: 24 }, (_, i) => ({
+  value: i,
+  label: `${String(i).padStart(2, '0')}:00`,
+}));
+
 /**
  * 【機能概要】: 設定ページコンポーネント
  */
@@ -29,6 +34,7 @@ export const SettingsPage = () => {
   const { logout, user: authUser } = useAuth();
   const [user, setUser] = useState<User | null>(null);
   const [selectedTime, setSelectedTime] = useState<string>('09:00');
+  const [selectedDayStartHour, setSelectedDayStartHour] = useState<number>(4);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -44,6 +50,7 @@ export const SettingsPage = () => {
       const data = await usersApi.getCurrentUser();
       setUser(data);
       setSelectedTime(data.notification_time || '09:00');
+      setSelectedDayStartHour(data.day_start_hour ?? 4);
     } catch (err) {
       setError('設定の取得に失敗しました');
     } finally {
@@ -69,7 +76,10 @@ export const SettingsPage = () => {
     setError(null);
 
     try {
-      const updatedUser = await usersApi.updateUser({ notification_time: selectedTime });
+      const updatedUser = await usersApi.updateUser({
+        notification_time: selectedTime,
+        day_start_hour: selectedDayStartHour,
+      });
       setUser(updatedUser);
       setSuccessMessage('設定を保存しました');
     } catch (err) {
@@ -93,7 +103,10 @@ export const SettingsPage = () => {
     }
   };
 
-  const hasChanges = user && selectedTime !== (user.notification_time || '09:00');
+  const hasChanges = user && (
+    selectedTime !== (user.notification_time || '09:00') ||
+    selectedDayStartHour !== (user.day_start_hour ?? 4)
+  );
 
   // 【ローディング表示】
   if (isLoading) {
@@ -197,6 +210,29 @@ export const SettingsPage = () => {
                 </label>
               ))}
             </div>
+          </div>
+
+          <div className="mb-4">
+            <label htmlFor="day-start-hour" className="block text-sm font-medium text-gray-700 mb-2">
+              日付切り替え時刻
+            </label>
+            <p className="text-sm text-gray-500 mb-3">
+              この時刻以降にその日の復習カードが表示されます
+            </p>
+
+            <select
+              id="day-start-hour"
+              value={selectedDayStartHour}
+              onChange={(e) => setSelectedDayStartHour(Number(e.target.value))}
+              className="w-full p-3 border border-gray-300 rounded-lg bg-white text-gray-800 min-h-[44px]"
+              data-testid="day-start-hour-select"
+            >
+              {DAY_START_HOURS.map((hour) => (
+                <option key={hour.value} value={hour.value}>
+                  {hour.label}
+                </option>
+              ))}
+            </select>
           </div>
 
           <button

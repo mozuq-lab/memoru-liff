@@ -3,6 +3,11 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from aws_lambda_powertools import Logger
+
+logger = Logger()
 
 
 @dataclass
@@ -83,6 +88,54 @@ def calculate_sm2(
         interval=new_interval,
         next_review_at=next_review_at,
     )
+
+
+def calculate_next_review_boundary(
+    interval: int,
+    user_timezone: str = "Asia/Tokyo",
+    day_start_hour: int = 4,
+) -> datetime:
+    """Calculate next_review_at normalized to user's day boundary.
+
+    Args:
+        interval: Days until next review (from SM-2 calculation).
+        user_timezone: User's IANA timezone string.
+        day_start_hour: Hour when user's "day" starts (0-23).
+
+    Returns:
+        UTC datetime set to the day boundary time.
+    """
+    interval = int(interval)
+    day_start_hour = int(day_start_hour)
+    if not 0 <= day_start_hour <= 23:
+        raise ValueError(f"day_start_hour must be 0-23, got {day_start_hour}")
+
+    try:
+        user_tz = ZoneInfo(user_timezone)
+    except (ZoneInfoNotFoundError, KeyError):
+        logger.warning(f"Invalid timezone '{user_timezone}', falling back to Asia/Tokyo")
+        user_tz = ZoneInfo("Asia/Tokyo")
+
+    now_utc = datetime.now(timezone.utc)
+    local_now = now_utc.astimezone(user_tz)
+
+    # 有効日付: 境界時刻前なら前日扱い
+    effective_date = local_now.date()
+    if local_now.hour < day_start_hour:
+        effective_date -= timedelta(days=1)
+
+    # interval 日後の境界時刻
+    target_date = effective_date + timedelta(days=interval)
+    boundary = datetime(
+        target_date.year,
+        target_date.month,
+        target_date.day,
+        day_start_hour,
+        0,
+        0,
+        tzinfo=user_tz,
+    )
+    return boundary.astimezone(timezone.utc).replace(microsecond=0)
 
 
 @dataclass

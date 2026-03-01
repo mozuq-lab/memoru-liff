@@ -11,6 +11,7 @@ from moto import mock_aws
 import boto3
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 from services.card_service import (
     CardService,
@@ -603,3 +604,102 @@ class TestCardServiceUpdateInterval:
         # 【確認内容】: 期待される日時と一致すること
         expected = self.FIXED_NOW + timedelta(days=7)
         assert parsed.replace(tzinfo=timezone.utc) == expected  # 【確認内容】: 7 日後の正確な日時であること 🟡
+
+
+class TestCardServiceUpdateIntervalDayBoundary:
+    """Tests for day boundary normalization in update_card (TASK-0105).
+
+    Verifies that interval update normalizes next_review_at to user's day boundary
+    when user_timezone and day_start_hour are provided.
+    """
+
+    def test_interval_update_with_timezone_normalizes(self, card_service):
+        """Test that interval update with timezone/day_start_hour normalizes next_review_at."""
+        created = card_service.create_card(
+            user_id="test-user-id",
+            front="Q",
+            back="A",
+        )
+
+        # Mock srs.datetime to control boundary calculation
+        mock_now = datetime(2024, 6, 15, 1, 0, 0, tzinfo=timezone.utc)  # 10:00 JST
+        with patch("services.srs.datetime") as mock_srs_dt, \
+             patch("services.card_service.datetime") as mock_cs_dt:
+            mock_srs_dt.now.return_value = mock_now
+            mock_srs_dt.side_effect = lambda *args, **kw: datetime(*args, **kw)
+            mock_cs_dt.now.return_value = mock_now
+            mock_cs_dt.side_effect = lambda *args, **kw: datetime(*args, **kw)
+
+            updated = card_service.update_card(
+                user_id="test-user-id",
+                card_id=created.card_id,
+                interval=7,
+                user_timezone="Asia/Tokyo",
+                day_start_hour=4,
+            )
+
+        # 10:00 JST (after boundary), effective_date = 2024-06-15
+        # target_date = 2024-06-15 + 7 = 2024-06-22
+        # boundary = 2024-06-22 04:00 JST = 2024-06-21 19:00 UTC
+        assert updated.interval == 7
+        assert updated.next_review_at is not None
+        jst = updated.next_review_at.astimezone(ZoneInfo("Asia/Tokyo"))
+        assert jst.hour == 4
+        assert jst.day == 22
+        assert jst.month == 6
+
+    def test_interval_update_without_timezone_uses_raw_calculation(self, card_service):
+        """Test that interval update without timezone uses raw datetime (backward compatibility)."""
+        created = card_service.create_card(
+            user_id="test-user-id",
+            front="Q",
+            back="A",
+        )
+
+        fixed_now = datetime(2024, 6, 15, 10, 0, 0, tzinfo=timezone.utc)
+        with patch("services.card_service.datetime") as mock_dt:
+            mock_dt.now.return_value = fixed_now
+            mock_dt.side_effect = lambda *args, **kw: datetime(*args, **kw)
+
+            updated = card_service.update_card(
+                user_id="test-user-id",
+                card_id=created.card_id,
+                interval=7,
+            )
+
+        # Without timezone params, should use raw calculation: now + 7 days
+        expected = fixed_now + timedelta(days=7)
+        assert updated.next_review_at.replace(tzinfo=timezone.utc) == expected
+
+    def test_interval_update_normalized_stored_in_dynamodb(self, card_service, dynamodb_table):
+        """Test that the normalized next_review_at is stored correctly in DynamoDB."""
+        created = card_service.create_card(
+            user_id="test-user-id",
+            front="Q",
+            back="A",
+        )
+
+        mock_now = datetime(2024, 6, 15, 1, 0, 0, tzinfo=timezone.utc)  # 10:00 JST
+        with patch("services.srs.datetime") as mock_srs_dt, \
+             patch("services.card_service.datetime") as mock_cs_dt:
+            mock_srs_dt.now.return_value = mock_now
+            mock_srs_dt.side_effect = lambda *args, **kw: datetime(*args, **kw)
+            mock_cs_dt.now.return_value = mock_now
+            mock_cs_dt.side_effect = lambda *args, **kw: datetime(*args, **kw)
+
+            card_service.update_card(
+                user_id="test-user-id",
+                card_id=created.card_id,
+                interval=3,
+                user_timezone="Asia/Tokyo",
+                day_start_hour=4,
+            )
+
+        # Verify stored value
+        cards_table = dynamodb_table.Table("memoru-cards-test")
+        item = cards_table.get_item(
+            Key={"user_id": "test-user-id", "card_id": created.card_id}
+        )["Item"]
+        stored = datetime.fromisoformat(item["next_review_at"])
+        jst = stored.astimezone(ZoneInfo("Asia/Tokyo"))
+        assert jst.hour == 4  # Should be at day boundary

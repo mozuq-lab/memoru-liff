@@ -16,12 +16,14 @@ from services.review_service import (
     InvalidGradeError,
     NoReviewHistoryError,
 )
+from services.user_service import UserService
 
 logger = Logger()
 tracer = Tracer()
 router = Router()
 
 review_service = ReviewService()
+user_service = UserService()
 
 
 @router.get("/cards/due")
@@ -74,10 +76,17 @@ def submit_review(card_id: str):
         )
 
     try:
+        # Get user settings for day boundary normalization
+        user = user_service.get_or_create_user(user_id)
+        user_timezone = user.settings.get("timezone", "Asia/Tokyo")
+        day_start_hour = user.settings.get("day_start_hour", 4)
+
         response = review_service.submit_review(
             user_id=user_id,
             card_id=card_id,
             grade=request.grade,
+            user_timezone=user_timezone,
+            day_start_hour=day_start_hour,
         )
         return response.model_dump(mode="json")
     except CardNotFoundError:

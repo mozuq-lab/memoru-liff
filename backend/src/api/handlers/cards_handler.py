@@ -159,6 +159,12 @@ def update_card(card_id: str):
             # Key present in JSON → pass value (None for null, string for value)
             update_kwargs["deck_id"] = body["deck_id"]
 
+        # Get user settings for day boundary normalization when interval is specified
+        if request.interval is not None:
+            user = user_service.get_or_create_user(user_id)
+            update_kwargs["user_timezone"] = user.settings.get("timezone", "Asia/Tokyo")
+            update_kwargs["day_start_hour"] = user.settings.get("day_start_hour", 4)
+
         card = card_service.update_card(**update_kwargs)
         return card.to_response().model_dump(mode="json")
     except CardNotFoundError:

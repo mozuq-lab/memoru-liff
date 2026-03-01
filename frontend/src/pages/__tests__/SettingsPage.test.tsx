@@ -62,6 +62,7 @@ const mockUser: User = {
   line_linked: false,
   notification_time: '09:00',
   timezone: 'Asia/Tokyo',
+  day_start_hour: 4,
   created_at: '2024-01-01T00:00:00Z',
   updated_at: '2024-01-01T00:00:00Z',
 };
@@ -140,7 +141,7 @@ describe('SettingsPage', () => {
         expect(screen.getByTestId('success-message')).toHaveTextContent('設定を保存しました');
       });
 
-      expect(mockUpdateUser).toHaveBeenCalledWith({ notification_time: '18:00' });
+      expect(mockUpdateUser).toHaveBeenCalledWith({ notification_time: '18:00', day_start_hour: 4 });
     });
   });
 
@@ -272,6 +273,51 @@ describe('SettingsPage', () => {
       await waitFor(() => {
         expect(screen.getByRole('button', { name: /再試行/ })).toBeInTheDocument();
       });
+    });
+  });
+
+  describe('日付切り替え時刻の設定', () => {
+    it('現在のday_start_hourがセレクトボックスに反映される', async () => {
+      renderSettingsPage();
+
+      await waitFor(() => {
+        const select = screen.getByTestId('day-start-hour-select') as HTMLSelectElement;
+        expect(select.value).toBe('4');
+      });
+    });
+
+    it('day_start_hourを変更すると保存ボタンが有効になる', async () => {
+      const user = userEvent.setup();
+      renderSettingsPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('save-button')).toBeDisabled();
+      });
+
+      await user.selectOptions(screen.getByTestId('day-start-hour-select'), '6');
+
+      expect(screen.getByTestId('save-button')).toBeEnabled();
+    });
+
+    it('day_start_hourの変更を保存できる', async () => {
+      const user = userEvent.setup();
+      const updatedUser = { ...mockUser, day_start_hour: 6 };
+      mockUpdateUser.mockResolvedValue(updatedUser);
+
+      renderSettingsPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('settings-title')).toBeInTheDocument();
+      });
+
+      await user.selectOptions(screen.getByTestId('day-start-hour-select'), '6');
+      await user.click(screen.getByTestId('save-button'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('success-message')).toHaveTextContent('設定を保存しました');
+      });
+
+      expect(mockUpdateUser).toHaveBeenCalledWith({ notification_time: '09:00', day_start_hour: 6 });
     });
   });
 

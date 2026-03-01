@@ -250,13 +250,20 @@ class UserService:
         except ClientError as e:
             raise UserServiceError(f"Failed to update last notified date: {e}")
 
-    def update_settings(self, user_id: str, notification_time: Optional[str] = None, timezone: Optional[str] = None) -> User:
+    def update_settings(
+        self,
+        user_id: str,
+        notification_time: Optional[str] = None,
+        timezone: Optional[str] = None,
+        day_start_hour: Optional[int] = None,
+    ) -> User:
         """Update user settings.
 
         Args:
             user_id: The user's unique identifier.
             notification_time: Optional notification time in HH:MM format.
             timezone: Optional IANA timezone string.
+            day_start_hour: Optional hour when user's day starts (0-23).
 
         Returns:
             Updated User object.
@@ -282,6 +289,10 @@ class UserService:
             expression_values[":timezone"] = timezone
             expression_names["#tz"] = "timezone"
 
+        if day_start_hour is not None:
+            update_parts.append("settings.day_start_hour = :day_start_hour")
+            expression_values[":day_start_hour"] = day_start_hour
+
         if not update_parts:
             return user
 
@@ -305,6 +316,8 @@ class UserService:
                 user.settings["notification_time"] = notification_time
             if timezone is not None:
                 user.settings["timezone"] = timezone
+            if day_start_hour is not None:
+                user.settings["day_start_hour"] = day_start_hour
             user.updated_at = now
 
             return user
