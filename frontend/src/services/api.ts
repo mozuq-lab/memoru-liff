@@ -30,7 +30,8 @@ class ApiClient {
 
   private async request<T>(
     endpoint: string,
-    options: RequestInit = {}
+    options: RequestInit = {},
+    _isRetry = false
   ): Promise<T> {
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
@@ -46,16 +47,22 @@ class ApiClient {
       headers,
     });
 
-    // 401 Unauthorized - トークンリフレッシュ処理
+    // 401 Unauthorized - トークンリフレッシュ処理（リトライは1回のみ）
     if (response.status === 401) {
+      if (_isRetry) {
+        // リトライ後も 401 - ログイン画面にリダイレクト
+        authService.login();
+        throw new Error('Session expired');
+      }
+
       if (!this.isRefreshing) {
         this.isRefreshing = true;
         this.refreshPromise = this.refreshToken();
       }
       try {
         await this.refreshPromise;
-        // リフレッシュ成功後に元のリクエストを再実行
-        return this.request<T>(endpoint, options);
+        // リフレッシュ成功後に元のリクエストを再実行（_isRetry=true で再帰を1回に制限）
+        return this.request<T>(endpoint, options, true);
       } catch {
         // リフレッシュ失敗 - ログイン画面にリダイレクト
         authService.login();

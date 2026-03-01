@@ -684,6 +684,35 @@ describe('ApiClient', () => {
       expect(mockLogin).toHaveBeenCalledTimes(1);
     });
 
+    it('TC-037-06: リトライ後も401の場合はlogin()が呼ばれエラーがスローされる', async () => {
+      // 【テストデータ準備】: トークンリフレッシュは成功するが、リトライ後のリクエストも 401 を返す
+      // 【初期条件設定】: 1回目 401 → リフレッシュ成功 → 2回目 401
+      // 【テスト目的】: REQ-014「リトライを1回に制限し、無限再帰を防止」を確認
+      mockFetch
+        .mockResolvedValueOnce(new Response(null, { status: 401 }))
+        .mockResolvedValueOnce(new Response(null, { status: 401 }));
+
+      const mockRefreshToken = vi.fn().mockResolvedValue(undefined);
+      const mockLogin = vi.fn().mockResolvedValue(undefined);
+      const { authService } = await import('@/services/auth');
+      vi.spyOn(authService, 'refreshToken').mockImplementation(mockRefreshToken);
+      vi.spyOn(authService, 'login').mockImplementation(mockLogin);
+
+      const { apiClient } = await import('@/services/api');
+      apiClient.setAccessToken('expired-token');
+
+      // 【実際の処理実行】: リトライ後も 401 が返される
+      await expect(
+        apiClient['request']<void>('/cards/card-123', { method: 'GET' })
+      ).rejects.toThrow('Session expired');
+
+      // 【結果検証】: リフレッシュは1回、login() が呼ばれ、fetch は2回（再帰は1回のみ）
+      // 🔵 青信号: REQ-014 に基づく
+      expect(mockRefreshToken).toHaveBeenCalledTimes(1);
+      expect(mockLogin).toHaveBeenCalledTimes(1);
+      expect(mockFetch).toHaveBeenCalledTimes(2); // 初回 + リトライ1回のみ
+    });
+
     it('TC-037-05: 401以外のエラーではリフレッシュが呼ばれない', async () => {
       // 【テストデータ準備】: 404 Not Found など、401以外のエラーレスポンス
       // 【初期条件設定】: 404 エラーレスポンスを返す
