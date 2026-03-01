@@ -71,7 +71,7 @@ TASK-0084 + TASK-0086 → TASK-0087
 
 - [ ] [TASK-0088: total_due_count 修正](TASK-0088.md) - 3h (TDD) 🔵
 - [ ] [TASK-0089: description/color REMOVE](TASK-0089.md) - 3h (TDD) 🔵
-- [ ] [TASK-0090: TODO コメント追加](TASK-0090.md) - 1h (DIRECT) 🔵
+- [x] [TASK-0090: TODO コメント追加](TASK-0090.md) - 1h (DIRECT) 🔵
 - [ ] [TASK-0091: CardsPage deck_id フィルタ対応](TASK-0091.md) - 5h (TDD) 🔵
 - [ ] [TASK-0092: フロントエンド型修正 + null 送信](TASK-0092.md) - 4h (TDD) 🔵
 

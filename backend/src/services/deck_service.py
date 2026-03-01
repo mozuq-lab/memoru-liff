@@ -356,6 +356,8 @@ class DeckService:
         if not deck_ids:
             return {}
 
+        # TODO: パフォーマンス改善 - 全カードスキャンを GSI カウントまたは
+        # DynamoDB Streams + カウンターテーブルに置き換える（MVP後対応）
         counts: Dict[str, int] = {deck_id: 0 for deck_id in deck_ids}
 
         try:
@@ -400,6 +402,8 @@ class DeckService:
         if not deck_ids:
             return {}
 
+        # TODO: パフォーマンス改善 - 全カードスキャンを GSI カウントまたは
+        # DynamoDB Streams + カウンターテーブルに置き換える（MVP後対応）
         counts: Dict[str, int] = {deck_id: 0 for deck_id in deck_ids}
         now = datetime.now(timezone.utc)
 
