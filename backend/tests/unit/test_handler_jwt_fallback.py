@@ -9,7 +9,7 @@ import pytest
 from aws_lambda_powertools.event_handler.exceptions import UnauthorizedError
 
 import api.handler as _handler_module
-from api.handler import get_user_id_from_context, app
+from api.shared import get_user_id_from_context, get_user_id_from_event
 
 
 # =============================================================================
@@ -62,14 +62,15 @@ class TestGetUserIdFromContext:
     # -------------------------------------------------------------------------
 
     def test_dev_env_valid_jwt_returns_sub(self, monkeypatch, mock_event_ctx):
-        """TC-01: dev環境 + 有効なJWT → sub返却.
+        """TC-01: dev環境 + AWS_SAM_LOCAL=true + 有効なJWT → sub返却.
 
-        【テスト目的】: ENVIRONMENT=dev で JWT フォールバックが正常に動作することを検証する
+        【テスト目的】: ENVIRONMENT=dev AND AWS_SAM_LOCAL=true で JWT フォールバックが正常に動作することを検証する
         【テスト内容】: authorizer context なし + 有効な JWT ヘッダーで get_user_id_from_context() を呼び出す
         【期待される動作】: JWT ペイロードの sub クレームがユーザーIDとして返る
-        🔵 信頼性レベル: 青信号 - REQ-LD-061, REQ-LD-062, handler.py L84-95 より
+        🔵 信頼性レベル: 青信号 - REQ-001, REQ-002, REQ-003 より
         """
         monkeypatch.setenv("ENVIRONMENT", "dev")
+        monkeypatch.setenv("AWS_SAM_LOCAL", "true")
 
         token = make_jwt({"sub": "test-user-123", "iss": "https://keycloak:8180/realms/memoru"})
         mock_event = _make_event(authorizer=None, auth_header=f"Bearer {token}")
@@ -97,14 +98,15 @@ class TestGetUserIdFromContext:
         mock_event.get_header_value.assert_not_called()  # 🔵 JWT フォールバックは使用されない
 
     def test_authorizer_takes_priority_over_jwt(self, monkeypatch, mock_event_ctx):
-        """TC-09: authorizer context あり + JWT ヘッダーあり → authorizer context を優先.
+        """TC-04: authorizer context あり + JWT ヘッダーあり → authorizer context を優先.
 
         【テスト目的】: 両方のソースが存在する場合、authorizer context が優先されることを検証する
         【テスト内容】: authorizer context と JWT ヘッダーに異なる sub を設定し、どちらが返るかを確認する
         【期待される動作】: authorizer context の sub が返り、JWT ヘッダーの sub は無視される
-        🔵 信頼性レベル: 青信号 - REQ-LD-101 より
+        🔵 信頼性レベル: 青信号 - REQ-001 より
         """
         monkeypatch.setenv("ENVIRONMENT", "dev")
+        monkeypatch.setenv("AWS_SAM_LOCAL", "true")
 
         token = make_jwt({"sub": "header-user"})
         authorizer = {"jwt": {"claims": {"sub": "authorizer-user"}}}
@@ -157,48 +159,69 @@ class TestGetUserIdFromContext:
     # 異常系（dev 環境フォールバック失敗）
     # -------------------------------------------------------------------------
 
-    def test_dev_env_no_auth_header(self, monkeypatch, mock_event_ctx):
-        """TC-05: dev環境 + Authorizationヘッダーなし → UnauthorizedError.
+    def test_dev_env_without_sam_local_fallback_disabled(self, monkeypatch, mock_event_ctx):
+        """TC-05: dev環境 + AWS_SAM_LOCAL未設定 → UnauthorizedError（フォールバック無効）.
 
-        【テスト目的】: Authorization ヘッダーがない場合に UnauthorizedError が発生することを検証する
-        【テスト内容】: ENVIRONMENT=dev で Authorization ヘッダーなしの状態を再現する
-        【期待される動作】: JWT フォールバックコードパスに入るが、ヘッダーなしで失敗する
-        🟡 信頼性レベル: 黄信号 - TC-LD-061-E01, handler.py L89-90 より
+        【テスト目的】: ENVIRONMENT=dev でも AWS_SAM_LOCAL=true がなければフォールバック無効を検証する
+        【テスト内容】: ENVIRONMENT=dev のみ設定し、有効な JWT ヘッダーで UnauthorizedError を確認する
+        【期待される動作】: 二重条件の片方が欠けているためフォールバック無効
+        🔵 信頼性レベル: 青信号 - REQ-002 より
         """
         monkeypatch.setenv("ENVIRONMENT", "dev")
+        monkeypatch.delenv("AWS_SAM_LOCAL", raising=False)
+
+        token = make_jwt({"sub": "test-user-123"})
+        mock_event = _make_event(authorizer=None, auth_header=f"Bearer {token}")
+
+        with mock_event_ctx(mock_event):
+            with pytest.raises(UnauthorizedError):
+                get_user_id_from_context(_handler_module.app)
+
+    def test_dev_env_no_auth_header(self, monkeypatch, mock_event_ctx):
+        """TC-06: dev環境 + SAM local + Authorizationヘッダーなし → UnauthorizedError.
+
+        【テスト目的】: Authorization ヘッダーがない場合に UnauthorizedError が発生することを検証する
+        【テスト内容】: ENVIRONMENT=dev, AWS_SAM_LOCAL=true で Authorization ヘッダーなしの状態を再現する
+        【期待される動作】: JWT フォールバックコードパスに入るが、ヘッダーなしで失敗する
+        🔵 信頼性レベル: 青信号 - REQ-001 より
+        """
+        monkeypatch.setenv("ENVIRONMENT", "dev")
+        monkeypatch.setenv("AWS_SAM_LOCAL", "true")
 
         mock_event = _make_event(authorizer=None, auth_header=None)
 
         with mock_event_ctx(mock_event):
-            with pytest.raises(UnauthorizedError):  # 🟡 Authorization ヘッダーなしは失敗
+            with pytest.raises(UnauthorizedError):
                 get_user_id_from_context(_handler_module.app)
 
     def test_dev_env_no_bearer_prefix(self, monkeypatch, mock_event_ctx):
-        """TC-06: dev環境 + "Bearer "プレフィックスなし → UnauthorizedError.
+        """TC-07: dev環境 + SAM local + "Bearer "プレフィックスなし → UnauthorizedError.
 
         【テスト目的】: Bearer プレフィックスがない場合にフォールバックがスキップされることを検証する
         【テスト内容】: Bearer なしの Authorization ヘッダーで UnauthorizedError を確認する
         【期待される動作】: startswith("Bearer ") が False となり、フォールバック処理をスキップする
-        🟡 信頼性レベル: 黄信号 - EDGE-LD-102, TC-LD-061-B02 より
+        🔵 信頼性レベル: 青信号 - REQ-001 より
         """
         monkeypatch.setenv("ENVIRONMENT", "dev")
+        monkeypatch.setenv("AWS_SAM_LOCAL", "true")
 
         raw_token = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.sig"
         mock_event = _make_event(authorizer=None, auth_header=f"Token {raw_token}")
 
         with mock_event_ctx(mock_event):
-            with pytest.raises(UnauthorizedError):  # 🟡 Bearer プレフィックスなしはスキップ
+            with pytest.raises(UnauthorizedError):
                 get_user_id_from_context(_handler_module.app)
 
     def test_dev_env_invalid_base64_jwt(self, monkeypatch, mock_event_ctx):
-        """TC-07: dev環境 + 不正なbase64のJWT → UnauthorizedError.
+        """TC-08: dev環境 + SAM local + 不正なbase64のJWT → UnauthorizedError.
 
         【テスト目的】: 不正な base64 ペイロードの JWT で安全に失敗することを検証する
         【テスト内容】: 不正な base64 文字列を含む JWT でデコードエラーを確認する
         【期待される動作】: base64 デコードエラーが except でキャッチされ UnauthorizedError に変換される
-        🟡 信頼性レベル: 黄信号 - EDGE-LD-003, TC-LD-061-E03 より
+        🔵 信頼性レベル: 青信号 - REQ-001 より
         """
         monkeypatch.setenv("ENVIRONMENT", "dev")
+        monkeypatch.setenv("AWS_SAM_LOCAL", "true")
 
         mock_event = _make_event(
             authorizer=None,
@@ -206,25 +229,80 @@ class TestGetUserIdFromContext:
         )
 
         with mock_event_ctx(mock_event):
-            with pytest.raises(UnauthorizedError):  # 🟡 不正 base64 はデコードエラー → UnauthorizedError
+            with pytest.raises(UnauthorizedError):
                 get_user_id_from_context(_handler_module.app)
 
     def test_dev_env_jwt_missing_sub(self, monkeypatch, mock_event_ctx):
-        """TC-08: dev環境 + subクレームなしのJWT → UnauthorizedError.
+        """TC-09: dev環境 + SAM local + subクレームなしのJWT → UnauthorizedError.
 
         【テスト目的】: JWT ペイロードに sub クレームがない場合に UnauthorizedError が発生することを検証する
-        【テスト内容】: sub を含まない JWT ペイロードでデコード後の KeyError を確認する
-        【期待される動作】: decoded["sub"] で KeyError → except でキャッチ → UnauthorizedError
-        🟡 信頼性レベル: 黄信号 - EDGE-LD-003 からの妥当な推測
+        【テスト内容】: sub を含まない JWT ペイロードでデコード後に None が返ることを確認する
+        【期待される動作】: decoded.get("sub") が None → フォールバック失敗 → UnauthorizedError
+        🔵 信頼性レベル: 青信号 - REQ-001 より
         """
         monkeypatch.setenv("ENVIRONMENT", "dev")
+        monkeypatch.setenv("AWS_SAM_LOCAL", "true")
 
         token = make_jwt({"iss": "https://keycloak:8180/realms/memoru", "aud": "memoru-client"})
         mock_event = _make_event(authorizer=None, auth_header=f"Bearer {token}")
 
         with mock_event_ctx(mock_event):
-            with pytest.raises(UnauthorizedError):  # 🟡 sub クレームなしは KeyError → UnauthorizedError
+            with pytest.raises(UnauthorizedError):
                 get_user_id_from_context(_handler_module.app)
+
+    def test_fallback_emits_warning_log(self, monkeypatch, mock_event_ctx):
+        """TC-10: フォールバック発動時に logger.warning が出力される.
+
+        【テスト目的】: フォールバック成功時に warning ログが出力されることを検証する
+        【テスト内容】: dev + SAM local 環境で有効な JWT フォールバックを発動し warning 出力を確認
+        【期待される動作】: logger.warning("JWT dev fallback activated", ...) が呼ばれる
+        🔵 信頼性レベル: 青信号 - REQ-003 より
+        """
+        monkeypatch.setenv("ENVIRONMENT", "dev")
+        monkeypatch.setenv("AWS_SAM_LOCAL", "true")
+
+        token = make_jwt({"sub": "warn-user-789"})
+        mock_event = _make_event(authorizer=None, auth_header=f"Bearer {token}")
+
+        with patch("api.shared.logger") as mock_logger:
+            with mock_event_ctx(mock_event):
+                result = get_user_id_from_context(_handler_module.app)
+
+        assert result == "warn-user-789"
+        mock_logger.warning.assert_called_once()
+        call_args = mock_logger.warning.call_args
+        assert "JWT dev fallback activated" in call_args[0][0]
+
+
+class TestGetUserIdFromEvent:
+    """get_user_id_from_event() のテスト."""
+
+    def test_authorizer_jwt_claims(self):
+        """authorizer JWT claims から sub を取得."""
+        event = {
+            "requestContext": {
+                "authorizer": {"jwt": {"claims": {"sub": "event-user-123"}}}
+            }
+        }
+        assert get_user_id_from_event(event) == "event-user-123"
+
+    def test_dev_fallback_with_sam_local(self, monkeypatch):
+        """dev + SAM local で JWT フォールバック動作."""
+        monkeypatch.setenv("ENVIRONMENT", "dev")
+        monkeypatch.setenv("AWS_SAM_LOCAL", "true")
+
+        token = make_jwt({"sub": "fallback-user"})
+        event = {"headers": {"authorization": f"Bearer {token}"}}
+        assert get_user_id_from_event(event) == "fallback-user"
+
+    def test_dev_without_sam_local_returns_none(self, monkeypatch):
+        """dev 環境でも AWS_SAM_LOCAL なしならフォールバック無効."""
+        monkeypatch.setenv("ENVIRONMENT", "dev")
+        monkeypatch.delenv("AWS_SAM_LOCAL", raising=False)
+
+        token = make_jwt({"sub": "fallback-user"})
+        event = {"headers": {"authorization": f"Bearer {token}"}}
+        assert get_user_id_from_event(event) is None
 
 
 # =============================================================================

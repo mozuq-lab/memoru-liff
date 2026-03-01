@@ -13,7 +13,7 @@ from aws_lambda_powertools.event_handler import APIGatewayHttpResolver
 from aws_lambda_powertools.logging import correlation_paths
 from aws_lambda_powertools.utilities.typing import LambdaContext
 
-from api.shared import get_user_id_from_context, map_ai_error_to_http
+from api.shared import get_user_id_from_context, get_user_id_from_event, map_ai_error_to_http
 from api.handlers.user_handler import router as user_router
 from api.handlers.cards_handler import router as cards_router
 from api.handlers.decks_handler import router as decks_router
@@ -27,8 +27,6 @@ from pydantic import ValidationError
 from services.card_service import CardService, CardNotFoundError
 from services.review_service import ReviewService
 from services.ai_service import create_ai_service, AIServiceError
-import base64
-import os
 
 logger = Logger()
 tracer = Tracer()
@@ -48,38 +46,6 @@ review_service = ReviewService()
 
 # Keep backward compatibility alias
 _map_ai_error_to_http = map_ai_error_to_http
-
-
-def _get_user_id_from_event(event: dict) -> str | None:
-    """Extract user_id from API Gateway HTTP API v2 Lambda event JWT claims.
-
-    Used by standalone Lambda handlers that receive raw API Gateway events
-    (not routed through APIGatewayHttpResolver).
-    """
-    try:
-        claims = event.get("requestContext", {}).get("authorizer", {})
-        if claims and "jwt" in claims:
-            return claims["jwt"]["claims"]["sub"]
-        if claims and "claims" in claims:
-            return claims["claims"]["sub"]
-        if claims and "sub" in claims:
-            return claims["sub"]
-    except (KeyError, TypeError, AttributeError):
-        pass
-
-    if os.environ.get("ENVIRONMENT") == "dev":
-        try:
-            auth_header = (event.get("headers") or {}).get("authorization", "")
-            if auth_header.startswith("Bearer "):
-                token = auth_header.split(" ", 1)[1]
-                payload = token.split(".")[1]
-                payload += "=" * (4 - len(payload) % 4)
-                decoded = json.loads(base64.urlsafe_b64decode(payload))
-                return decoded.get("sub")
-        except Exception:
-            pass
-
-    return None
 
 
 def _make_lambda_response(status_code: int, body: dict) -> dict:
@@ -102,7 +68,7 @@ def grade_ai_handler(event: dict, context: Any) -> dict:
     独立 Lambda 関数として API Gateway HTTP API v2 イベントを直接受け取る。
     """
     try:
-        user_id = _get_user_id_from_event(event)
+        user_id = get_user_id_from_event(event)
         if not user_id:
             return _make_lambda_response(401, {"error": "Unauthorized"})
 
@@ -180,7 +146,7 @@ def advice_handler(event: dict, context: Any) -> dict:
     独立 Lambda 関数として API Gateway HTTP API v2 イベントを直接受け取る。
     """
     try:
-        user_id = _get_user_id_from_event(event)
+        user_id = get_user_id_from_event(event)
         if not user_id:
             return _make_lambda_response(401, {"error": "Unauthorized"})
 

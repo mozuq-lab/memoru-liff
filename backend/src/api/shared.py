@@ -19,6 +19,44 @@ from services.ai_service import (
 logger = Logger()
 
 
+def _jwt_dev_fallback_decode(auth_header: str | None) -> str | None:
+    """Decode user_id from JWT Authorization header (dev + SAM local only).
+
+    Fallback is only activated when ENVIRONMENT=dev AND AWS_SAM_LOCAL=true.
+    Logs a warning when activated to ensure visibility.
+
+    Args:
+        auth_header: Authorization header value (e.g. "Bearer <token>").
+
+    Returns:
+        User ID (sub claim) if successfully decoded, None otherwise.
+    """
+    environment = os.environ.get("ENVIRONMENT", "")
+    aws_sam_local = os.environ.get("AWS_SAM_LOCAL", "")
+
+    if environment != "dev" or aws_sam_local != "true":
+        return None
+
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return None
+
+    try:
+        token = auth_header.split(" ", 1)[1]
+        payload = token.split(".")[1]
+        payload += "=" * (4 - len(payload) % 4)
+        decoded = json.loads(base64.urlsafe_b64decode(payload))
+        user_id = decoded.get("sub")
+        if user_id:
+            logger.warning(
+                "JWT dev fallback activated",
+                extra={"user_id": user_id, "environment": environment},
+            )
+        return user_id
+    except Exception as e:
+        logger.error(f"Failed to decode JWT from Authorization header: {e}")
+        return None
+
+
 def get_user_id_from_context(resolver) -> str:
     """Extract user_id from JWT claims in request context.
 
@@ -42,19 +80,41 @@ def get_user_id_from_context(resolver) -> str:
     except (KeyError, TypeError, AttributeError) as e:
         logger.warning(f"Failed to extract user_id from authorizer context: {e}")
 
-    if os.environ.get("ENVIRONMENT") == "dev":
-        try:
-            auth_header = resolver.current_event.get_header_value("Authorization")
-            if auth_header and auth_header.startswith("Bearer "):
-                token = auth_header.split(" ", 1)[1]
-                payload = token.split(".")[1]
-                payload += "=" * (4 - len(payload) % 4)
-                decoded = json.loads(base64.urlsafe_b64decode(payload))
-                return decoded["sub"]
-        except Exception as e:
-            logger.error(f"Failed to decode JWT from Authorization header: {e}")
+    # Dev fallback: ENVIRONMENT=dev AND AWS_SAM_LOCAL=true required
+    auth_header = resolver.current_event.get_header_value("Authorization")
+    user_id = _jwt_dev_fallback_decode(auth_header)
+    if user_id:
+        return user_id
 
     raise UnauthorizedError("Unable to extract user ID from token")
+
+
+def get_user_id_from_event(event: dict) -> str | None:
+    """Extract user_id from API Gateway HTTP API v2 Lambda event JWT claims.
+
+    Used by standalone Lambda handlers that receive raw API Gateway events
+    (not routed through APIGatewayHttpResolver).
+
+    Args:
+        event: Raw API Gateway HTTP API v2 Lambda event dict.
+
+    Returns:
+        User ID from JWT claims, or None if extraction fails.
+    """
+    try:
+        claims = event.get("requestContext", {}).get("authorizer", {})
+        if claims and "jwt" in claims:
+            return claims["jwt"]["claims"]["sub"]
+        if claims and "claims" in claims:
+            return claims["claims"]["sub"]
+        if claims and "sub" in claims:
+            return claims["sub"]
+    except (KeyError, TypeError, AttributeError):
+        pass
+
+    # Dev fallback: ENVIRONMENT=dev AND AWS_SAM_LOCAL=true required
+    auth_header = (event.get("headers") or {}).get("authorization", "")
+    return _jwt_dev_fallback_decode(auth_header)
 
 
 def map_ai_error_to_http(error: AIServiceError) -> Response:
