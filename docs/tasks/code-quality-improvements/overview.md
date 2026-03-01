@@ -70,7 +70,7 @@ TASK-0113（独立）
 
 | 状態 | タスク | 工数 | 対応要件 |
 |------|--------|------|---------|
-| [ ] | [TASK-0114: ReviewPage setState 修正](TASK-0114.md) | 3h | REQ-006 🔵 |
+| [x] | [TASK-0114: ReviewPage setState 修正](TASK-0114.md) | 3h | REQ-006 🔵 |
 | [ ] | [TASK-0115: api.ts 401 リトライ制限](TASK-0115.md) | 2h | REQ-014 🔵 |
 
 ### 依存関係
