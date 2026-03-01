@@ -136,7 +136,7 @@ class User(BaseModel):
             line_user_id=item.get("line_user_id"),
             display_name=item.get("display_name"),
             picture_url=item.get("picture_url"),
-            settings=item.get("settings", {"notification_time": "09:00", "timezone": "Asia/Tokyo"}),
+            settings=item.get("settings", {"notification_time": "09:00", "timezone": "Asia/Tokyo", "day_start_hour": 4}),
             last_notified_date=item.get("last_notified_date"),
             created_at=datetime.fromisoformat(item["created_at"]),
             updated_at=datetime.fromisoformat(item["updated_at"]) if item.get("updated_at") else None,
