@@ -5,8 +5,11 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
 import boto3
+from aws_lambda_powertools import Logger
 from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import ClientError
+
+logger = Logger()
 
 from models.card import Card
 from models.review import (
@@ -169,6 +172,14 @@ class ReviewService:
     ) -> UndoReviewResponse:
         """Undo the latest review for a card and restore SRS parameters.
 
+        **Design note – why read-then-write instead of ``list_append``:**
+        Undo removes the *last* entry from ``review_history`` (truncation).
+        DynamoDB's ``REMOVE review_history[-1]`` syntax is not available for
+        list manipulation, and ``list_append`` only supports appending.
+        Therefore, the full list must be read, truncated in-memory, and
+        written back.  ``_update_card_review_data`` *can* use ``list_append``
+        for appends, but undo cannot.
+
         Args:
             user_id: The user's ID.
             card_id: The card's ID.
@@ -270,7 +281,11 @@ class ReviewService:
         previous_repetitions: Optional[int] = None,
         previous_next_review_at: Optional[str] = None,
     ) -> None:
-        """Update card's SRS data and review history.
+        """Update card's SRS data and append a review history entry atomically.
+
+        Uses DynamoDB ``list_append`` with ``if_not_exists`` to append the new
+        history entry in a single UpdateItem call, eliminating the previous
+        read-then-write pattern that was susceptible to race conditions.
 
         Args:
             user_id: The user's ID.
@@ -284,17 +299,7 @@ class ReviewService:
         """
         now = datetime.now(timezone.utc)
 
-        # Get existing review history
-        try:
-            response = self.cards_table.get_item(
-                Key={"user_id": user_id, "card_id": card_id},
-                ProjectionExpression="review_history",
-            )
-            existing_history = response.get("Item", {}).get("review_history", [])
-        except ClientError:
-            existing_history = []
-
-        # Add new history entry
+        # Build new history entry
         history_entry = ReviewHistoryEntry(
             reviewed_at=now,
             grade=grade,
@@ -307,7 +312,8 @@ class ReviewService:
             next_review_at_before=previous_next_review_at,
             next_review_at_after=result.next_review_at.isoformat(),
         )
-        updated_history = add_review_history(existing_history, history_entry)
+        # Convert to DynamoDB-compatible dict (same format as add_review_history)
+        entry_dict = add_review_history([], history_entry)[0]
 
         try:
             self.cards_table.update_item(
@@ -318,7 +324,7 @@ class ReviewService:
                     "ease_factor = :ease_factor, "
                     "repetitions = :repetitions, "
                     "updated_at = :updated_at, "
-                    "review_history = :review_history"
+                    "review_history = list_append(if_not_exists(review_history, :empty_list), :new_entry)"
                 ),
                 ExpressionAttributeNames={"#interval": "interval"},
                 ExpressionAttributeValues={
@@ -327,7 +333,8 @@ class ReviewService:
                     ":ease_factor": str(result.ease_factor),
                     ":repetitions": result.repetitions,
                     ":updated_at": now.isoformat(),
-                    ":review_history": updated_history,
+                    ":empty_list": [],
+                    ":new_entry": [entry_dict],
                 },
             )
         except ClientError as e:
@@ -370,9 +377,11 @@ class ReviewService:
                 }
             )
         except ClientError as e:
-            # Log error but don't fail the review
-            # Reviews table is for analytics, not critical
-            pass
+            # Reviews table is for analytics, not critical – log and continue.
+            logger.warning(
+                "Failed to record review (best-effort)",
+                extra={"user_id": user_id, "card_id": card_id, "error": str(e)},
+            )
 
     def get_due_cards(
         self,
@@ -462,17 +471,25 @@ class ReviewService:
     def _get_next_due_date(self, user_id: str) -> Optional[str]:
         """Get the next due date for a user's cards.
 
+        Only returns future dates (next_review_at > now).  Past due dates are
+        already included in the due cards list, so the "next" due date should
+        always be in the future.
+
         Args:
             user_id: The user's ID.
 
         Returns:
             ISO format date string of next due date, or None.
         """
+        now = datetime.now(timezone.utc)
         try:
             response = self.cards_table.query(
                 IndexName="user_id-due-index",
-                KeyConditionExpression="user_id = :user_id",
-                ExpressionAttributeValues={":user_id": user_id},
+                KeyConditionExpression="user_id = :user_id AND next_review_at > :now",
+                ExpressionAttributeValues={
+                    ":user_id": user_id,
+                    ":now": now.isoformat(),
+                },
                 Limit=1,
                 ScanIndexForward=True,
             )
