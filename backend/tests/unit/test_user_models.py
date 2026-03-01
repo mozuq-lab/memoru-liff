@@ -76,6 +76,23 @@ class TestUserSettingsRequest:
         request = UserSettingsRequest(timezone="UTC")
         assert request.timezone == "UTC"
 
+    def test_invalid_timezone_non_existent(self):
+        """REQ-002: 非実在 TZ 'Foo/Bar' が拒否されること。"""
+        with pytest.raises(ValidationError) as exc_info:
+            UserSettingsRequest(timezone="Foo/Bar")
+        assert "Invalid timezone" in str(exc_info.value)
+
+    def test_invalid_timezone_format_like_but_non_existent(self):
+        """REQ-002: フォーマットは正しいが非実在の TZ が拒否されること。"""
+        with pytest.raises(ValidationError) as exc_info:
+            UserSettingsRequest(timezone="Invalid/Zone")
+        assert "Invalid timezone" in str(exc_info.value)
+
+    def test_valid_timezone_america(self):
+        """REQ-002: 実在する TZ 'America/New_York' が受け入れられること。"""
+        request = UserSettingsRequest(timezone="America/New_York")
+        assert request.timezone == "America/New_York"
+
     def test_none_values_allowed(self):
         """Test that None values are allowed."""
         request = UserSettingsRequest()

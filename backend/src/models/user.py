@@ -40,22 +40,15 @@ class UserSettingsRequest(BaseModel):
     @field_validator("timezone")
     @classmethod
     def validate_timezone(cls, v: Optional[str]) -> Optional[str]:
-        """Validate IANA timezone string."""
+        """Validate IANA timezone string using ZoneInfo."""
         if v is None:
             return v
-        # Common valid timezones
-        valid_timezones = {
-            "Asia/Tokyo",
-            "America/New_York",
-            "America/Los_Angeles",
-            "Europe/London",
-            "Europe/Paris",
-            "UTC",
-        }
-        # For production, use pytz or zoneinfo to validate
-        # Here we do a basic check
-        if not re.match(r"^[A-Za-z_]+/[A-Za-z_]+$", v) and v != "UTC":
-            raise ValueError("Invalid timezone format.")
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        try:
+            ZoneInfo(v)
+        except (ZoneInfoNotFoundError, KeyError):
+            raise ValueError(f"Invalid timezone: {v}")
         return v
 
     @field_validator("day_start_hour")
