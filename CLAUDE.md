@@ -17,6 +17,9 @@ LINE ベースの暗記カードアプリケーション。SRS (Spaced Repetitio
 - React 19 + TypeScript 5.x / Vite 7 / Tailwind CSS 4
 - LIFF SDK / oidc-client-ts / React Router v7
 
+### インフラ
+- AWS CDK v2 (TypeScript) — Cognito / Keycloak / LIFF Hosting
+
 ### 認証
 - OIDC + PKCE（Keycloak / Cognito 切り替え対応）
 
@@ -39,6 +42,13 @@ frontend/src/
 ├── services/      # API サービス
 ├── types/         # TypeScript 型定義
 └── utils/         # ユーティリティ
+
+infrastructure/cdk/
+├── bin/app.ts             # CDK App エントリポイント
+└── lib/
+    ├── cognito-stack.ts      # Cognito UserPool (OIDC + PKCE)
+    ├── keycloak-stack.ts     # Keycloak (VPC + ECS/Fargate + RDS + ALB)
+    └── liff-hosting-stack.ts # LIFF Hosting (S3 + CloudFront + OAC)
 
 docs/
 ├── spec/{要件名}/    # 要件定義
@@ -63,6 +73,13 @@ npm run dev             # Vite 開発サーバー (ポート 3000)
 npm run test            # Vitest
 npm run type-check      # tsc --noEmit
 npm run build           # TypeScript チェック + Vite ビルド
+
+# インフラ (CDK)
+cd infrastructure/cdk
+npx cdk ls              # スタック一覧
+npx cdk synth           # CloudFormation テンプレート生成
+npx cdk deploy <Stack>  # デプロイ（ユーザーが手動実行）
+npm run build           # TypeScript コンパイル
 ```
 
 ## 開発ルール
