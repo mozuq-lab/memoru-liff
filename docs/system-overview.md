@@ -479,10 +479,9 @@ memoru-liff/
     │   ├── cdk.json                  # CDK 設定
     │   ├── package.json
     │   └── tsconfig.json
-    ├── keycloak/
-    │   ├── realm-local.json           # ローカル用 Keycloak 設定
-    │   └── test-users.json            # テストユーザー定義
-    └── liff-hosting/                  # (旧) CloudFormation テンプレート
+    └── keycloak/
+        ├── realm-local.json           # ローカル用 Keycloak 設定
+        └── test-users.json            # テストユーザー定義
 ```
 
 ---

@@ -12,39 +12,56 @@
 ### 作業フロー
 
 ```
-[1. AWS基盤構築] → [2. Keycloak設定] → [3. LINE設定] → [4. GitHub設定] → [5. 動作確認]
-                                                                              ↓
-                                                              [Claude Codeに依頼: 最終調整]
+[1. AWS基盤構築(CDK)] → [2. Keycloak設定] → [3. LINE設定] → [4. GitHub設定] → [5. 動作確認]
+                                                                                ↓
+                                                                [Claude Codeに依頼: 最終調整]
 ```
 
 ---
 
 ## 1. AWS基盤構築
 
-### 1.1 Keycloak ECS/Fargate デプロイ
+### 1.1 CDK Bootstrap（初回のみ）
 
-**場所**: `infrastructure/keycloak/`
+**場所**: `infrastructure/cdk/`
 
 ```bash
-cd infrastructure/keycloak
-make deploy-dev  # 開発環境
-# または
-make deploy-prod  # 本番環境
+cd infrastructure/cdk
+npm install
+npx cdk bootstrap
+```
+
+### 1.2 Cognito UserPool デプロイ
+
+```bash
+cd infrastructure/cdk
+npx cdk deploy MemoruCognitoDev
 ```
 
 **確認事項**:
+- [ ] UserPool が作成されている
+- [ ] UserPoolClient が作成されている
+- [ ] UserPoolDomain が作成されている
+
+### 1.3 Keycloak ECS/Fargate デプロイ
+
+```bash
+cd infrastructure/cdk
+npx cdk deploy MemoruKeycloakDev
+```
+
+**確認事項**:
+- [ ] VPC・サブネットが作成されている
 - [ ] ECSクラスターが作成されている
 - [ ] Fargateタスクが起動している
 - [ ] ALBエンドポイントにアクセスできる
 - [ ] Keycloak管理画面が表示される
 
-### 1.2 CloudFront + S3 デプロイ
-
-**場所**: `infrastructure/liff-hosting/`
+### 1.4 CloudFront + S3 (LIFF Hosting) デプロイ
 
 ```bash
-cd infrastructure/liff-hosting
-make deploy-dev  # 開発環境
+cd infrastructure/cdk
+npx cdk deploy MemoruLiffHostingDev
 ```
 
 **確認事項**:
@@ -52,7 +69,7 @@ make deploy-dev  # 開発環境
 - [ ] CloudFrontディストリビューションが作成されている
 - [ ] CloudFront URLにアクセスできる
 
-### 1.3 バックエンド SAM デプロイ
+### 1.5 バックエンド SAM デプロイ
 
 **場所**: `backend/`
 
@@ -240,11 +257,10 @@ Environments → `dev` を作成 → Variables
 |------|-------|
 | `API_URL` | API Gateway URL |
 | `LIFF_ID` | LIFF ID |
-| `KEYCLOAK_URL` | Keycloak URL |
-| `KEYCLOAK_REALM` | `memoru` |
-| `KEYCLOAK_CLIENT_ID` | `memoru-liff` |
-| `FRONTEND_BUCKET` | S3バケット名 |
-| `CLOUDFRONT_DISTRIBUTION_ID` | CloudFront ID |
+| `OIDC_AUTHORITY` | OIDC プロバイダ Authority URL |
+| `OIDC_CLIENT_ID` | OIDC クライアント ID |
+| `FRONTEND_BUCKET` | S3バケット名（CDK スタック出力を参照） |
+| `CLOUDFRONT_DISTRIBUTION_ID` | CloudFront ID（CDK スタック出力を参照） |
 
 **確認事項**:
 - [ ] IAMロールが作成されている
@@ -262,9 +278,8 @@ Environments → `dev` を作成 → Variables
 ```env
 VITE_API_URL=https://your-api-gateway-url
 VITE_LIFF_ID=0000000000-xxxxxxxx
-VITE_KEYCLOAK_URL=https://your-keycloak-domain
-VITE_KEYCLOAK_REALM=memoru
-VITE_KEYCLOAK_CLIENT_ID=memoru-liff
+VITE_OIDC_AUTHORITY=https://your-oidc-provider/realms/memoru
+VITE_OIDC_CLIENT_ID=memoru-liff
 ```
 
 ---
@@ -314,7 +329,8 @@ npm run dev
 以下の設定値でフロントエンドの環境変数を更新してください：
 - API_URL: https://xxxxx.execute-api.ap-northeast-1.amazonaws.com/dev
 - LIFF_ID: 0000000000-xxxxxxxx
-- KEYCLOAK_URL: https://your-keycloak-domain
+- OIDC_AUTHORITY: https://your-oidc-provider/realms/memoru
+- OIDC_CLIENT_ID: memoru-liff
 ```
 
 ### 8.2 エラーが発生した場合
@@ -341,8 +357,10 @@ npm run dev
 ## チェックリストサマリー
 
 ### AWS
+- [ ] CDK Bootstrap 完了
+- [ ] Cognito UserPool デプロイ完了
 - [ ] Keycloak ECS/Fargate デプロイ完了
-- [ ] CloudFront + S3 デプロイ完了
+- [ ] CloudFront + S3 (LIFF Hosting) デプロイ完了
 - [ ] SAM バックエンドデプロイ完了
 - [ ] Secrets Manager シークレット作成完了
 
