@@ -9,6 +9,7 @@ Globals:
     Runtime: python3.12
     Architectures:
       - arm64
+    Tracing: Active
     Environment:
       Variables:
         ENVIRONMENT: !Ref Environment
@@ -43,12 +44,6 @@ Parameters:
     Default: liff-client
     Description: OIDC Audience (JWT audience claim)
 
-  LINEChannelAccessToken:
-    Type: String
-    Default: ''
-    NoEcho: true
-    Description: LINE Channel Access Token (stored in Secrets Manager)
-
   BedrockModelId:
     Type: String
     Default: anthropic.claude-3-haiku-20240307-v1:0
@@ -69,7 +64,7 @@ Parameters:
 
 Conditions:
   IsProd: !Equals [!Ref Environment, prod]
-  ShouldUseStrands: !Equals [!Ref UseStrands, "true"]
+  IsNotProd: !Not [!Equals [!Ref Environment, prod]]
 
 Resources:
   #============================================================
@@ -235,11 +230,14 @@ Resources:
     Properties:
       StageName: !Ref Environment
       CorsConfiguration:
-        AllowOrigins:
-          - https://liff.line.me
-          - https://liff.example.com
-          - http://localhost:5173
-          - http://localhost:3000
+        AllowOrigins: !If
+          - IsNotProd
+          - - https://liff.line.me
+            - https://liff.example.com
+            - http://localhost:5173
+            - http://localhost:3000
+          - - https://liff.line.me
+            - https://liff.example.com
         AllowHeaders:
           - Content-Type
           - Authorization
@@ -282,6 +280,7 @@ Resources:
       CodeUri: src/
       Handler: api.handler.handler
       Description: Main API handler for Memoru LIFF application
+      ReservedConcurrentExecutions: 100
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref UsersTable
@@ -428,6 +427,7 @@ Resources:
       CodeUri: src/
       Handler: webhook.line_handler.handler
       Description: LINE Messaging API webhook handler
+      ReservedConcurrentExecutions: 50
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref UsersTable
@@ -440,7 +440,7 @@ Resources:
             - Effect: Allow
               Action:
                 - secretsmanager:GetSecretValue
-              Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:memoru-${Environment}-line-*
+              Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:memoru-${Environment}-line-credentials-*
       Environment:
         Variables:
           LINE_CHANNEL_SECRET_ARN: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:memoru-${Environment}-line-credentials
@@ -466,6 +466,7 @@ Resources:
       Handler: jobs.due_push_handler.handler
       Description: Scheduled job to send review reminders via LINE
       Timeout: 300
+      ReservedConcurrentExecutions: 5
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref UsersTable
@@ -482,7 +483,7 @@ Resources:
             - Effect: Allow
               Action:
                 - secretsmanager:GetSecretValue
-              Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:memoru-${Environment}-line-*
+              Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:memoru-${Environment}-line-credentials-*
       Environment:
         Variables:
           LINE_CHANNEL_SECRET_ARN: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:memoru-${Environment}-line-credentials
@@ -507,6 +508,7 @@ Resources:
       Description: AI grading handler for POST /reviews/{cardId}/grade-ai
       Timeout: 60
       MemorySize: 512
+      ReservedConcurrentExecutions: 20
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref UsersTable
@@ -514,6 +516,12 @@ Resources:
             TableName: !Ref CardsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref ReviewsTable
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource: !Sub arn:aws:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}
       Environment:
         Variables:
           OIDC_ISSUER: !Ref OidcIssuer
@@ -539,6 +547,7 @@ Resources:
       Description: AI learning advice handler for GET /advice
       Timeout: 60
       MemorySize: 512
+      ReservedConcurrentExecutions: 20
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref UsersTable
@@ -546,6 +555,12 @@ Resources:
             TableName: !Ref CardsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref ReviewsTable
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource: !Sub arn:aws:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}
       Environment:
         Variables:
           OIDC_ISSUER: !Ref OidcIssuer

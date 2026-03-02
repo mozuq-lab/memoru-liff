@@ -31,6 +31,13 @@ Parameters:
     Default: ''
     Description: Backend API Gateway endpoint URL
 
+Rules:
+  DomainRequiresCertificate:
+    RuleCondition: !Not [!Equals [!Ref DomainName, '']]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref CertificateArn, '']]
+        AssertDescription: CertificateArn (in us-east-1) is required when DomainName is specified
+
 Conditions:
   HasCustomDomain: !Not [!Equals [!Ref DomainName, '']]
   HasCertificate: !Not [!Equals [!Ref CertificateArn, '']]
@@ -154,7 +161,7 @@ Resources:
           ContentTypeOptions:
             Override: true
           FrameOptions:
-            FrameOption: DENY
+            FrameOption: SAMEORIGIN
             Override: true
           XSSProtection:
             ModeBlock: true

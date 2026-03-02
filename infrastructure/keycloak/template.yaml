@@ -57,6 +57,13 @@ Parameters:
     MaxValue: 100
     Description: RDS storage size in GB
 
+Rules:
+  ProdRequiresCertificate:
+    RuleCondition: !Equals [!Ref Environment, prod]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref CertificateArn, '']]
+        AssertDescription: CertificateArn is required for prod environment
+
 Conditions:
   HasCertificate: !Not [!Equals [!Ref CertificateArn, '']]
   HasHostedZone: !Not [!Equals [!Ref HostedZoneId, '']]
@@ -315,7 +322,7 @@ Resources:
     Properties:
       DBParameterGroupName: !Sub memoru-${Environment}-keycloak-db-params
       Description: Parameter group for Keycloak PostgreSQL
-      Family: postgres15
+      Family: postgres16
       Parameters:
         client_encoding: UTF8
 
@@ -327,7 +334,7 @@ Resources:
       DBInstanceIdentifier: !Sub memoru-${Environment}-keycloak-db
       DBInstanceClass: !Ref DBInstanceClass
       Engine: postgres
-      EngineVersion: '15'
+      EngineVersion: '16'
       AllocatedStorage: !Ref DBAllocatedStorage
       StorageType: gp3
       StorageEncrypted: true
@@ -338,6 +345,7 @@ Resources:
       DBParameterGroupName: !Ref DBParameterGroup
       VPCSecurityGroups:
         - !Ref RDSSecurityGroup
+      PubliclyAccessible: false
       BackupRetentionPeriod: 7
       MultiAZ: !If [IsProd, true, false]
       DeletionProtection: !If [IsProd, true, false]
@@ -429,13 +437,16 @@ Resources:
             - Name: KC_DB_URL
               Value: !Sub jdbc:postgresql://${RDSInstance.Endpoint.Address}:5432/keycloak
             - Name: KC_HOSTNAME
-              Value: !Ref DomainName
+              Value: !If
+                - HasHostedZone
+                - !Ref DomainName
+                - !GetAtt ALB.DNSName
             - Name: KC_HOSTNAME_STRICT
-              Value: 'false'
+              Value: !If [IsProd, 'true', 'false']
             - Name: KC_HOSTNAME_STRICT_HTTPS
               Value: !If [IsProd, 'true', 'false']
-            - Name: KC_PROXY
-              Value: edge
+            - Name: KC_PROXY_HEADERS
+              Value: xforwarded
             - Name: KC_HTTP_ENABLED
               Value: !If [IsProd, 'false', 'true']
             - Name: KC_HEALTH_ENABLED

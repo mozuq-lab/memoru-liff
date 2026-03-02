@@ -40,8 +40,14 @@ Resources:
       # Sign-in configuration
       UsernameAttributes:
         - email
+      UsernameConfiguration:
+        CaseSensitive: false
       AutoVerifiedAttributes:
         - email
+      # MFA configuration (OPTIONAL: users can enable TOTP)
+      MfaConfiguration: OPTIONAL
+      EnabledMfas:
+        - SOFTWARE_TOKEN_MFA
       # Password policy
       Policies:
         PasswordPolicy:
@@ -50,6 +56,13 @@ Resources:
           RequireUppercase: true
           RequireNumbers: true
           RequireSymbols: true
+          TemporaryPasswordValidityDays: 7
+      # Email configuration
+      # NOTE: Default Cognito email has 50/day limit.
+      # For production, configure SES integration:
+      # EmailConfiguration:
+      #   EmailSendingAccount: DEVELOPER
+      #   SourceArn: !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/noreply@example.com
       # Schema attributes
       Schema:
         - Name: email
