@@ -29,12 +29,15 @@
 - `types/`: TypeScript 型定義（`card.ts`, `user.ts`）
 - `config/`: 設定（OIDC 設定など）
 
-### Infrastructure: IaC
-**Location**: `infrastructure/`
-**Purpose**: アプリケーション外のインフラ定義
+### Infrastructure: IaC (AWS CDK)
+**Location**: `infrastructure/cdk/`
+**Purpose**: AWS CDK (TypeScript) によるインフラ定義
 **Patterns**:
-- `keycloak/`: Keycloak ECS/Fargate 構成（CDK or CloudFormation）
-- `liff-hosting/`: CloudFront + S3 によるフロントエンドホスティング
+- `bin/app.ts`: CDK App エントリポイント。全スタック（dev/prod）を定義
+- `lib/cognito-stack.ts`: Cognito UserPool スタック（OIDC + PKCE）
+- `lib/keycloak-stack.ts`: Keycloak ECS/Fargate スタック（VPC + RDS + ALB）
+- `lib/liff-hosting-stack.ts`: LIFF Hosting スタック（S3 + CloudFront + OAC）
+- `infrastructure/keycloak/`: ローカル開発用 Keycloak 設定（realm-local.json, test-users.json）
 
 ### Backend IaC
 **Location**: `backend/template.yaml`
