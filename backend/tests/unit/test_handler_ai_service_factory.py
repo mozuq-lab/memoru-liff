@@ -364,7 +364,7 @@ class TestGenerateCardsCompatibility:
                     MagicMock(front="What is ATP?", back="Adenosine triphosphate", suggested_tags=["biology", "chemistry"]),
                 ],
                 input_length=64,
-                model_used="anthropic.claude-3-haiku-20240307-v1:0",
+                model_used="global.anthropic.claude-haiku-4-5-20251001-v1:0",
                 processing_time_ms=1200,
             )
             mock_factory.return_value = mock_service
@@ -391,7 +391,7 @@ class TestGenerateCardsCompatibility:
         assert "generation_info" in body  # 🔵
         info = body["generation_info"]
         assert info["input_length"] == 64  # 🔵
-        assert info["model_used"] == "anthropic.claude-3-haiku-20240307-v1:0"  # 🔵
+        assert info["model_used"] == "global.anthropic.claude-haiku-4-5-20251001-v1:0"  # 🔵
         assert info["processing_time_ms"] == 1200  # 🔵
 
     def test_generate_cards_handles_ai_timeout_error(self, api_gateway_event, lambda_context):
