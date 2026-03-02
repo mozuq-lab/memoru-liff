@@ -18,7 +18,7 @@ LINE ベースの暗記カードアプリケーション。SRS (Spaced Repetitio
 - LIFF SDK / oidc-client-ts / React Router v7
 
 ### 認証
-- Keycloak (ECS/Fargate) / OIDC + PKCE
+- OIDC + PKCE（Keycloak / Cognito 切り替え対応）
 
 ## ディレクトリ構成
 
