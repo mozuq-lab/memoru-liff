@@ -29,9 +29,8 @@ npm run lint
 |--------|------|---------------|
 | `VITE_API_BASE_URL` | バックエンド API URL | `http://localhost:8080` |
 | `VITE_LIFF_ID` | LINE LIFF ID（ローカルでは空） | （空） |
-| `VITE_KEYCLOAK_URL` | Keycloak URL | `http://localhost:8180` |
-| `VITE_KEYCLOAK_REALM` | Keycloak Realm 名 | `memoru` |
-| `VITE_KEYCLOAK_CLIENT_ID` | Keycloak クライアント ID | `liff-client` |
+| `VITE_OIDC_AUTHORITY` | OIDC プロバイダ Authority URL | `http://localhost:8180/realms/memoru` |
+| `VITE_OIDC_CLIENT_ID` | OIDC クライアント ID | `liff-client` |
 
 ## テスト
 

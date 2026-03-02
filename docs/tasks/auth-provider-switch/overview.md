@@ -24,7 +24,7 @@
 
 ## 全体進捗
 
-- [ ] Phase 1: OIDC汎用化
+- [x] Phase 1: OIDC汎用化
 
 ---
 
@@ -40,7 +40,7 @@
 |------|--------|------|--------|--------|
 | [x] | [TASK-0123: backend/template.yaml OIDC パラメータ汎用化](TASK-0123.md) | 2h | DIRECT | 🔵 |
 | [x] | [TASK-0124: frontend OIDC 設定汎用化](TASK-0124.md) | 3h | TDD | 🔵 |
-| [ ] | [TASK-0125: 環境変数ファイル・設定例の更新](TASK-0125.md) | 1h | DIRECT | 🟡 |
+| [x] | [TASK-0125: 環境変数ファイル・設定例の更新](TASK-0125.md) | 1h | DIRECT | 🟡 |
 
 ### 依存関係
 
