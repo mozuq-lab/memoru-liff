@@ -579,19 +579,21 @@ class TestTemplateYamlConfig:
         assert "true" in param["AllowedValues"]  # 【検証項目】: "true" が許可値に含まれる 🔵
         assert "false" in param["AllowedValues"]  # 【検証項目】: "false" が許可値に含まれる 🔵
 
-    def test_template_yaml_should_use_strands_condition(self):
-        """TC-056-017: ShouldUseStrands コンディション定義の確認.
+    def test_template_yaml_conditions_section_exists(self):
+        """TC-056-017: Conditions セクション定義の確認.
 
-        【テスト目的】: ShouldUseStrands コンディションが定義されていることを確認
-        【テスト内容】: Conditions セクションに ShouldUseStrands が存在すること
-        🔵 信頼性レベル: 青信号 - 要件定義書 2.2 節「ShouldUseStrands コンディション追加」から確定
+        【テスト目的】: Conditions セクションが定義されていることを確認
+        【テスト内容】: Conditions セクションに必要なコンディションが存在すること
+        🔵 信頼性レベル: 青信号 - テンプレートの基本構造確認
+        NOTE: ShouldUseStrands はリソースから参照されていないため削除済み
         """
         # Given
         template = self._load_template()
 
         # Then
         assert "Conditions" in template  # 【検証項目】: Conditions セクションが存在する 🔵
-        assert "ShouldUseStrands" in template["Conditions"]  # 【検証項目】: コンディションが存在する 🔵
+        assert "IsProd" in template["Conditions"]  # 【検証項目】: IsProd コンディションが存在する 🔵
+        assert "IsNotProd" in template["Conditions"]  # 【検証項目】: IsNotProd コンディションが存在する 🔵
 
     def test_template_yaml_global_timeout_is_120(self):
         """TC-056-018: Global タイムアウトが 120 秒に設定されていること.
