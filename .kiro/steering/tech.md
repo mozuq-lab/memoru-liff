@@ -2,7 +2,7 @@
 
 ## Architecture
 
-サーバーレスアーキテクチャ。バックエンドは AWS SAM (Lambda + API Gateway + DynamoDB) で構成し、フロントエンドは React SPA を S3 + CloudFront でホスティング。認証は Keycloak (ECS/Fargate) による OIDC + PKCE フロー。
+サーバーレスアーキテクチャ。バックエンドは AWS SAM (Lambda + API Gateway + DynamoDB) で構成し、フロントエンドは React SPA を S3 + CloudFront でホスティング。認証は OIDC + PKCE フロー（Keycloak / Cognito 切り替え対応）。
 
 ## Core Technologies
 
@@ -22,7 +22,7 @@
 - **Routing**: React Router v7
 
 ### Authentication
-- **Provider**: Keycloak (OIDC + PKCE)
+- **Provider**: OIDC + PKCE（Keycloak / Cognito 環境変数で切り替え）
 - **Client**: oidc-client-ts
 - **LINE 連携**: LIFF SDK
 
