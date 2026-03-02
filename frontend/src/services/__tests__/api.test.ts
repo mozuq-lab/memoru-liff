@@ -767,6 +767,7 @@ describe('ApiClient', () => {
         line_linked: false,
         notification_time: '09:00',
         timezone: 'Asia/Tokyo',
+        day_start_hour: 4,
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-02T00:00:00Z',
       };
@@ -841,6 +842,7 @@ describe('ApiClient', () => {
         line_linked: true,
         notification_time: '09:00',
         timezone: 'Asia/Tokyo',
+        day_start_hour: 4,
         created_at: '2024-01-01T00:00:00Z',
         updated_at: '2024-01-02T00:00:00Z',
       };
