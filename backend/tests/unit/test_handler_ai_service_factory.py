@@ -758,7 +758,7 @@ class TestEnvJsonConfig:
 
         【テスト目的】: 新規関数が env.json に正しく定義されていることを確認
         【テスト内容】: 両関数に必要な全環境変数が設定されていることを検証
-        【期待される動作】: ENVIRONMENT, テーブル名, KEYCLOAK_ISSUER 等の全変数が設定されている
+        【期待される動作】: ENVIRONMENT, テーブル名, OIDC_ISSUER 等の全変数が設定されている
         🔵 信頼性レベル: 青信号 - 要件定義書 2.3 節「新規関数の環境変数定義」から確定
         """
         # Given
@@ -768,7 +768,7 @@ class TestEnvJsonConfig:
         # 【テストデータ準備】: 必須環境変数の一覧
         required_vars = [
             "ENVIRONMENT", "USERS_TABLE", "CARDS_TABLE", "REVIEWS_TABLE",
-            "KEYCLOAK_ISSUER", "BEDROCK_MODEL_ID", "LOG_LEVEL",
+            "OIDC_ISSUER", "BEDROCK_MODEL_ID", "LOG_LEVEL",
             "DYNAMODB_ENDPOINT_URL", "AWS_ENDPOINT_URL",
             "USE_STRANDS", "OLLAMA_HOST", "OLLAMA_MODEL",
         ]
