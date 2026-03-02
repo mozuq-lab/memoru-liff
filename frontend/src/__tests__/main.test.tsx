@@ -46,7 +46,7 @@ describe('main.tsx', () => {
     it('環境変数が不備の場合にエラーがスローされること', async () => {
       // 【テスト準備】: エラーをスローする validateOidcConfig をモック化
       const mockValidateOidcConfig = vi.fn(() => {
-        throw new Error('環境変数 VITE_KEYCLOAK_URL が設定されていません');
+        throw new Error('環境変数 VITE_OIDC_AUTHORITY が設定されていません');
       });
 
       // 【モック設定】: oidc.ts の validateOidcConfig をモック
@@ -68,7 +68,7 @@ describe('main.tsx', () => {
       // 【実際の処理実行】: main.tsx インポート時にエラーがスローされることを確認
       await expect(async () => {
         await import('../main');
-      }).rejects.toThrow('環境変数 VITE_KEYCLOAK_URL が設定されていません');
+      }).rejects.toThrow('環境変数 VITE_OIDC_AUTHORITY が設定されていません');
     });
   });
 });

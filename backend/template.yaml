@@ -33,10 +33,15 @@ Parameters:
       - prod
     Description: Environment name
 
-  KeycloakIssuer:
+  OidcIssuer:
     Type: String
     Default: https://keycloak.example.com/realms/memoru
-    Description: Keycloak OIDC Issuer URL
+    Description: OIDC Issuer URL (Keycloak or Cognito)
+
+  OidcAudience:
+    Type: String
+    Default: liff-client
+    Description: OIDC Audience (JWT audience claim)
 
   LINEChannelAccessToken:
     Type: String
@@ -258,9 +263,9 @@ Resources:
               - profile
             IdentitySource: $request.header.Authorization
             JwtConfiguration:
-              issuer: !Ref KeycloakIssuer
+              issuer: !Ref OidcIssuer
               audience:
-                - liff-client
+                - !Ref OidcAudience
       Tags:
         Environment: !Ref Environment
         Application: memoru
@@ -294,7 +299,7 @@ Resources:
               Resource: !Sub arn:aws:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}
       Environment:
         Variables:
-          KEYCLOAK_ISSUER: !Ref KeycloakIssuer
+          OIDC_ISSUER: !Ref OidcIssuer
           BEDROCK_MODEL_ID: !Ref BedrockModelId
           LINE_CHANNEL_ID: !Ref LineChannelId
       Events:
@@ -511,7 +516,7 @@ Resources:
             TableName: !Ref ReviewsTable
       Environment:
         Variables:
-          KEYCLOAK_ISSUER: !Ref KeycloakIssuer
+          OIDC_ISSUER: !Ref OidcIssuer
           BEDROCK_MODEL_ID: !Ref BedrockModelId
       Events:
         ReviewsGradeAi:
@@ -543,7 +548,7 @@ Resources:
             TableName: !Ref ReviewsTable
       Environment:
         Variables:
-          KEYCLOAK_ISSUER: !Ref KeycloakIssuer
+          OIDC_ISSUER: !Ref OidcIssuer
           BEDROCK_MODEL_ID: !Ref BedrockModelId
       Events:
         Advice:

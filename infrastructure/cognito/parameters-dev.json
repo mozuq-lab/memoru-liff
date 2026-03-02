@@ -1,0 +1,18 @@
+[
+  {
+    "ParameterKey": "Environment",
+    "ParameterValue": "dev"
+  },
+  {
+    "ParameterKey": "CognitoDomainPrefix",
+    "ParameterValue": "memoru-dev"
+  },
+  {
+    "ParameterKey": "CallbackUrls",
+    "ParameterValue": "http://localhost:3000/auth/callback"
+  },
+  {
+    "ParameterKey": "LogoutUrls",
+    "ParameterValue": "http://localhost:3000"
+  }
+]

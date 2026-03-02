@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // 【テスト目的】: OIDC設定が環境変数から正しく生成されることを確認
 // 【テスト内容】: oidcConfigオブジェクトの各プロパティが期待通りに設定されること
-// 【期待される動作】: Keycloak OIDC接続に必要な設定が正しく構成される
+// 【期待される動作】: OIDC接続に必要な設定が正しく構成される
 // 🔵 青信号: 要件定義2.1入力パラメータに基づく
 
 describe('oidcConfig', () => {
@@ -15,10 +15,9 @@ describe('oidcConfig', () => {
   describe('TC-001: OIDC設定正常生成', () => {
     it('環境変数から正しいOIDC設定が生成される', async () => {
       // 【テストデータ準備】: 環境変数をモック設定
-      // 【初期条件設定】: Keycloak接続に必要な環境変数が設定されている状態
-      vi.stubEnv('VITE_KEYCLOAK_URL', 'https://keycloak.example.com');
-      vi.stubEnv('VITE_KEYCLOAK_REALM', 'memoru');
-      vi.stubEnv('VITE_KEYCLOAK_CLIENT_ID', 'liff-client');
+      // 【初期条件設定】: OIDC接続に必要な環境変数が設定されている状態
+      vi.stubEnv('VITE_OIDC_AUTHORITY', 'https://keycloak.example.com/realms/memoru');
+      vi.stubEnv('VITE_OIDC_CLIENT_ID', 'liff-client');
 
       // 【実際の処理実行】: oidcConfigをインポートして設定を取得
       // 【処理内容】: 環境変数からOIDC設定オブジェクトを構築
@@ -27,8 +26,8 @@ describe('oidcConfig', () => {
       // 【結果検証】: 各設定値が期待通りであることを確認
       // 【期待値確認】: PKCE認証に必要なすべてのパラメータが含まれている
 
-      // 【検証項目】: authority URLが正しく構成されている
-      // 🔵 青信号: Keycloak OIDC標準のURL形式
+      // 【検証項目】: authority URLが環境変数の値そのまま使用されている
+      // 🔵 青信号: OIDC標準のURL形式
       expect(oidcConfig.authority).toBe('https://keycloak.example.com/realms/memoru');
 
       // 【検証項目】: client_idが環境変数から正しく設定されている
@@ -55,9 +54,9 @@ describe('oidcConfig', () => {
 
   describe('TC-023: 環境変数未設定エラー', () => {
     it('必須環境変数が未設定の場合はエラーをスローする', async () => {
-      // 【テストデータ準備】: 環境変数をundefinedに設定
+      // 【テストデータ準備】: 環境変数を空に設定
       // 【初期条件設定】: 必須環境変数が存在しない状態
-      vi.stubEnv('VITE_KEYCLOAK_URL', '');
+      vi.stubEnv('VITE_OIDC_AUTHORITY', '');
 
       // 【実際の処理実行】: oidcConfigのインポートでエラーが発生することを確認
       // 【処理内容】: バリデーション関数が未設定を検出
@@ -73,7 +72,7 @@ describe('oidcConfig', () => {
     it('環境変数が空文字列の場合はエラーをスローする', async () => {
       // 【テストデータ準備】: 環境変数を空文字列に設定
       // 【初期条件設定】: 設定はあるが値が空の状態
-      vi.stubEnv('VITE_KEYCLOAK_CLIENT_ID', '');
+      vi.stubEnv('VITE_OIDC_CLIENT_ID', '');
 
       // 【実際の処理実行】: バリデーション関数でエラーが発生することを確認
       // 【処理内容】: 空文字列を不正値として検出
