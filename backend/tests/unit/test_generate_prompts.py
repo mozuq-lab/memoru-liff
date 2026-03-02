@@ -80,8 +80,7 @@ class TestEnglishPromptGeneration:
         assert "expert at creating flashcards" in prompt  # 【確認内容】: 英語テンプレートが使用されていること
 
         # 【検証項目】: カード枚数が正しく埋め込まれること
-        # 🔵 既存テストと同一
-        assert "3 effective flashcards" in prompt  # 【確認内容】: card_count=3 が英語フレーズに埋め込まれること
+        assert "3 flashcards" in prompt  # 【確認内容】: card_count=3 が英語フレーズに埋め込まれること
 
         # 【検証項目】: 入力テキストが正しく埋め込まれること
         # 🔵 既存テストと同一
@@ -181,3 +180,102 @@ class TestBackwardCompatibleImport:
         )
         assert isinstance(prompt, str)  # 【確認内容】: str 型のプロンプトが返ること
         assert len(prompt) > 0  # 【確認内容】: 空でないプロンプトが返ること
+
+
+class TestRewriteInstructions:
+    """TC-030: 清書/推敲モードの指示が含まれることを確認."""
+
+    def test_japanese_prompt_contains_polish_instructions(self):
+        """日本語プロンプトに清書・整形指示が含まれること."""
+        from services.prompts.generate import get_card_generation_prompt
+
+        prompt = get_card_generation_prompt(
+            input_text="テスト入力テキスト",
+            card_count=3,
+            difficulty="medium",
+            language="ja",
+        )
+
+        assert "清書・整形" in prompt
+        assert "新規情報を創作・追加しないこと" in prompt
+        assert "原文の意味を維持" in prompt
+
+    def test_english_prompt_contains_polish_instructions(self):
+        """英語プロンプトに清書・整形指示が含まれること."""
+        from services.prompts.generate import get_card_generation_prompt
+
+        prompt = get_card_generation_prompt(
+            input_text="Test input text",
+            card_count=3,
+            difficulty="medium",
+            language="en",
+        )
+
+        assert "polished" in prompt
+        assert "Do not add new information" in prompt
+        assert "Preserve the original meaning" in prompt
+
+    def test_japanese_prompt_uses_user_input_as_source(self):
+        """日本語プロンプトがユーザー入力を素材として扱うこと."""
+        from services.prompts.generate import get_card_generation_prompt
+
+        input_text = "光合成は植物が光エネルギーを使って二酸化炭素と水から糖を作るプロセスです。"
+        prompt = get_card_generation_prompt(
+            input_text=input_text,
+            card_count=2,
+            difficulty="easy",
+            language="ja",
+        )
+
+        assert "ユーザーが入力したテキスト" in prompt
+        assert input_text in prompt
+
+    def test_english_prompt_uses_user_input_as_source(self):
+        """英語プロンプトがユーザー入力を素材として扱うこと."""
+        from services.prompts.generate import get_card_generation_prompt
+
+        input_text = "Photosynthesis is the process by which plants use light energy."
+        prompt = get_card_generation_prompt(
+            input_text=input_text,
+            card_count=2,
+            difficulty="easy",
+            language="en",
+        )
+
+        assert "user-provided text" in prompt
+        assert input_text in prompt
+
+    def test_short_input_included_in_prompt(self):
+        """短い入力テキスト（最小長）がプロンプトに含まれること."""
+        from services.prompts.generate import get_card_generation_prompt
+
+        short_input = "ABC12"
+        prompt = get_card_generation_prompt(
+            input_text=short_input,
+            card_count=1,
+            difficulty="easy",
+            language="ja",
+        )
+
+        assert short_input in prompt
+        assert "清書・整形" in prompt
+
+    def test_long_input_with_bullets_included_in_prompt(self):
+        """箇条書き・改行を含む長い入力がプロンプトに含まれること."""
+        from services.prompts.generate import get_card_generation_prompt
+
+        long_input = (
+            "SRSとは:\n"
+            "- 間隔反復システム\n"
+            "- 記憶の定着に効果的\n"
+            "- 復習タイミングを自動調整\n" * 10
+        )
+        prompt = get_card_generation_prompt(
+            input_text=long_input,
+            card_count=5,
+            difficulty="hard",
+            language="ja",
+        )
+
+        assert long_input in prompt
+        assert "清書・整形" in prompt

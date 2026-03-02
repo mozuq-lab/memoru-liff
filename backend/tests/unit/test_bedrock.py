@@ -44,7 +44,7 @@ class TestPrompts:
         )
 
         assert "expert at creating flashcards" in prompt
-        assert "3 effective flashcards" in prompt
+        assert "3 flashcards" in prompt
         assert "Test input text" in prompt
         assert "hard" in prompt
 

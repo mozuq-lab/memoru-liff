@@ -96,16 +96,18 @@ def get_card_generation_prompt(
     # 🔵 既存実装と同一
     if language == "ja":
         prompt = f"""あなたはフラッシュカード作成の専門家です。
-以下のテキストから学習効果の高いフラッシュカードを{card_count}枚作成してください。
+以下のユーザーが入力したテキストを素材として、フラッシュカードを{card_count}枚作成してください。
 
-## 入力テキスト
+## ユーザー入力テキスト
 {input_text}
 
 ## 要件
 - 難易度: {difficulty} ({difficulty_desc})
 - 言語: 日本語
 - 問題文（front）は簡潔で明確に、質問形式で記述
-- 解答（back）は必要十分な情報を含める
+- 解答（back）はユーザーが入力したテキストの該当部分を清書・整形して使用すること
+- 解答に新規情報を創作・追加しないこと。原文の意味を維持しながら読みやすく整える
+- 明らかな誤字脱字・冗長表現・不自然な文は改善する
 - 重要な概念を優先的にカード化
 - 各カードは独立して学習できるように
 
@@ -120,18 +122,19 @@ def get_card_generation_prompt(
 ```"""
     else:
         # 【英語テンプレート】: language="en" 時の英語プロンプト
-        # 🔵 既存実装と同一
         prompt = f"""You are an expert at creating flashcards.
-Create {card_count} effective flashcards from the following text.
+Create {card_count} flashcards based on the following user-provided text.
 
-## Input Text
+## User Input Text
 {input_text}
 
 ## Requirements
 - Difficulty: {difficulty} ({difficulty_desc})
 - Language: English
 - The front (question) should be concise and clear, in question format
-- The back (answer) should contain sufficient information
+- The back (answer) should be a polished, structured version of relevant parts from the user's input text
+- Do not add new information not present in the user's input. Preserve the original meaning while improving readability
+- Fix obvious typos, redundant expressions, and unnatural phrasing
 - Prioritize important concepts
 - Each card should be independently learnable
 
