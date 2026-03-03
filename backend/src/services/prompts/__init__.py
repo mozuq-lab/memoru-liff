@@ -34,6 +34,13 @@ from .advice import (
     ADVICE_SYSTEM_PROMPT,
 )
 
+# 【refine.py エクスポート】: カード補足・改善プロンプト関連
+# 🔵 設計文書 architecture.md プロンプト設計より
+from .refine import (
+    get_refine_user_prompt,
+    REFINE_SYSTEM_PROMPT,
+)
+
 # 【公開インターフェース】: パッケージが公開する全シンボルのリスト
 # 🔵 要件定義書 2.4 節のエクスポートシンボル一覧から確定
 __all__ = [
@@ -50,4 +57,7 @@ __all__ = [
     # advice.py から
     "get_advice_prompt",
     "ADVICE_SYSTEM_PROMPT",
+    # refine.py から
+    "get_refine_user_prompt",
+    "REFINE_SYSTEM_PROMPT",
 ]
