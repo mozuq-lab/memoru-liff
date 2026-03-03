@@ -25,7 +25,7 @@
 
 ## 全体進捗
 
-- [ ] Phase 1: レビュー修正
+- [x] Phase 1: レビュー修正
 
 ---
 
@@ -39,7 +39,7 @@
 - [x] [TASK-0142: refine プロンプト ja/en テンプレート分岐 + テスト](TASK-0142.md) - 4h (TDD) 🔵
 - [x] [TASK-0143: body=null TypeError 対策 + テスト](TASK-0143.md) - 2h (TDD) 🔵
 - [x] [TASK-0144: CardForm useEffect cleanup + テスト](TASK-0144.md) - 1h (TDD) 🔵
-- [ ] [TASK-0145: BedrockService refine テスト追加](TASK-0145.md) - 3h (TDD) 🔵
+- [x] [TASK-0145: BedrockService refine テスト追加](TASK-0145.md) - 3h (TDD) 🔵
 
 ### 依存関係
 
