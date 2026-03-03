@@ -3,7 +3,7 @@
  * 【テスト対象】: CardForm コンポーネント
  * 【テスト対応】: TASK-0017 テストケース2〜5, TASK-0141 AI補足機能
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CardForm } from '../CardForm';
@@ -400,6 +400,32 @@ describe('CardForm', () => {
           { signal: expect.any(AbortSignal) },
         );
       });
+    });
+
+    it('アンマウント時に進行中のリクエストがキャンセルされる', async () => {
+      const user = userEvent.setup();
+      const mockRefineCard = await getRefineCardMock();
+      let capturedSignal: AbortSignal | undefined;
+      mockRefineCard.mockImplementation((_req: unknown, opts: { signal: AbortSignal }) => {
+        capturedSignal = opts.signal;
+        return new Promise(() => {}); // 永遠に解決しない
+      });
+
+      const { unmount } = renderCardForm();
+
+      await user.click(screen.getByTestId('refine-button'));
+
+      // signal が渡されていることを確認
+      await waitFor(() => {
+        expect(capturedSignal).toBeDefined();
+      });
+      expect(capturedSignal!.aborted).toBe(false);
+
+      // アンマウント
+      unmount();
+
+      // abort が呼ばれたことを確認
+      expect(capturedSignal!.aborted).toBe(true);
     });
 
     it('再試行時にエラーメッセージがクリアされる', async () => {

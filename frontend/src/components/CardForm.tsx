@@ -4,7 +4,7 @@
  * 【テスト対応】: TASK-0017 テストケース2〜5, TASK-0141 AI補足機能
  * 🟡 黄信号: user-stories.md 3.3より
  */
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { cardsApi } from '@/services/api';
 
 interface CardFormProps {
@@ -31,6 +31,13 @@ export const CardForm = ({
   const [isRefining, setIsRefining] = useState(false);
   const [refineError, setRefineError] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  // 【クリーンアップ】: アンマウント時に進行中のリクエストをキャンセル
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, []);
 
   // 【バリデーション】: 空でないかチェック
   const isValid = front.trim().length > 0 && back.trim().length > 0;
