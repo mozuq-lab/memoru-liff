@@ -56,6 +56,20 @@ export interface GenerateCardsResponse {
   };
 }
 
+// AI Refine types
+export interface RefineCardRequest {
+  front: string;
+  back: string;
+  language?: 'ja' | 'en';
+}
+
+export interface RefineCardResponse {
+  refined_front: string;
+  refined_back: string;
+  model_used: string;
+  processing_time_ms: number;
+}
+
 // Review types
 export interface ReviewPreviousState {
   ease_factor: number;

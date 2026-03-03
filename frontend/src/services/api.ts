@@ -4,6 +4,8 @@ import type {
   UpdateCardRequest,
   GenerateCardsRequest,
   GenerateCardsResponse,
+  RefineCardRequest,
+  RefineCardResponse,
   DueCardsResponse,
   ReviewResponse,
   UndoReviewResponse,
@@ -140,6 +142,14 @@ class ApiClient {
     });
   }
 
+  async refineCard(data: RefineCardRequest, options?: { signal?: AbortSignal }): Promise<RefineCardResponse> {
+    return this.request<RefineCardResponse>('/cards/refine', {
+      method: 'POST',
+      body: JSON.stringify(data),
+      signal: options?.signal,
+    });
+  }
+
   async getDueCards(limit?: number, deckId?: string): Promise<DueCardsResponse> {
     const searchParams = new URLSearchParams();
     if (limit) searchParams.set('limit', String(limit));
@@ -229,6 +239,7 @@ export const cardsApi = {
   updateCard: (id: string, data: UpdateCardRequest) => apiClient.updateCard(id, data),
   deleteCard: (id: string) => apiClient.deleteCard(id),
   generateCards: (data: GenerateCardsRequest, options?: { signal?: AbortSignal }) => apiClient.generateCards(data, options),
+  refineCard: (data: RefineCardRequest, options?: { signal?: AbortSignal }) => apiClient.refineCard(data, options),
   getDueCards: (limit?: number, deckId?: string) => apiClient.getDueCards(limit, deckId),
   getDueCount: () => apiClient.getDueCount(),
 };

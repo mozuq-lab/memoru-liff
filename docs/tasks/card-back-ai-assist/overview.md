@@ -61,7 +61,7 @@ TASK-0137 → TASK-0138 → TASK-0139
 
 ### タスク一覧
 
-- [ ] [TASK-0140: フロントエンド型定義・API クライアント](TASK-0140.md) - 2h (TDD) 🔵
+- [x] [TASK-0140: フロントエンド型定義・API クライアント](TASK-0140.md) - 2h (TDD) 🔵
 - [ ] [TASK-0141: CardForm 「AI で補足」ボタン実装](TASK-0141.md) - 4h (TDD) 🔵
 
 ### 依存関係
