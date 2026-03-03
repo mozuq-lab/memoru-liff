@@ -35,11 +35,18 @@ from services.ai_service import (
     GradingResult,
     Language,
     LearningAdvice,
+    RefineResult,
 )
-from services.prompts import get_advice_prompt, get_card_generation_prompt, get_grading_prompt
+from services.prompts import (
+    get_advice_prompt,
+    get_card_generation_prompt,
+    get_grading_prompt,
+    get_refine_user_prompt,
+)
 from services.prompts.advice import ADVICE_SYSTEM_PROMPT
 from services.prompts.generate import CARD_GENERATION_SYSTEM_PROMPT
 from services.prompts.grading import GRADING_SYSTEM_PROMPT
+from services.prompts.refine import REFINE_SYSTEM_PROMPT
 
 # Bedrock のデフォルトモデル ID
 _DEFAULT_BEDROCK_MODEL_ID = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
@@ -397,6 +404,82 @@ class StrandsAIService:
                 model_used=self.model_used,
                 processing_time_ms=processing_time_ms,
             )
+
+    def refine_card(
+        self,
+        front: str,
+        back: str,
+        language: Language = "ja",
+    ) -> RefineResult:
+        """ユーザー入力のフラッシュカードを Strands Agent 経由で改善する.
+
+        Args:
+            front: カードの表面テキスト（空文字の場合は未入力扱い）。
+            back: カードの裏面テキスト（空文字の場合は未入力扱い）。
+            language: 出力言語（'ja', 'en'）。
+
+        Returns:
+            RefineResult: 改善されたカードの表面・裏面。
+
+        Raises:
+            AITimeoutError: Agent 呼び出しがタイムアウトした場合。
+            AIRateLimitError: レート制限に達した場合。
+            AIProviderError: プロバイダー接続エラーが発生した場合。
+            AIParseError: レスポンスの解析に失敗した場合。
+            AIServiceError: その他の予期しないエラーが発生した場合。
+        """
+        with _handle_ai_errors():
+            user_prompt = get_refine_user_prompt(
+                front=front,
+                back=back,
+                language=language,
+            )
+
+            agent = Agent(model=self.model, system_prompt=REFINE_SYSTEM_PROMPT)
+            response = agent(user_prompt)
+
+            response_text = str(response)
+            return self._parse_refine_result(response_text)
+
+    def _parse_refine_result(self, response_text: str) -> RefineResult:
+        """Strands Agent のレスポンステキストからカード改善結果を抽出する.
+
+        Args:
+            response_text: Agent から返されたレスポンステキスト。
+
+        Returns:
+            RefineResult: 改善されたカードの表面・裏面。
+
+        Raises:
+            AIParseError: JSON の解析に失敗した場合、または必須フィールドが欠落している場合。
+        """
+        try:
+            json_match = re.search(r"```json\s*([\s\S]*?)\s*```", response_text)
+            if json_match:
+                json_str = json_match.group(1)
+            else:
+                json_str = response_text.strip()
+
+            data = json.loads(json_str)
+
+        except json.JSONDecodeError as e:
+            raise AIParseError(f"Failed to parse JSON response: {e}") from e
+
+        if "refined_front" not in data:
+            raise AIParseError(
+                "Response missing required 'refined_front' field. "
+                f"Available keys: {list(data.keys())}"
+            )
+        if "refined_back" not in data:
+            raise AIParseError(
+                "Response missing required 'refined_back' field. "
+                f"Available keys: {list(data.keys())}"
+            )
+
+        return RefineResult(
+            refined_front=str(data["refined_front"]),
+            refined_back=str(data["refined_back"]),
+        )
 
     def _parse_advice_result(self, response_text: str) -> tuple[str, List[str], List[str]]:
         """Strands Agent のレスポンステキストからアドバイス結果を抽出する.
