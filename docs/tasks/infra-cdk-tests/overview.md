@@ -24,7 +24,7 @@
 
 ## 全体進捗
 
-- [ ] Phase 1: CDK テスト実装
+- [x] Phase 1: CDK テスト実装
 
 ## マイルストーン
 
@@ -39,9 +39,9 @@
 
 ### タスク一覧
 
-- [ ] [TASK-0134: CognitoStack テスト作成](TASK-0134.md) - 3h (TDD) 🔵
-- [ ] [TASK-0135: KeycloakStack テスト作成](TASK-0135.md) - 4h (TDD) 🔵
-- [ ] [TASK-0136: LiffHostingStack テスト作成](TASK-0136.md) - 4h (TDD) 🔵
+- [x] [TASK-0134: CognitoStack テスト作成](TASK-0134.md) - 3h (TDD) 🔵
+- [x] [TASK-0135: KeycloakStack テスト作成](TASK-0135.md) - 4h (TDD) 🔵
+- [x] [TASK-0136: LiffHostingStack テスト作成](TASK-0136.md) - 4h (TDD) 🔵
 
 ### 依存関係
 
