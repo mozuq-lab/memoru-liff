@@ -1,5 +1,485 @@
 // Jest Snapshot v1, https://goo.gl/fbAQLP
 
+exports[`CognitoStack LINE Login IdP Snapshot（LINE あり） TC-008: dev + LINE IdP のスナップショットが一致すること 1`] = `
+{
+  "Outputs": {
+    "CognitoDomainUrl": {
+      "Description": "Cognito Hosted UI domain URL",
+      "Export": {
+        "Name": "memoru-dev-cognito-domain-url",
+      },
+      "Value": {
+        "Fn::Join": [
+          "",
+          [
+            "https://memoru-dev-test.auth.",
+            {
+              "Ref": "AWS::Region",
+            },
+            ".amazoncognito.com",
+          ],
+        ],
+      },
+    },
+    "OidcIssuerUrl": {
+      "Description": "OIDC Issuer URL for backend configuration",
+      "Export": {
+        "Name": "memoru-dev-cognito-oidc-issuer",
+      },
+      "Value": {
+        "Fn::Join": [
+          "",
+          [
+            "https://cognito-idp.",
+            {
+              "Ref": "AWS::Region",
+            },
+            ".amazonaws.com/",
+            {
+              "Ref": "UserPool6BA7E5F2",
+            },
+          ],
+        ],
+      },
+    },
+    "UserPoolArn": {
+      "Description": "Cognito User Pool ARN",
+      "Export": {
+        "Name": "memoru-dev-cognito-user-pool-arn",
+      },
+      "Value": {
+        "Fn::GetAtt": [
+          "UserPool6BA7E5F2",
+          "Arn",
+        ],
+      },
+    },
+    "UserPoolClientId": {
+      "Description": "Cognito User Pool Client ID",
+      "Export": {
+        "Name": "memoru-dev-cognito-client-id",
+      },
+      "Value": {
+        "Ref": "UserPoolLiffClient5F4D99DC",
+      },
+    },
+    "UserPoolId": {
+      "Description": "Cognito User Pool ID",
+      "Export": {
+        "Name": "memoru-dev-cognito-user-pool-id",
+      },
+      "Value": {
+        "Ref": "UserPool6BA7E5F2",
+      },
+    },
+  },
+  "Parameters": {
+    "BootstrapVersion": {
+      "Default": "/cdk-bootstrap/hnb659fds/version",
+      "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+  },
+  "Resources": {
+    "LineLoginProvider63DFFF04": {
+      "Properties": {
+        "AttributeMapping": {
+          "name": "name",
+          "picture": "picture",
+          "username": "sub",
+        },
+        "ProviderDetails": {
+          "attributes_request_method": "GET",
+          "attributes_url": "https://api.line.me/v2/profile",
+          "authorize_scopes": "openid profile",
+          "authorize_url": "https://access.line.me/oauth2/v2.1/authorize",
+          "client_id": "test-channel-id",
+          "client_secret": "test-channel-secret",
+          "jwks_uri": "https://api.line.me/oauth2/v2.1/certs",
+          "oidc_issuer": "https://access.line.me",
+          "token_url": "https://api.line.me/oauth2/v2.1/token",
+        },
+        "ProviderName": "LINE",
+        "ProviderType": "OIDC",
+        "UserPoolId": {
+          "Ref": "UserPool6BA7E5F2",
+        },
+      },
+      "Type": "AWS::Cognito::UserPoolIdentityProvider",
+    },
+    "UserPool6BA7E5F2": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "AccountRecoverySetting": {
+          "RecoveryMechanisms": [
+            {
+              "Name": "verified_email",
+              "Priority": 1,
+            },
+          ],
+        },
+        "AdminCreateUserConfig": {
+          "AllowAdminCreateUserOnly": false,
+        },
+        "AutoVerifiedAttributes": [
+          "email",
+        ],
+        "DeletionProtection": "INACTIVE",
+        "EmailVerificationMessage": "The verification code to your new account is {####}",
+        "EmailVerificationSubject": "Verify your new account",
+        "EnabledMfas": [
+          "SOFTWARE_TOKEN_MFA",
+        ],
+        "MfaConfiguration": "OPTIONAL",
+        "Policies": {
+          "PasswordPolicy": {
+            "MinimumLength": 8,
+            "RequireLowercase": true,
+            "RequireNumbers": true,
+            "RequireSymbols": true,
+            "RequireUppercase": true,
+            "TemporaryPasswordValidityDays": 7,
+          },
+        },
+        "SmsVerificationMessage": "The verification code to your new account is {####}",
+        "UserPoolName": "memoru-dev-user-pool",
+        "UsernameAttributes": [
+          "email",
+        ],
+        "UsernameConfiguration": {
+          "CaseSensitive": false,
+        },
+        "VerificationMessageTemplate": {
+          "DefaultEmailOption": "CONFIRM_WITH_CODE",
+          "EmailMessage": "The verification code to your new account is {####}",
+          "EmailSubject": "Verify your new account",
+          "SmsMessage": "The verification code to your new account is {####}",
+        },
+      },
+      "Type": "AWS::Cognito::UserPool",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "UserPoolLiffClient5F4D99DC": {
+      "Properties": {
+        "AccessTokenValidity": 60,
+        "AllowedOAuthFlows": [
+          "code",
+        ],
+        "AllowedOAuthFlowsUserPoolClient": true,
+        "AllowedOAuthScopes": [
+          "openid",
+          "profile",
+          "email",
+        ],
+        "CallbackURLs": [
+          "http://localhost:3000/callback",
+        ],
+        "ClientName": "memoru-dev-liff-client",
+        "ExplicitAuthFlows": [
+          "ALLOW_REFRESH_TOKEN_AUTH",
+        ],
+        "GenerateSecret": false,
+        "IdTokenValidity": 60,
+        "LogoutURLs": [
+          "http://localhost:3000/",
+        ],
+        "PreventUserExistenceErrors": "ENABLED",
+        "RefreshTokenValidity": 43200,
+        "SupportedIdentityProviders": [
+          "COGNITO",
+          "LINE",
+        ],
+        "TokenValidityUnits": {
+          "AccessToken": "minutes",
+          "IdToken": "minutes",
+          "RefreshToken": "minutes",
+        },
+        "UserPoolId": {
+          "Ref": "UserPool6BA7E5F2",
+        },
+      },
+      "Type": "AWS::Cognito::UserPoolClient",
+    },
+    "UserPoolUserPoolDomain9F01E991": {
+      "Properties": {
+        "Domain": "memoru-dev-test",
+        "UserPoolId": {
+          "Ref": "UserPool6BA7E5F2",
+        },
+      },
+      "Type": "AWS::Cognito::UserPoolDomain",
+    },
+  },
+  "Rules": {
+    "CheckBootstrapVersion": {
+      "Assertions": [
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Contains": [
+                  [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                  ],
+                  {
+                    "Ref": "BootstrapVersion",
+                  },
+                ],
+              },
+            ],
+          },
+          "AssertDescription": "CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI.",
+        },
+      ],
+    },
+  },
+}
+`;
+
+exports[`CognitoStack LINE Login IdP Snapshot（LINE あり） TC-009: prod + LINE IdP のスナップショットが一致すること 1`] = `
+{
+  "Outputs": {
+    "CognitoDomainUrl": {
+      "Description": "Cognito Hosted UI domain URL",
+      "Export": {
+        "Name": "memoru-prod-cognito-domain-url",
+      },
+      "Value": {
+        "Fn::Join": [
+          "",
+          [
+            "https://memoru-prod-test.auth.",
+            {
+              "Ref": "AWS::Region",
+            },
+            ".amazoncognito.com",
+          ],
+        ],
+      },
+    },
+    "OidcIssuerUrl": {
+      "Description": "OIDC Issuer URL for backend configuration",
+      "Export": {
+        "Name": "memoru-prod-cognito-oidc-issuer",
+      },
+      "Value": {
+        "Fn::Join": [
+          "",
+          [
+            "https://cognito-idp.",
+            {
+              "Ref": "AWS::Region",
+            },
+            ".amazonaws.com/",
+            {
+              "Ref": "UserPool6BA7E5F2",
+            },
+          ],
+        ],
+      },
+    },
+    "UserPoolArn": {
+      "Description": "Cognito User Pool ARN",
+      "Export": {
+        "Name": "memoru-prod-cognito-user-pool-arn",
+      },
+      "Value": {
+        "Fn::GetAtt": [
+          "UserPool6BA7E5F2",
+          "Arn",
+        ],
+      },
+    },
+    "UserPoolClientId": {
+      "Description": "Cognito User Pool Client ID",
+      "Export": {
+        "Name": "memoru-prod-cognito-client-id",
+      },
+      "Value": {
+        "Ref": "UserPoolLiffClient5F4D99DC",
+      },
+    },
+    "UserPoolId": {
+      "Description": "Cognito User Pool ID",
+      "Export": {
+        "Name": "memoru-prod-cognito-user-pool-id",
+      },
+      "Value": {
+        "Ref": "UserPool6BA7E5F2",
+      },
+    },
+  },
+  "Parameters": {
+    "BootstrapVersion": {
+      "Default": "/cdk-bootstrap/hnb659fds/version",
+      "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+  },
+  "Resources": {
+    "LineLoginProvider63DFFF04": {
+      "Properties": {
+        "AttributeMapping": {
+          "name": "name",
+          "picture": "picture",
+          "username": "sub",
+        },
+        "ProviderDetails": {
+          "attributes_request_method": "GET",
+          "attributes_url": "https://api.line.me/v2/profile",
+          "authorize_scopes": "openid profile",
+          "authorize_url": "https://access.line.me/oauth2/v2.1/authorize",
+          "client_id": "test-channel-id",
+          "client_secret": "test-channel-secret",
+          "jwks_uri": "https://api.line.me/oauth2/v2.1/certs",
+          "oidc_issuer": "https://access.line.me",
+          "token_url": "https://api.line.me/oauth2/v2.1/token",
+        },
+        "ProviderName": "LINE",
+        "ProviderType": "OIDC",
+        "UserPoolId": {
+          "Ref": "UserPool6BA7E5F2",
+        },
+      },
+      "Type": "AWS::Cognito::UserPoolIdentityProvider",
+    },
+    "UserPool6BA7E5F2": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "AccountRecoverySetting": {
+          "RecoveryMechanisms": [
+            {
+              "Name": "verified_email",
+              "Priority": 1,
+            },
+          ],
+        },
+        "AdminCreateUserConfig": {
+          "AllowAdminCreateUserOnly": false,
+        },
+        "AutoVerifiedAttributes": [
+          "email",
+        ],
+        "DeletionProtection": "ACTIVE",
+        "EmailVerificationMessage": "The verification code to your new account is {####}",
+        "EmailVerificationSubject": "Verify your new account",
+        "EnabledMfas": [
+          "SOFTWARE_TOKEN_MFA",
+        ],
+        "MfaConfiguration": "OPTIONAL",
+        "Policies": {
+          "PasswordPolicy": {
+            "MinimumLength": 8,
+            "RequireLowercase": true,
+            "RequireNumbers": true,
+            "RequireSymbols": true,
+            "RequireUppercase": true,
+            "TemporaryPasswordValidityDays": 7,
+          },
+        },
+        "SmsVerificationMessage": "The verification code to your new account is {####}",
+        "UserPoolName": "memoru-prod-user-pool",
+        "UsernameAttributes": [
+          "email",
+        ],
+        "UsernameConfiguration": {
+          "CaseSensitive": false,
+        },
+        "VerificationMessageTemplate": {
+          "DefaultEmailOption": "CONFIRM_WITH_CODE",
+          "EmailMessage": "The verification code to your new account is {####}",
+          "EmailSubject": "Verify your new account",
+          "SmsMessage": "The verification code to your new account is {####}",
+        },
+      },
+      "Type": "AWS::Cognito::UserPool",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "UserPoolLiffClient5F4D99DC": {
+      "Properties": {
+        "AccessTokenValidity": 60,
+        "AllowedOAuthFlows": [
+          "code",
+        ],
+        "AllowedOAuthFlowsUserPoolClient": true,
+        "AllowedOAuthScopes": [
+          "openid",
+          "profile",
+          "email",
+        ],
+        "CallbackURLs": [
+          "https://app.example.com/callback",
+        ],
+        "ClientName": "memoru-prod-liff-client",
+        "ExplicitAuthFlows": [
+          "ALLOW_REFRESH_TOKEN_AUTH",
+        ],
+        "GenerateSecret": false,
+        "IdTokenValidity": 60,
+        "LogoutURLs": [
+          "https://app.example.com/",
+        ],
+        "PreventUserExistenceErrors": "ENABLED",
+        "RefreshTokenValidity": 43200,
+        "SupportedIdentityProviders": [
+          "COGNITO",
+          "LINE",
+        ],
+        "TokenValidityUnits": {
+          "AccessToken": "minutes",
+          "IdToken": "minutes",
+          "RefreshToken": "minutes",
+        },
+        "UserPoolId": {
+          "Ref": "UserPool6BA7E5F2",
+        },
+      },
+      "Type": "AWS::Cognito::UserPoolClient",
+    },
+    "UserPoolUserPoolDomain9F01E991": {
+      "Properties": {
+        "Domain": "memoru-prod-test",
+        "UserPoolId": {
+          "Ref": "UserPool6BA7E5F2",
+        },
+      },
+      "Type": "AWS::Cognito::UserPoolDomain",
+    },
+  },
+  "Rules": {
+    "CheckBootstrapVersion": {
+      "Assertions": [
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Contains": [
+                  [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                  ],
+                  {
+                    "Ref": "BootstrapVersion",
+                  },
+                ],
+              },
+            ],
+          },
+          "AssertDescription": "CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI.",
+        },
+      ],
+    },
+  },
+}
+`;
+
 exports[`CognitoStack Snapshot dev environment matches snapshot 1`] = `
 {
   "Outputs": {
