@@ -100,5 +100,64 @@ describe('CognitoStack', () => {
         AllowedOAuthFlowsUserPoolClient: true,
       });
     });
+
+    test('CallbackURLs are set from props', () => {
+      const template = Template.fromStack(createStack(devProps));
+      template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
+        CallbackURLs: ['http://localhost:3000/callback'],
+      });
+    });
+
+    test('LogoutURLs are set from props', () => {
+      const template = Template.fromStack(createStack(devProps));
+      template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
+        LogoutURLs: ['http://localhost:3000/'],
+      });
+    });
+
+    test('prod: CallbackURLs and LogoutURLs use production URLs', () => {
+      const template = Template.fromStack(createStack(prodProps));
+      template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
+        CallbackURLs: ['https://app.example.com/callback'],
+        LogoutURLs: ['https://app.example.com/'],
+      });
+    });
+
+    test('token validity is configured correctly', () => {
+      const template = Template.fromStack(createStack(devProps));
+      template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
+        AccessTokenValidity: 60,
+        IdTokenValidity: 60,
+        RefreshTokenValidity: 43200,
+        TokenValidityUnits: {
+          AccessToken: 'minutes',
+          IdToken: 'minutes',
+          RefreshToken: 'minutes',
+        },
+      });
+    });
+
+    test('client is public (no secret)', () => {
+      const template = Template.fromStack(createStack(devProps));
+      template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
+        GenerateSecret: false,
+      });
+    });
+  });
+
+  describe('Domain', () => {
+    test('UserPool domain prefix is set from props', () => {
+      const template = Template.fromStack(createStack(devProps));
+      template.hasResourceProperties('AWS::Cognito::UserPoolDomain', {
+        Domain: 'memoru-dev-test',
+      });
+    });
+
+    test('prod: UserPool domain prefix is set correctly', () => {
+      const template = Template.fromStack(createStack(prodProps));
+      template.hasResourceProperties('AWS::Cognito::UserPoolDomain', {
+        Domain: 'memoru-prod-test',
+      });
+    });
   });
 });

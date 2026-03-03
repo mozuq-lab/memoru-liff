@@ -158,4 +158,93 @@ describe('LiffHostingStack', () => {
       });
     });
   });
+
+  describe('Custom domain and certificate', () => {
+    test('prod: CloudFront has custom domain alias', () => {
+      const template = Template.fromStack(createStack(prodProps));
+      template.hasResourceProperties('AWS::CloudFront::Distribution', {
+        DistributionConfig: {
+          Aliases: ['app.example.com'],
+        },
+      });
+    });
+
+    test('prod: CloudFront has ACM certificate', () => {
+      const template = Template.fromStack(createStack(prodProps));
+      template.hasResourceProperties('AWS::CloudFront::Distribution', {
+        DistributionConfig: {
+          ViewerCertificate: {
+            AcmCertificateArn: prodProps.certificateArn,
+            SslSupportMethod: 'sni-only',
+          },
+        },
+      });
+    });
+
+    test('dev: CloudFront has no custom domain alias', () => {
+      const template = Template.fromStack(createStack(devProps));
+      template.hasResourceProperties('AWS::CloudFront::Distribution', {
+        DistributionConfig: {
+          Aliases: Match.absent(),
+        },
+      });
+    });
+  });
+
+  describe('Logging', () => {
+    test('prod: CloudFront logging is enabled', () => {
+      const template = Template.fromStack(createStack(prodProps));
+      template.hasResourceProperties('AWS::CloudFront::Distribution', {
+        DistributionConfig: {
+          Logging: Match.objectLike({
+            Prefix: 'cloudfront/',
+            IncludeCookies: false,
+          }),
+        },
+      });
+    });
+
+    test('dev: CloudFront logging is not configured', () => {
+      const template = Template.fromStack(createStack(devProps));
+      template.hasResourceProperties('AWS::CloudFront::Distribution', {
+        DistributionConfig: {
+          Logging: Match.absent(),
+        },
+      });
+    });
+  });
+
+  describe('DNS', () => {
+    test('prod: Route53 A record is created', () => {
+      const template = Template.fromStack(createStack(prodProps));
+      template.hasResourceProperties('AWS::Route53::RecordSet', {
+        Name: 'app.example.com.',
+        Type: 'A',
+        HostedZoneId: 'Z0123456789ABCDEF',
+      });
+    });
+
+    test('no Route53 record without hostedZoneId', () => {
+      const template = Template.fromStack(createStack(devProps));
+      template.resourceCountIs('AWS::Route53::RecordSet', 0);
+    });
+  });
+
+  describe('CSP connect-src with apiEndpoint', () => {
+    test('apiEndpoint is included in CSP connect-src', () => {
+      const template = Template.fromStack(createStack({
+        environment: 'dev',
+        apiEndpoint: 'https://api.example.com',
+      }));
+      template.hasResourceProperties('AWS::CloudFront::ResponseHeadersPolicy', {
+        ResponseHeadersPolicyConfig: {
+          SecurityHeadersConfig: {
+            ContentSecurityPolicy: {
+              ContentSecurityPolicy: Match.stringLikeRegexp('https://api\\.example\\.com'),
+            },
+          },
+        },
+      });
+    });
+  });
 });

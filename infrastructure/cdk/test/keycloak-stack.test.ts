@@ -103,17 +103,27 @@ describe('KeycloakStack', () => {
       });
     });
 
-    test('dev: LogGroup RemovalPolicy is DESTROY', () => {
+    test('dev: LogGroup retention is 14 days, RemovalPolicy is DESTROY', () => {
       const template = Template.fromStack(createStack(devProps));
+      template.resourceCountIs('AWS::Logs::LogGroup', 1);
       template.hasResource('AWS::Logs::LogGroup', {
+        Properties: {
+          LogGroupName: '/ecs/memoru-dev-keycloak',
+          RetentionInDays: 14,
+        },
         UpdateReplacePolicy: 'Delete',
         DeletionPolicy: 'Delete',
       });
     });
 
-    test('prod: LogGroup RemovalPolicy is RETAIN', () => {
+    test('prod: LogGroup retention is 90 days, RemovalPolicy is RETAIN', () => {
       const template = Template.fromStack(createStack(prodProps));
+      template.resourceCountIs('AWS::Logs::LogGroup', 1);
       template.hasResource('AWS::Logs::LogGroup', {
+        Properties: {
+          LogGroupName: '/ecs/memoru-prod-keycloak',
+          RetentionInDays: 90,
+        },
         UpdateReplacePolicy: 'Retain',
         DeletionPolicy: 'Retain',
       });
@@ -133,6 +143,81 @@ describe('KeycloakStack', () => {
       template.hasResourceProperties('AWS::RDS::DBInstance', {
         PubliclyAccessible: false,
       });
+    });
+  });
+
+  describe('HTTPS and Load Balancer', () => {
+    test('dev: Listener is HTTP on port 80', () => {
+      const template = Template.fromStack(createStack(devProps));
+      template.hasResourceProperties('AWS::ElasticLoadBalancingV2::Listener', {
+        Port: 80,
+        Protocol: 'HTTP',
+      });
+    });
+
+    test('prod: Listener is HTTPS on port 443 with certificate', () => {
+      const template = Template.fromStack(createStack(prodProps));
+      template.hasResourceProperties('AWS::ElasticLoadBalancingV2::Listener', {
+        Port: 443,
+        Protocol: 'HTTPS',
+        Certificates: [
+          { CertificateArn: prodProps.certificateArn },
+        ],
+      });
+    });
+
+    test('prod: HTTP to HTTPS redirect listener exists', () => {
+      const template = Template.fromStack(createStack(prodProps));
+      template.hasResourceProperties('AWS::ElasticLoadBalancingV2::Listener', {
+        Port: 80,
+        DefaultActions: Match.arrayWith([
+          Match.objectLike({
+            Type: 'redirect',
+            RedirectConfig: Match.objectLike({
+              Protocol: 'HTTPS',
+              Port: '443',
+              StatusCode: 'HTTP_301',
+            }),
+          }),
+        ]),
+      });
+    });
+
+    test('dev: no HTTP redirect listener', () => {
+      const template = Template.fromStack(createStack(devProps));
+      // dev has only 1 listener (HTTP), no redirect
+      template.resourceCountIs('AWS::ElasticLoadBalancingV2::Listener', 1);
+    });
+
+    test('prod: 2 listeners (HTTPS + HTTP redirect)', () => {
+      const template = Template.fromStack(createStack(prodProps));
+      template.resourceCountIs('AWS::ElasticLoadBalancingV2::Listener', 2);
+    });
+  });
+
+  describe('Health check', () => {
+    test('TargetGroup health check path is /health/ready', () => {
+      const template = Template.fromStack(createStack(devProps));
+      template.hasResourceProperties('AWS::ElasticLoadBalancingV2::TargetGroup', {
+        HealthCheckPath: '/health/ready',
+        Matcher: { HttpCode: '200' },
+      });
+    });
+  });
+
+  describe('DNS', () => {
+    test('prod: Route53 A record is created', () => {
+      const template = Template.fromStack(createStack(prodProps));
+      template.hasResourceProperties('AWS::Route53::RecordSet', {
+        Name: 'keycloak.example.com.',
+        Type: 'A',
+        HostedZoneId: 'Z0123456789ABCDEF',
+      });
+    });
+
+    test('no Route53 record without hostedZoneId', () => {
+      const template = Template.fromStack(createStack(devProps));
+      template.resourceCountIs('AWS::Route53::RecordSet', 0);
     });
   });
 });
