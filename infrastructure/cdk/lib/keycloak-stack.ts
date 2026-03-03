@@ -134,7 +134,7 @@ export class KeycloakStack extends cdk.Stack {
     const cluster = new ecs.Cluster(this, 'Cluster', {
       clusterName: `memoru-${props.environment}-keycloak-cluster`,
       vpc: this.vpc,
-      containerInsights: isProd,
+      containerInsightsV2: isProd ? ecs.ContainerInsights.ENABLED : ecs.ContainerInsights.DISABLED,
     });
 
     // ============================================================
