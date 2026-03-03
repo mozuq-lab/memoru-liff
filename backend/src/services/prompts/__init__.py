@@ -38,6 +38,7 @@ from .advice import (
 # 🔵 設計文書 architecture.md プロンプト設計より
 from .refine import (
     get_refine_user_prompt,
+    get_refine_system_prompt,
     REFINE_SYSTEM_PROMPT,
 )
 
@@ -59,5 +60,6 @@ __all__ = [
     "ADVICE_SYSTEM_PROMPT",
     # refine.py から
     "get_refine_user_prompt",
+    "get_refine_system_prompt",
     "REFINE_SYSTEM_PROMPT",
 ]

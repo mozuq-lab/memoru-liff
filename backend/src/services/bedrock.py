@@ -11,7 +11,7 @@ import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
-from .prompts import DifficultyLevel, Language, get_card_generation_prompt, get_grading_prompt, get_advice_prompt, get_refine_user_prompt, REFINE_SYSTEM_PROMPT
+from .prompts import DifficultyLevel, Language, get_card_generation_prompt, get_grading_prompt, get_advice_prompt, get_refine_user_prompt, get_refine_system_prompt
 from services.ai_service import (
     AIServiceError,
     AITimeoutError,
@@ -274,7 +274,8 @@ class BedrockService:
         start_time = time.time()
 
         user_prompt = get_refine_user_prompt(front=front, back=back, language=language)
-        prompt = f"{REFINE_SYSTEM_PROMPT}\n\n{user_prompt}"
+        system_prompt = get_refine_system_prompt(language=language)
+        prompt = f"{system_prompt}\n\n{user_prompt}"
 
         response_text = self._invoke_with_retry(prompt)
 

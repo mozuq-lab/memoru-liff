@@ -46,7 +46,7 @@ from services.prompts import (
 from services.prompts.advice import ADVICE_SYSTEM_PROMPT
 from services.prompts.generate import CARD_GENERATION_SYSTEM_PROMPT
 from services.prompts.grading import GRADING_SYSTEM_PROMPT
-from services.prompts.refine import REFINE_SYSTEM_PROMPT
+from services.prompts.refine import get_refine_system_prompt
 
 # Bedrock のデフォルトモデル ID
 _DEFAULT_BEDROCK_MODEL_ID = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
@@ -437,7 +437,8 @@ class StrandsAIService:
                 language=language,
             )
 
-            agent = Agent(model=self.model, system_prompt=REFINE_SYSTEM_PROMPT)
+            system_prompt = get_refine_system_prompt(language=language)
+            agent = Agent(model=self.model, system_prompt=system_prompt)
             response = agent(user_prompt)
 
             response_text = str(response)
