@@ -35,6 +35,12 @@ def generate_cards():
 
     try:
         body = router.current_event.json_body
+        if not isinstance(body, dict):
+            return Response(
+                status_code=400,
+                content_type=content_types.APPLICATION_JSON,
+                body=json.dumps({"error": "Request body must be a JSON object"}),
+            )
         request = GenerateCardsRequest(**body)
     except ValidationError as e:
         logger.warning(f"Validation error: {e}")
@@ -97,6 +103,12 @@ def refine_card():
 
     try:
         body = router.current_event.json_body
+        if not isinstance(body, dict):
+            return Response(
+                status_code=400,
+                content_type=content_types.APPLICATION_JSON,
+                body=json.dumps({"error": "Request body must be a JSON object"}),
+            )
         request = RefineCardRequest(**body)
     except ValidationError as e:
         logger.warning(f"Validation error: {e}")
