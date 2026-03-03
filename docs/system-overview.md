@@ -470,10 +470,18 @@ memoru-liff/
 │   └── Makefile                       # 開発コマンド
 │
 └── infrastructure/
-    ├── keycloak/
-    │   ├── realm-local.json           # ローカル用 Keycloak 設定
-    │   └── test-users.json            # テストユーザー定義
-    └── liff-hosting/                  # CloudFront + S3 (本番用)
+    ├── cdk/                          # AWS CDK プロジェクト（本番インフラ定義）
+    │   ├── bin/app.ts                # CDK App エントリポイント
+    │   ├── lib/
+    │   │   ├── cognito-stack.ts      # Cognito UserPool スタック
+    │   │   ├── keycloak-stack.ts     # Keycloak (VPC + ECS + RDS) スタック
+    │   │   └── liff-hosting-stack.ts # LIFF Hosting (S3 + CloudFront) スタック
+    │   ├── cdk.json                  # CDK 設定
+    │   ├── package.json
+    │   └── tsconfig.json
+    └── keycloak/
+        ├── realm-local.json           # ローカル用 Keycloak 設定
+        └── test-users.json            # テストユーザー定義
 ```
 
 ---
@@ -531,3 +539,65 @@ flowchart LR
 - **LINE 連携**: LIFF SDK は LINE アプリ内でのみ動作
 - **LINE 通知**: LINE Messaging API のトークンが必要
 - **LINE Bot 復習**: Webhook が外部から到達不可
+
+---
+
+## 11. 本番インフラ（AWS CDK）
+
+### 11.1 CDK スタック構成
+
+本番インフラは AWS CDK (TypeScript) で管理しています。
+
+| スタック名 | 主要リソース | 説明 |
+|-----------|-------------|------|
+| MemoruCognito{Env} | Cognito UserPool, UserPoolClient, UserPoolDomain | OIDC 認証（Cognito プロバイダ） |
+| MemoruKeycloak{Env} | VPC, ECS/Fargate, RDS PostgreSQL 17, ALB, SecretsManager | Keycloak 認証サーバー |
+| MemoruLiffHosting{Env} | S3, CloudFront (OAC), ResponseHeadersPolicy | LIFF フロントエンドホスティング |
+
+### 11.2 CDK Bootstrap 手順
+
+CDK を初めて使うアカウント/リージョンでは Bootstrap が必要です:
+
+```bash
+cd infrastructure/cdk
+
+# アカウント/リージョンの Bootstrap
+npx cdk bootstrap aws://<ACCOUNT_ID>/ap-northeast-1
+
+# LIFF Hosting の CloudFront 証明書用 (us-east-1 も必要)
+npx cdk bootstrap aws://<ACCOUNT_ID>/us-east-1
+```
+
+### 11.3 デプロイ手順
+
+推奨デプロイ順序:
+
+```bash
+cd infrastructure/cdk
+
+# 1. Cognito（他のサービスが OIDC Issuer URL を参照）
+npx cdk deploy MemoruCognito<Env>
+
+# 2. Keycloak（VPC + ECS + RDS の構築に時間がかかる）
+npx cdk deploy MemoruKeycloak<Env>
+
+# 3. LIFF Hosting（フロントエンドのホスティング基盤）
+npx cdk deploy MemoruLiffHosting<Env>
+```
+
+### 11.4 スタック一覧の確認
+
+```bash
+cd infrastructure/cdk
+npx cdk ls
+# MemoruCognitoDev
+# MemoruKeycloakDev
+# MemoruLiffHostingDev
+# MemoruCognitoProd
+# MemoruKeycloakProd
+# MemoruLiffHostingProd
+```
+
+### 11.5 環境別設定
+
+各スタックの Props（ドメイン名、証明書 ARN 等）は `infrastructure/cdk/bin/app.ts` で管理しています。デプロイ前に TODO コメントの値を実際の値に更新してください。

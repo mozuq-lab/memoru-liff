@@ -58,7 +58,7 @@ class BedrockParseError(BedrockServiceError, AIParseError):
 class BedrockService:
     """Service for interacting with Amazon Bedrock."""
 
-    DEFAULT_MODEL_ID = "anthropic.claude-3-haiku-20240307-v1:0"
+    DEFAULT_MODEL_ID = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
     MAX_TOKENS = 4096
     DEFAULT_TEMPERATURE = 0.7
     DEFAULT_TIMEOUT = 30
@@ -72,7 +72,7 @@ class BedrockService:
         """Initialize BedrockService.
 
         Args:
-            model_id: Bedrock model ID. Defaults to Claude 3 Haiku.
+            model_id: Bedrock model ID. Defaults to Claude Haiku 4.5.
             bedrock_client: Optional boto3 Bedrock client for testing.
         """
         self.model_id = model_id or os.environ.get(

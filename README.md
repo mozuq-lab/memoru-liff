@@ -65,8 +65,8 @@ memoru-liff/
 │   │   └── utils/         # ユーティリティ
 │   └── e2e/               # E2E テスト (Playwright)
 ├── infrastructure/        # インフラ IaC
-│   ├── keycloak/          # Keycloak ECS/Fargate
-│   └── liff-hosting/      # CloudFront + S3
+│   ├── cdk/               # AWS CDK プロジェクト（Cognito / Keycloak / LIFF Hosting）
+│   └── keycloak/          # ローカル開発用 Keycloak 設定
 └── docs/                  # ドキュメント
     ├── spec/              # 要件定義
     ├── design/            # 設計文書
@@ -81,6 +81,7 @@ memoru-liff/
 - Node.js 20+
 - AWS CLI v2
 - AWS SAM CLI
+- AWS CDK CLI (`npm install -g aws-cdk`)
 - Docker（ローカル開発用・SAM ビルド用）
 
 ### 初回セットアップ
@@ -196,14 +197,27 @@ npm run test:e2e:ui       # E2E テスト（UI モード）
 npm run test:e2e:headed   # E2E テスト（ブラウザ表示）
 ```
 
-### インフラ
+### インフラ（CDK）
 
 ```bash
-# Keycloak デプロイ（AWS）
-cd infrastructure/keycloak && make deploy-dev
+cd infrastructure/cdk
 
-# LIFF ホスティング デプロイ
-cd infrastructure/liff-hosting && make deploy-dev
+# 初回のみ: CDK Bootstrap
+npx cdk bootstrap
+
+# スタック一覧確認
+npx cdk ls
+
+# 開発環境デプロイ（推奨デプロイ順）
+npx cdk deploy MemoruCognitoDev
+npx cdk deploy MemoruKeycloakDev
+npx cdk deploy MemoruLiffHostingDev
+
+# 全 dev スタック一括デプロイ
+npx cdk deploy MemoruCognitoDev MemoruKeycloakDev MemoruLiffHostingDev
+
+# CloudFormation テンプレート生成（デプロイせず確認）
+npx cdk synth
 ```
 
 ## デプロイ
@@ -241,10 +255,10 @@ make deploy-prod
 cd frontend
 npm run build
 
-# S3 にアップロード
-aws s3 sync dist s3://your-bucket-name --delete
+# S3 にアップロード（バケット名は CDK スタック出力を参照）
+aws s3 sync dist s3://memoru-liff-hosting-{env} --delete
 
-# CloudFront キャッシュ無効化
+# CloudFront キャッシュ無効化（Distribution ID は CDK スタック出力を参照）
 aws cloudfront create-invalidation --distribution-id YOUR_DIST_ID --paths "/*"
 ```
 

@@ -42,7 +42,7 @@ from services.prompts.generate import CARD_GENERATION_SYSTEM_PROMPT
 from services.prompts.grading import GRADING_SYSTEM_PROMPT
 
 # Bedrock のデフォルトモデル ID
-_DEFAULT_BEDROCK_MODEL_ID = "anthropic.claude-3-haiku-20240307-v1:0"
+_DEFAULT_BEDROCK_MODEL_ID = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
 _DEFAULT_OLLAMA_HOST = "http://localhost:11434"
 _DEFAULT_OLLAMA_MODEL = "llama3.2"
 

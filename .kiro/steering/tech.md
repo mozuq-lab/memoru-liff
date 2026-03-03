@@ -60,6 +60,7 @@
 - Node.js 20+
 - Python 3.12+（テスト実行用）
 - AWS CLI v2 + AWS SAM CLI
+- AWS CDK CLI (`npm install -g aws-cdk`)
 - Docker（ローカル DynamoDB, Keycloak, SAM ビルド用）
 
 ### Common Commands

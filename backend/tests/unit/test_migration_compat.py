@@ -65,7 +65,7 @@ DEFAULT_LANGUAGE = "ja"
 STRANDS_MODEL_USED = "strands_bedrock"
 
 # BedrockService が返す model_used のデフォルト値
-BEDROCK_MODEL_USED_DEFAULT = "anthropic.claude-3-haiku-20240307-v1:0"
+BEDROCK_MODEL_USED_DEFAULT = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
 
 # 共通テストカードデータ
 SAMPLE_CARDS_DATA = [
