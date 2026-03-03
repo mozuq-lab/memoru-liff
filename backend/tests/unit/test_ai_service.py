@@ -36,10 +36,11 @@ class TestAIServiceProtocol:
     """AIService Protocol テスト."""
 
     def test_protocol_has_required_methods(self):
-        """TC-PROTO-001: Protocol は 3 つの必須メソッドを持つ."""
+        """TC-PROTO-001: Protocol は 4 つの必須メソッドを持つ."""
         assert hasattr(AIService, "generate_cards")
         assert hasattr(AIService, "grade_answer")
         assert hasattr(AIService, "get_learning_advice")
+        assert hasattr(AIService, "refine_card")
 
     def test_protocol_is_runtime_checkable(self):
         """TC-PROTO-002: Protocol は runtime_checkable である."""
@@ -52,6 +53,9 @@ class TestAIServiceProtocol:
                 pass
 
             def get_learning_advice(self, review_summary, language="ja"):
+                pass
+
+            def refine_card(self, front, back, language="ja"):
                 pass
 
         assert isinstance(_ConformingService(), AIService)

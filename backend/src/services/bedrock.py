@@ -11,7 +11,7 @@ import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
-from .prompts import DifficultyLevel, Language, get_card_generation_prompt, get_grading_prompt, get_advice_prompt
+from .prompts import DifficultyLevel, Language, get_card_generation_prompt, get_grading_prompt, get_advice_prompt, get_refine_user_prompt, get_refine_system_prompt
 from services.ai_service import (
     AIServiceError,
     AITimeoutError,
@@ -22,6 +22,7 @@ from services.ai_service import (
     GenerationResult,
     GradingResult,
     LearningAdvice,
+    RefineResult,
 )
 
 
@@ -244,6 +245,51 @@ class BedrockService:
             advice_text=advice_text,
             weak_areas=weak_areas,
             recommendations=recommendations,
+            model_used=self.model_id,
+            processing_time_ms=processing_time_ms,
+        )
+
+    def refine_card(
+        self,
+        front: str,
+        back: str,
+        language: Language = "ja",
+    ) -> RefineResult:
+        """Refine/improve user-input flashcard using AI.
+
+        Args:
+            front: Card front text (empty string if not provided).
+            back: Card back text (empty string if not provided).
+            language: Output language (ja/en).
+
+        Returns:
+            RefineResult with refined front/back and metadata.
+
+        Raises:
+            BedrockTimeoutError: If API times out.
+            BedrockRateLimitError: If rate limit exceeded.
+            BedrockInternalError: If API returns internal error.
+            BedrockParseError: If response cannot be parsed.
+        """
+        start_time = time.time()
+
+        user_prompt = get_refine_user_prompt(front=front, back=back, language=language)
+        system_prompt = get_refine_system_prompt(language=language)
+        prompt = f"{system_prompt}\n\n{user_prompt}"
+
+        response_text = self._invoke_with_retry(prompt)
+
+        data = self._parse_json_response(
+            response_text,
+            required_fields=["refined_front", "refined_back"],
+            context="refine",
+        )
+
+        processing_time_ms = int((time.time() - start_time) * 1000)
+
+        return RefineResult(
+            refined_front=str(data["refined_front"]),
+            refined_back=str(data["refined_back"]),
             model_used=self.model_id,
             processing_time_ms=processing_time_ms,
         )

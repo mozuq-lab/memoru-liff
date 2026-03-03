@@ -68,6 +68,16 @@ class LearningAdvice:
     processing_time_ms: int
 
 
+@dataclass
+class RefineResult:
+    """AI カード改善結果."""
+
+    refined_front: str
+    refined_back: str
+    model_used: str
+    processing_time_ms: int
+
+
 # Exception hierarchy
 class AIServiceError(Exception):
     """AI サービスの基底例外クラス."""
@@ -163,6 +173,24 @@ class AIService(Protocol):
 
         Returns:
             アドバイス、弱点分野、推奨事項。
+        """
+        ...
+
+    def refine_card(
+        self,
+        front: str,
+        back: str,
+        language: Language = "ja",
+    ) -> RefineResult:
+        """ユーザー入力のフラッシュカードを AI で改善する.
+
+        Args:
+            front: カードの表面テキスト（空文字の場合は未入力扱い）。
+            back: カードの裏面テキスト（空文字の場合は未入力扱い）。
+            language: 出力言語。
+
+        Returns:
+            改善されたカードの表面・裏面。
         """
         ...
 

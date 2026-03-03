@@ -2,7 +2,7 @@
 
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class GenerateCardsRequest(BaseModel):
@@ -62,3 +62,38 @@ class GenerateCardsResponse(BaseModel):
 
     generated_cards: List[GeneratedCardResponse]
     generation_info: GenerationInfoResponse
+
+
+class RefineCardRequest(BaseModel):
+    """Request model for AI card refinement."""
+
+    front: str = Field(
+        default="",
+        max_length=1000,
+        description="Card front text (question)",
+    )
+    back: str = Field(
+        default="",
+        max_length=2000,
+        description="Card back text (answer)",
+    )
+    language: Literal["ja", "en"] = Field(
+        default="ja",
+        description="Output language for refinement",
+    )
+
+    @model_validator(mode="after")
+    def validate_at_least_one(self) -> "RefineCardRequest":
+        """Validate that at least one of front or back is provided."""
+        if not self.front.strip() and not self.back.strip():
+            raise ValueError("At least one of front or back must be provided")
+        return self
+
+
+class RefineCardResponse(BaseModel):
+    """Response model for card refinement."""
+
+    refined_front: str
+    refined_back: str
+    model_used: str
+    processing_time_ms: int
