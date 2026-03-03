@@ -19,6 +19,8 @@ if (!stage || stage === 'dev') {
     cognitoDomainPrefix: 'memoru-dev', // TODO: Replace with actual domain prefix
     callbackUrls: ['http://localhost:3000/callback', 'https://localhost:3000/callback'],
     logoutUrls: ['http://localhost:3000/', 'https://localhost:3000/'],
+    lineLoginChannelId: process.env.LINE_LOGIN_CHANNEL_ID,
+    lineLoginChannelSecret: process.env.LINE_LOGIN_CHANNEL_SECRET,
   });
 
   new KeycloakStack(app, 'MemoruKeycloakDev', {
@@ -43,6 +45,8 @@ if (stage === 'prod') {
     cognitoDomainPrefix: 'memoru-prod', // TODO: Replace with actual domain prefix
     callbackUrls: ['https://liff.example.com/callback'], // TODO: Replace with actual URLs
     logoutUrls: ['https://liff.example.com/'], // TODO: Replace with actual URLs
+    lineLoginChannelId: process.env.LINE_LOGIN_CHANNEL_ID,
+    lineLoginChannelSecret: process.env.LINE_LOGIN_CHANNEL_SECRET,
   });
 
   new KeycloakStack(app, 'MemoruKeycloakProd', {

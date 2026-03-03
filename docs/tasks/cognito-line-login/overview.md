@@ -25,7 +25,7 @@
 
 ## 全体進捗
 
-- [ ] Phase 1: CDK 実装
+- [x] Phase 1: CDK 実装 ✅ 完了 (2026-03-04)
 
 ## マイルストーン
 
@@ -42,8 +42,8 @@
 
 | 状態 | タスク | 工数 | タイプ | 信頼性 |
 |------|--------|------|--------|--------|
-| [ ] | [TASK-0146: CognitoStack LINE Login 外部 IdP 実装](TASK-0146.md) | 4h | TDD | 🔵 |
-| [ ] | [TASK-0147: app.ts LINE Login 環境変数設定](TASK-0147.md) | 1h | DIRECT | 🔵 |
+| ✅ 完了 (2026-03-04) | [TASK-0146: CognitoStack LINE Login 外部 IdP 実装](TASK-0146.md) | 4h | TDD | 🔵 |
+| ✅ 完了 (2026-03-04) | [TASK-0147: app.ts LINE Login 環境変数設定](TASK-0147.md) | 1h | DIRECT | 🔵 |
 
 ### 依存関係
 
