@@ -12,6 +12,7 @@ type Environment = 'dev' | 'staging' | 'prod';
 export interface LiffHostingStackProps extends cdk.StackProps {
   environment: Environment;
   domainName?: string;
+  hostedZoneName?: string;
   certificateArn?: string;
   hostedZoneId?: string;
   apiEndpoint?: string;
@@ -98,10 +99,8 @@ export class LiffHostingStack extends cdk.Stack {
             preload: true,
           },
           contentTypeOptions: { override: true },
-          frameOptions: {
-            frameOption: cloudfront.HeadersFrameOption.SAMEORIGIN,
-            override: true,
-          },
+          // frameOptions は CSP frame-ancestors と競合するため設定しない
+          // LIFF は liff.line.me 内の iframe で動作するため frame-ancestors で制御
           xssProtection: {
             protection: true,
             modeBlock: true,
@@ -220,7 +219,7 @@ export class LiffHostingStack extends cdk.Stack {
     if (props.domainName && props.hostedZoneId) {
       const zone = route53.HostedZone.fromHostedZoneAttributes(this, 'Zone', {
         hostedZoneId: props.hostedZoneId,
-        zoneName: props.domainName,
+        zoneName: props.hostedZoneName ?? props.domainName,
       });
       new route53.ARecord(this, 'DNSRecord', {
         zone,

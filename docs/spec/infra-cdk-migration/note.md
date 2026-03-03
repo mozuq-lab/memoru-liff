@@ -11,7 +11,7 @@
 ### 移行対象テンプレート
 | テンプレート | リソース数 | 行数 | 複雑度 |
 |---|---|---|---|
-| `infrastructure/keycloak/template.yaml` | VPC, Subnet×4, NAT, IGW, SG×3, SecretsManager×2, RDS PostgreSQL 18 (16から更新), ECS/Fargate, ALB, Route53 | 672行 | 高 |
+| `infrastructure/keycloak/template.yaml` | VPC, Subnet×4, NAT, IGW, SG×3, SecretsManager×2, RDS PostgreSQL 17 (16から更新), ECS/Fargate, ALB, Route53 | 672行 | 高 |
 | `infrastructure/liff-hosting/template.yaml` | S3×2, CloudFront, OAC, CachePolicy, ResponseHeadersPolicy, Route53 | 358行 | 中 |
 | `infrastructure/cognito/template.yaml` | UserPool, UserPoolDomain, UserPoolClient | 183行 | 低 |
 
@@ -69,8 +69,8 @@ infrastructure/
 
 ### PostgreSQL バージョン
 - **現在**: PostgreSQL 16 (`EngineVersion: '16'`, `Family: postgres16`)
-- **更新後**: PostgreSQL 18 (`EngineVersion: '18'`, `Family: postgres18`)
-- **RDS 対応状況**: 2025年11月にサポート開始、最新マイナーバージョン 18.3 (2026年2月)
+- **更新後**: PostgreSQL 17 (`rds.PostgresEngineVersion.VER_17`)
+- **備考**: PostgreSQL 18 は CDK/RDS で VER_18 が未提供のため VER_17 を採用
 
 ## 注意事項
 

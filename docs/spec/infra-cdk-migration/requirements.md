@@ -22,7 +22,7 @@
 
 - REQ-002: 3つの独立した CDK スタック（Keycloak, LIFF Hosting, Cognito）を作成しなければならない 🔵 *ヒアリング Q3, Q5 より*
 
-- REQ-003: Keycloak スタックは既存テンプレートと同等のリソース（VPC, Subnet, NAT Gateway, IGW, SecurityGroup, SecretsManager, RDS PostgreSQL 18, ECS/Fargate, ALB, Route53）を作成しなければならない 🔵 *`infrastructure/keycloak/template.yaml` より。PostgreSQL 18 はユーザ指示により 16 からアップグレード*
+- REQ-003: Keycloak スタックは既存テンプレートと同等のリソース（VPC, Subnet, NAT Gateway, IGW, SecurityGroup, SecretsManager, RDS PostgreSQL 17, ECS/Fargate, ALB, Route53）を作成しなければならない 🔵 *`infrastructure/keycloak/template.yaml` より。PostgreSQL 17 はユーザ指示により 16 からアップグレード*
 
 - REQ-004: LIFF Hosting スタックは既存テンプレートと同等のリソース（S3, CloudFront + OAC, CachePolicy, SecurityHeaders, Route53）を作成しなければならない 🔵 *`infrastructure/liff-hosting/template.yaml` より*
 

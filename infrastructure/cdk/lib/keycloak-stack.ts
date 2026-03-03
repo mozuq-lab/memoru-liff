@@ -16,6 +16,7 @@ type Environment = 'dev' | 'staging' | 'prod';
 export interface KeycloakStackProps extends cdk.StackProps {
   environment: Environment;
   domainName: string;
+  hostedZoneName?: string;
   certificateArn?: string;
   hostedZoneId?: string;
   vpcCidr?: string;
@@ -92,7 +93,7 @@ export class KeycloakStack extends cdk.Stack {
     });
 
     // ============================================================
-    // RDS PostgreSQL 18
+    // RDS PostgreSQL 17 (CDK/RDS で VER_18 は未提供のため VER_17 を使用)
     // ============================================================
     const dbSecurityGroup = new ec2.SecurityGroup(this, 'RDSSecurityGroup', {
       vpc: this.vpc,
@@ -142,7 +143,7 @@ export class KeycloakStack extends cdk.Stack {
     const logGroup = new logs.LogGroup(this, 'LogGroup', {
       logGroupName: `/ecs/memoru-${props.environment}-keycloak`,
       retention: isProd ? logs.RetentionDays.THREE_MONTHS : logs.RetentionDays.TWO_WEEKS,
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
 
     // ============================================================
@@ -183,7 +184,7 @@ export class KeycloakStack extends cdk.Stack {
           environment: {
             KC_DB: 'postgres',
             KC_DB_URL: `jdbc:postgresql://${this.dbInstance.instanceEndpoint.hostname}:5432/keycloak`,
-            KC_HOSTNAME: props.domainName,
+            KC_HOSTNAME: certificate ? props.domainName : '',
             KC_HOSTNAME_STRICT: isProd ? 'true' : 'false',
             KC_HOSTNAME_STRICT_HTTPS: isProd ? 'true' : 'false',
             KC_PROXY_HEADERS: 'xforwarded',
@@ -226,7 +227,7 @@ export class KeycloakStack extends cdk.Stack {
     if (props.domainName && props.hostedZoneId) {
       const zone = route53.HostedZone.fromHostedZoneAttributes(this, 'Zone', {
         hostedZoneId: props.hostedZoneId,
-        zoneName: props.domainName,
+        zoneName: props.hostedZoneName ?? props.domainName,
       });
       new route53.ARecord(this, 'DNSRecord', {
         zone,

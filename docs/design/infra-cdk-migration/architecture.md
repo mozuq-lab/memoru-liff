@@ -126,7 +126,7 @@ new KeycloakStack(app, 'MemoruKeycloakProd', {
 |---|---|---|
 | `ec2.Vpc` | VPC + Subnet + NAT Gateway + IGW | L2 |
 | `ecs_patterns.ApplicationLoadBalancedFargateService` | ECS Fargate + ALB + SG + LogGroup | L2 (Pattern) |
-| `rds.DatabaseInstance` | RDS PostgreSQL 18 | L2 |
+| `rds.DatabaseInstance` | RDS PostgreSQL 17 | L2 |
 | `secretsmanager.Secret` | DB パスワード・Keycloak admin | L2 |
 | `route53.ARecord` | DNS レコード | L2 |
 

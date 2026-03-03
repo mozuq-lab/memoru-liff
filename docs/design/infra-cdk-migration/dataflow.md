@@ -29,7 +29,7 @@ flowchart TD
     CFn --> CG[Cognito スタック]
 
     KC --> VPC[VPC + Subnet]
-    KC --> RDS[RDS PostgreSQL 18]
+    KC --> RDS[RDS PostgreSQL 17]
     KC --> ECS[ECS/Fargate + ALB]
     KC --> SM[Secrets Manager]
 
@@ -114,7 +114,7 @@ flowchart TD
     end
 
     subgraph Database
-        PriSub --> RDS[rds.DatabaseInstance<br/>PostgreSQL 18]
+        PriSub --> RDS[rds.DatabaseInstance<br/>PostgreSQL 17]
         SM1 -->|credentials| RDS
     end
 

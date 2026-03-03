@@ -295,7 +295,9 @@ Resources:
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
-              Resource: !Sub arn:aws:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}
+              Resource:
+                - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
+                - !Sub arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0
       Environment:
         Variables:
           OIDC_ISSUER: !Ref OidcIssuer
@@ -521,7 +523,9 @@ Resources:
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
-              Resource: !Sub arn:aws:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}
+              Resource:
+                - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
+                - !Sub arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0
       Environment:
         Variables:
           OIDC_ISSUER: !Ref OidcIssuer
@@ -560,7 +564,9 @@ Resources:
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
-              Resource: !Sub arn:aws:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}
+              Resource:
+                - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
+                - !Sub arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0
       Environment:
         Variables:
           OIDC_ISSUER: !Ref OidcIssuer

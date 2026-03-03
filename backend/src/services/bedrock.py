@@ -72,7 +72,7 @@ class BedrockService:
         """Initialize BedrockService.
 
         Args:
-            model_id: Bedrock model ID. Defaults to Claude 3 Haiku.
+            model_id: Bedrock model ID. Defaults to Claude Haiku 4.5.
             bedrock_client: Optional boto3 Bedrock client for testing.
         """
         self.model_id = model_id or os.environ.get(
