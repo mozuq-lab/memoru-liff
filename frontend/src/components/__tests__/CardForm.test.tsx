@@ -1,12 +1,25 @@
 /**
  * 【テスト概要】: カード編集フォームコンポーネントのテスト
  * 【テスト対象】: CardForm コンポーネント
- * 【テスト対応】: TASK-0017 テストケース2〜5
+ * 【テスト対応】: TASK-0017 テストケース2〜5, TASK-0141 AI補足機能
  */
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CardForm } from '../CardForm';
+
+// cardsApi モック
+vi.mock('@/services/api', () => ({
+  cardsApi: {
+    refineCard: vi.fn(),
+  },
+}));
+
+// モック関数を取得
+const getRefineCardMock = async () => {
+  const { cardsApi } = await import('@/services/api');
+  return cardsApi.refineCard as ReturnType<typeof vi.fn>;
+};
 
 const defaultProps = {
   initialFront: '元の質問',
@@ -21,6 +34,10 @@ const renderCardForm = (props = {}) => {
 };
 
 describe('CardForm', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   describe('初期表示', () => {
     it('初期値が表示される', () => {
       renderCardForm();
@@ -40,6 +57,13 @@ describe('CardForm', () => {
 
       expect(screen.getByLabelText('表面（質問）')).toBeInTheDocument();
       expect(screen.getByLabelText('裏面（解答）')).toBeInTheDocument();
+    });
+
+    it('AI で補足ボタンが表示される', () => {
+      renderCardForm();
+
+      expect(screen.getByTestId('refine-button')).toBeInTheDocument();
+      expect(screen.getByTestId('refine-button')).toHaveTextContent('AI で補足');
     });
   });
 
@@ -187,6 +211,219 @@ describe('CardForm', () => {
       await user.type(backInput, 'テスト回答');
 
       expect(backInput).toHaveValue('テスト回答');
+    });
+  });
+
+  describe('AI で補足', () => {
+    it('AI で補足ボタンが有効（表面・裏面に値がある場合）', () => {
+      renderCardForm();
+
+      expect(screen.getByTestId('refine-button')).toBeEnabled();
+    });
+
+    it('表面・裏面の両方が空の場合、AI で補足ボタンは無効', () => {
+      renderCardForm({ initialFront: '', initialBack: '' });
+
+      expect(screen.getByTestId('refine-button')).toBeDisabled();
+    });
+
+    it('表面のみ入力があればAI で補足ボタンは有効', () => {
+      renderCardForm({ initialFront: 'テスト', initialBack: '' });
+
+      expect(screen.getByTestId('refine-button')).toBeEnabled();
+    });
+
+    it('裏面のみ入力があればAI で補足ボタンは有効', () => {
+      renderCardForm({ initialFront: '', initialBack: 'テスト' });
+
+      expect(screen.getByTestId('refine-button')).toBeEnabled();
+    });
+
+    it('保存中はAI で補足ボタンが無効', () => {
+      renderCardForm({ isSaving: true });
+
+      expect(screen.getByTestId('refine-button')).toBeDisabled();
+    });
+
+    it('AI で補足成功時にテキストエリアが更新される', async () => {
+      const user = userEvent.setup();
+      const mockRefineCard = await getRefineCardMock();
+      mockRefineCard.mockResolvedValue({
+        refined_front: '改善された質問',
+        refined_back: '改善された回答',
+        model_used: 'test-model',
+        processing_time_ms: 500,
+      });
+
+      renderCardForm();
+
+      await user.click(screen.getByTestId('refine-button'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('input-front')).toHaveValue('改善された質問');
+        expect(screen.getByTestId('input-back')).toHaveValue('改善された回答');
+      });
+    });
+
+    it('AI で補足中はボタンに「AI 処理中...」と表示される', async () => {
+      const user = userEvent.setup();
+      const mockRefineCard = await getRefineCardMock();
+      let resolvePromise: (value: unknown) => void;
+      mockRefineCard.mockReturnValue(new Promise((resolve) => { resolvePromise = resolve; }));
+
+      renderCardForm();
+
+      await user.click(screen.getByTestId('refine-button'));
+
+      expect(screen.getByTestId('refine-button')).toHaveTextContent('AI 処理中...');
+      expect(screen.getByTestId('refine-button')).toBeDisabled();
+
+      resolvePromise!({
+        refined_front: '改善', refined_back: '改善',
+        model_used: 'test', processing_time_ms: 100,
+      });
+    });
+
+    it('AI で補足中は入力フィールドが無効化される', async () => {
+      const user = userEvent.setup();
+      const mockRefineCard = await getRefineCardMock();
+      let resolvePromise: (value: unknown) => void;
+      mockRefineCard.mockReturnValue(new Promise((resolve) => { resolvePromise = resolve; }));
+
+      renderCardForm();
+
+      await user.click(screen.getByTestId('refine-button'));
+
+      expect(screen.getByTestId('input-front')).toBeDisabled();
+      expect(screen.getByTestId('input-back')).toBeDisabled();
+
+      resolvePromise!({
+        refined_front: '改善', refined_back: '改善',
+        model_used: 'test', processing_time_ms: 100,
+      });
+    });
+
+    it('AI で補足エラー時にエラーメッセージが表示される', async () => {
+      const user = userEvent.setup();
+      const mockRefineCard = await getRefineCardMock();
+      mockRefineCard.mockRejectedValue(new Error('HTTP 500'));
+
+      renderCardForm();
+
+      await user.click(screen.getByTestId('refine-button'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('refine-error')).toBeInTheDocument();
+      });
+    });
+
+    it('AI で補足エラー時に元のテキストが維持される', async () => {
+      const user = userEvent.setup();
+      const mockRefineCard = await getRefineCardMock();
+      mockRefineCard.mockRejectedValue(new Error('HTTP 500'));
+
+      renderCardForm();
+
+      await user.click(screen.getByTestId('refine-button'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('refine-error')).toBeInTheDocument();
+      });
+
+      expect(screen.getByTestId('input-front')).toHaveValue('元の質問');
+      expect(screen.getByTestId('input-back')).toHaveValue('元の回答');
+    });
+
+    it('タイムアウトエラー時に適切なメッセージが表示される', async () => {
+      const user = userEvent.setup();
+      const mockRefineCard = await getRefineCardMock();
+      mockRefineCard.mockRejectedValue(new Error('HTTP 504'));
+
+      renderCardForm();
+
+      await user.click(screen.getByTestId('refine-button'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('refine-error')).toHaveTextContent(
+          'AIの処理がタイムアウトしました。再度お試しください'
+        );
+      });
+    });
+
+    it('レート制限エラー時に適切なメッセージが表示される', async () => {
+      const user = userEvent.setup();
+      const mockRefineCard = await getRefineCardMock();
+      mockRefineCard.mockRejectedValue(new Error('HTTP 429'));
+
+      renderCardForm();
+
+      await user.click(screen.getByTestId('refine-button'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('refine-error')).toHaveTextContent(
+          'リクエスト制限に達しました。しばらくお待ちください'
+        );
+      });
+    });
+
+    it('AIサービス障害時に適切なメッセージが表示される', async () => {
+      const user = userEvent.setup();
+      const mockRefineCard = await getRefineCardMock();
+      mockRefineCard.mockRejectedValue(new Error('HTTP 503'));
+
+      renderCardForm();
+
+      await user.click(screen.getByTestId('refine-button'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('refine-error')).toHaveTextContent(
+          'AIサービスが一時的に利用できません'
+        );
+      });
+    });
+
+    it('AI で補足リクエストに正しいパラメータが渡される', async () => {
+      const user = userEvent.setup();
+      const mockRefineCard = await getRefineCardMock();
+      mockRefineCard.mockResolvedValue({
+        refined_front: '改善', refined_back: '改善',
+        model_used: 'test', processing_time_ms: 100,
+      });
+
+      renderCardForm();
+
+      await user.click(screen.getByTestId('refine-button'));
+
+      await waitFor(() => {
+        expect(mockRefineCard).toHaveBeenCalledWith(
+          { front: '元の質問', back: '元の回答' },
+          { signal: expect.any(AbortSignal) },
+        );
+      });
+    });
+
+    it('再試行時にエラーメッセージがクリアされる', async () => {
+      const user = userEvent.setup();
+      const mockRefineCard = await getRefineCardMock();
+      mockRefineCard.mockRejectedValueOnce(new Error('HTTP 500'));
+      mockRefineCard.mockResolvedValueOnce({
+        refined_front: '改善', refined_back: '改善',
+        model_used: 'test', processing_time_ms: 100,
+      });
+
+      renderCardForm();
+
+      // 1回目: エラー
+      await user.click(screen.getByTestId('refine-button'));
+      await waitFor(() => {
+        expect(screen.getByTestId('refine-error')).toBeInTheDocument();
+      });
+
+      // 2回目: 成功
+      await user.click(screen.getByTestId('refine-button'));
+      await waitFor(() => {
+        expect(screen.queryByTestId('refine-error')).not.toBeInTheDocument();
+      });
     });
   });
 });
