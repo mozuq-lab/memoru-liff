@@ -110,10 +110,10 @@ class TestRefineCardParsing:
         """正しい JSON レスポンスのパースが成功すること."""
         service = self._create_service()
         response = json.dumps({"refined_front": "改善表面", "refined_back": "改善裏面"})
-        result = service._parse_refine_result(response)
+        refined_front, refined_back = service._parse_refine_result(response)
 
-        assert result.refined_front == "改善表面"
-        assert result.refined_back == "改善裏面"
+        assert refined_front == "改善表面"
+        assert refined_back == "改善裏面"
 
     def test_parse_invalid_json(self):
         """不正な JSON の場合に AIParseError が発生すること."""
@@ -139,10 +139,10 @@ class TestRefineCardParsing:
         """Markdown コードブロック内の JSON が正しくパースされること."""
         service = self._create_service()
         response = '```json\n{"refined_front": "F", "refined_back": "B"}\n```'
-        result = service._parse_refine_result(response)
+        refined_front, refined_back = service._parse_refine_result(response)
 
-        assert result.refined_front == "F"
-        assert result.refined_back == "B"
+        assert refined_front == "F"
+        assert refined_back == "B"
 
 
 class TestRefineCardErrors:

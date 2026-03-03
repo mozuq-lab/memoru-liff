@@ -419,7 +419,7 @@ class StrandsAIService:
             language: 出力言語（'ja', 'en'）。
 
         Returns:
-            RefineResult: 改善されたカードの表面・裏面。
+            RefineResult: 改善されたカードの表面・裏面とメタ情報。
 
         Raises:
             AITimeoutError: Agent 呼び出しがタイムアウトした場合。
@@ -428,6 +428,8 @@ class StrandsAIService:
             AIParseError: レスポンスの解析に失敗した場合。
             AIServiceError: その他の予期しないエラーが発生した場合。
         """
+        start_time = time.time()
+
         with _handle_ai_errors():
             user_prompt = get_refine_user_prompt(
                 front=front,
@@ -439,16 +441,25 @@ class StrandsAIService:
             response = agent(user_prompt)
 
             response_text = str(response)
-            return self._parse_refine_result(response_text)
+            refined_front, refined_back = self._parse_refine_result(response_text)
 
-    def _parse_refine_result(self, response_text: str) -> RefineResult:
+            processing_time_ms = int((time.time() - start_time) * 1000)
+
+            return RefineResult(
+                refined_front=refined_front,
+                refined_back=refined_back,
+                model_used=self.model_used,
+                processing_time_ms=processing_time_ms,
+            )
+
+    def _parse_refine_result(self, response_text: str) -> tuple[str, str]:
         """Strands Agent のレスポンステキストからカード改善結果を抽出する.
 
         Args:
             response_text: Agent から返されたレスポンステキスト。
 
         Returns:
-            RefineResult: 改善されたカードの表面・裏面。
+            (refined_front, refined_back) のタプル。
 
         Raises:
             AIParseError: JSON の解析に失敗した場合、または必須フィールドが欠落している場合。
@@ -476,10 +487,7 @@ class StrandsAIService:
                 f"Available keys: {list(data.keys())}"
             )
 
-        return RefineResult(
-            refined_front=str(data["refined_front"]),
-            refined_back=str(data["refined_back"]),
-        )
+        return str(data["refined_front"]), str(data["refined_back"])
 
     def _parse_advice_result(self, response_text: str) -> tuple[str, List[str], List[str]]:
         """Strands Agent のレスポンステキストからアドバイス結果を抽出する.

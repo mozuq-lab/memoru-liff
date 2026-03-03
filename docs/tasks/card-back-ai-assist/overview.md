@@ -25,7 +25,7 @@
 
 ## 全体進捗
 
-- [ ] Phase 1: バックエンド実装
+- [x] Phase 1: バックエンド実装
 - [ ] Phase 2: フロントエンド実装
 
 ## マイルストーン
@@ -44,7 +44,7 @@
 
 - [x] [TASK-0137: Pydantic モデル・プロンプト定義](TASK-0137.md) - 4h (TDD) 🔵
 - [x] [TASK-0138: AI サービス refine_card 実装](TASK-0138.md) - 4h (TDD) 🔵
-- [ ] [TASK-0139: API ハンドラー POST /cards/refine](TASK-0139.md) - 4h (TDD) 🔵
+- [x] [TASK-0139: API ハンドラー POST /cards/refine](TASK-0139.md) - 4h (TDD) 🔵
 
 ### 依存関係
 

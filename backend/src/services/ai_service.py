@@ -74,6 +74,8 @@ class RefineResult:
 
     refined_front: str
     refined_back: str
+    model_used: str
+    processing_time_ms: int
 
 
 # Exception hierarchy

@@ -13,6 +13,8 @@ from models.generate import (
     GenerateCardsResponse,
     GeneratedCardResponse,
     GenerationInfoResponse,
+    RefineCardRequest,
+    RefineCardResponse,
 )
 from services.ai_service import (
     create_ai_service,
@@ -83,4 +85,57 @@ def generate_cards():
         return map_ai_error_to_http(e)
     except Exception as e:
         logger.error(f"Error generating cards: {e}")
+        raise
+
+
+@router.post("/cards/refine")
+@tracer.capture_method
+def refine_card():
+    """Refine/improve user-input flashcard using AI."""
+    user_id = get_user_id_from_context(router)
+    logger.info(f"Refining card for user_id: {user_id}")
+
+    try:
+        body = router.current_event.json_body
+        request = RefineCardRequest(**body)
+    except ValidationError as e:
+        logger.warning(f"Validation error: {e}")
+        details = json.loads(e.json())
+        return Response(
+            status_code=400,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": "Invalid request", "details": details}),
+        )
+    except json.JSONDecodeError:
+        return Response(
+            status_code=400,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": "Invalid JSON body"}),
+        )
+
+    try:
+        ai_service = create_ai_service()
+        result = ai_service.refine_card(
+            front=request.front,
+            back=request.back,
+            language=request.language,
+        )
+        logger.info(
+            f"Card refinement succeeded for user_id: {user_id}, "
+            f"model={result.model_used}, time_ms={result.processing_time_ms}"
+        )
+
+        response = RefineCardResponse(
+            refined_front=result.refined_front,
+            refined_back=result.refined_back,
+            model_used=result.model_used,
+            processing_time_ms=result.processing_time_ms,
+        )
+        return response.model_dump(mode="json")
+
+    except AIServiceError as e:
+        logger.warning(f"AI service error for user_id {user_id}: {type(e).__name__}: {e}")
+        return map_ai_error_to_http(e)
+    except Exception as e:
+        logger.error(f"Error refining card: {e}")
         raise
