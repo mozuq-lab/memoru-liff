@@ -9,10 +9,10 @@ export interface CognitoStackProps extends cdk.StackProps {
   cognitoDomainPrefix: string;
   callbackUrls: string[];
   logoutUrls: string[];
-  // 【LINE Login 追加 Props】: LINE Login 外部 OIDC IdP 登録用のオプショナルプロパティ 🔵
-  // 【設計方針】: 両方が指定された場合のみ LINE IdP を登録し、後方互換性を維持 (REQ-006)
-  lineLoginChannelId?: string;     // LINE Login Channel ID（省略時は LINE IdP 未登録）
-  lineLoginChannelSecret?: string; // LINE Login Channel Secret
+  /** LINE Login Channel ID（両方指定時のみ LINE IdP を登録） */
+  lineLoginChannelId?: string;
+  /** LINE Login Channel Secret */
+  lineLoginChannelSecret?: string;
 }
 
 export class CognitoStack extends cdk.Stack {
@@ -59,39 +59,31 @@ export class CognitoStack extends cdk.Stack {
       },
     });
 
-    // ============================================================
-    // LINE Login 外部 OIDC IdP（条件付き作成）
-    // ============================================================
-    // 【機能概要】: LINE Login を外部 OIDC IdP として Cognito UserPool に登録する 🔵
-    // 【実装方針】: lineLoginChannelId と lineLoginChannelSecret の両方が指定された場合のみ作成 (REQ-001)
-    // 【後方互換性】: Props 未指定時は既存動作（COGNITO のみ）を維持する (REQ-401)
-    // 【変数宣言位置】: UserPoolClient の supportedIdentityProviders で参照するため、
-    //   addClient 呼び出し前に lineProvider を定義する必要がある
+    // LINE Login 外部 OIDC IdP（両方の Props が指定された場合のみ作成）
     let lineProvider: cognito.UserPoolIdentityProviderOidc | undefined;
     if (props.lineLoginChannelId && props.lineLoginChannelSecret) {
-      // 【LINE IdP 作成】: LINE Login の OIDC エンドポイントを手動指定して登録 (REQ-002) 🔵
-      // 【エンドポイント手動指定】: LINE は .well-known/openid-configuration に非対応のため、各エンドポイントを明示
+      // LINE OIDC エンドポイントは .well-known/openid-configuration から取得可能だが、
+      // CDK の UserPoolIdentityProviderOidc は手動指定が必要
+      // ref: https://access.line.me/.well-known/openid-configuration
       lineProvider = new cognito.UserPoolIdentityProviderOidc(this, 'LineLoginProvider', {
         userPool: this.userPool,
-        name: 'LINE', // 【プロバイダ名】: Cognito Hosted UI の LINE ログインボタン識別子
+        name: 'LINE',
         clientId: props.lineLoginChannelId,
         clientSecret: props.lineLoginChannelSecret,
-        issuerUrl: 'https://access.line.me', // 🟡 LINE OIDC Issuer URL
-        scopes: ['openid', 'profile'], // 【スコープ】: LINE ユーザー属性取得に必要な最小スコープ
+        issuerUrl: 'https://access.line.me',
+        scopes: ['openid', 'profile'],
         endpoints: {
-          // 【LINE OIDC エンドポイント手動指定】: 各エンドポイントを手動設定 (REQ-002) 🟡
           authorization: 'https://access.line.me/oauth2/v2.1/authorize',
           token: 'https://api.line.me/oauth2/v2.1/token',
-          userInfo: 'https://api.line.me/v2/profile',
+          userInfo: 'https://api.line.me/oauth2/v2.1/userinfo',
           jwksUri: 'https://api.line.me/oauth2/v2.1/certs',
         },
         attributeMapping: {
-          // 【属性マッピング】: LINE 属性を Cognito ユーザー属性にマッピング (REQ-003) 🔵
-          // 【custom 使用】: 標準マッピングキーでは username が undefined になるため custom を使用
+          // Cognito は federated user の username を自動で LINE_<sub> に設定するため、
+          // username マッピングは不要。name と picture のみマッピングする。
           custom: {
-            username: cognito.ProviderAttribute.other('sub'),     // LINE ユーザー ID → Cognito username
-            name: cognito.ProviderAttribute.other('name'),        // LINE 表示名 → Cognito name
-            picture: cognito.ProviderAttribute.other('picture'),  // LINE プロフィール画像 → Cognito picture
+            name: cognito.ProviderAttribute.other('name'),
+            picture: cognito.ProviderAttribute.other('picture'),
           },
         },
       });
@@ -118,8 +110,6 @@ export class CognitoStack extends cdk.Stack {
         userSrp: false,
       },
       supportedIdentityProviders: [
-        // 【supportedIdentityProviders】: LINE IdP が登録されている場合のみ追加 (REQ-004, REQ-005) 🔵
-        // 【条件付き追加】: lineProvider が存在する場合のみ LINE を配列に追加
         cognito.UserPoolClientIdentityProvider.COGNITO,
         ...(lineProvider ? [cognito.UserPoolClientIdentityProvider.custom('LINE')] : []),
       ],
@@ -128,6 +118,11 @@ export class CognitoStack extends cdk.Stack {
       refreshTokenValidity: cdk.Duration.days(30),
       preventUserExistenceErrors: true,
     });
+
+    // UserPoolClient が LINE IdP より先に作成されると CloudFormation エラーになるため明示的に依存を追加
+    if (lineProvider) {
+      this.userPoolClient.node.addDependency(lineProvider);
+    }
 
     // ============================================================
     // Outputs

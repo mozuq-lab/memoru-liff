@@ -1,6 +1,6 @@
 // Jest Snapshot v1, https://goo.gl/fbAQLP
 
-exports[`CognitoStack LINE Login IdP Snapshot（LINE あり） TC-008: dev + LINE IdP のスナップショットが一致すること 1`] = `
+exports[`CognitoStack LINE Login IdP Snapshot（LINE あり） dev + LINE IdP のスナップショットが一致すること 1`] = `
 {
   "Outputs": {
     "CognitoDomainUrl": {
@@ -86,11 +86,10 @@ exports[`CognitoStack LINE Login IdP Snapshot（LINE あり） TC-008: dev + LIN
         "AttributeMapping": {
           "name": "name",
           "picture": "picture",
-          "username": "sub",
         },
         "ProviderDetails": {
           "attributes_request_method": "GET",
-          "attributes_url": "https://api.line.me/v2/profile",
+          "attributes_url": "https://api.line.me/oauth2/v2.1/userinfo",
           "authorize_scopes": "openid profile",
           "authorize_url": "https://access.line.me/oauth2/v2.1/authorize",
           "client_id": "test-channel-id",
@@ -160,6 +159,9 @@ exports[`CognitoStack LINE Login IdP Snapshot（LINE あり） TC-008: dev + LIN
       "UpdateReplacePolicy": "Delete",
     },
     "UserPoolLiffClient5F4D99DC": {
+      "DependsOn": [
+        "LineLoginProvider63DFFF04",
+      ],
       "Properties": {
         "AccessTokenValidity": 60,
         "AllowedOAuthFlows": [
@@ -240,7 +242,7 @@ exports[`CognitoStack LINE Login IdP Snapshot（LINE あり） TC-008: dev + LIN
 }
 `;
 
-exports[`CognitoStack LINE Login IdP Snapshot（LINE あり） TC-009: prod + LINE IdP のスナップショットが一致すること 1`] = `
+exports[`CognitoStack LINE Login IdP Snapshot（LINE あり） prod + LINE IdP のスナップショットが一致すること 1`] = `
 {
   "Outputs": {
     "CognitoDomainUrl": {
@@ -326,11 +328,10 @@ exports[`CognitoStack LINE Login IdP Snapshot（LINE あり） TC-009: prod + LI
         "AttributeMapping": {
           "name": "name",
           "picture": "picture",
-          "username": "sub",
         },
         "ProviderDetails": {
           "attributes_request_method": "GET",
-          "attributes_url": "https://api.line.me/v2/profile",
+          "attributes_url": "https://api.line.me/oauth2/v2.1/userinfo",
           "authorize_scopes": "openid profile",
           "authorize_url": "https://access.line.me/oauth2/v2.1/authorize",
           "client_id": "test-channel-id",
@@ -400,6 +401,9 @@ exports[`CognitoStack LINE Login IdP Snapshot（LINE あり） TC-009: prod + LI
       "UpdateReplacePolicy": "Retain",
     },
     "UserPoolLiffClient5F4D99DC": {
+      "DependsOn": [
+        "LineLoginProvider63DFFF04",
+      ],
       "Properties": {
         "AccessTokenValidity": 60,
         "AllowedOAuthFlows": [

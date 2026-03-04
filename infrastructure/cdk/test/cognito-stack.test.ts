@@ -161,13 +161,6 @@ describe('CognitoStack', () => {
     });
   });
 
-  // ============================================================
-  // LINE Login IdP テスト（TASK-0146）
-  // 【テスト目的】: LINE Login 外部 OIDC IdP の条件付き登録機能をテスト
-  // 【期待される動作】: LINE Props 指定時は IdP が作成され、未指定時は既存動作を維持
-  // ============================================================
-
-  // 🔵 CognitoStackProps に lineLoginChannelId/lineLoginChannelSecret が追加されたため型安全
   const devPropsWithLine: CognitoStackProps = {
     ...devProps,
     lineLoginChannelId: 'test-channel-id',
@@ -181,62 +174,52 @@ describe('CognitoStack', () => {
   };
 
   describe('LINE Login IdP', () => {
-    // ============================================================
-    // LINE Props 指定時のテスト
-    // ============================================================
     describe('LINE Props 指定時', () => {
-      test('TC-001: UserPoolIdentityProvider リソースが作成される', () => {
-        // 🔵 REQ-001: lineLoginChannelId/Secret 両方指定時に OIDC IdP リソースが生成されること
+      test('UserPoolIdentityProvider OIDC リソースが作成される', () => {
         const template = Template.fromStack(createStack(devPropsWithLine));
         template.hasResourceProperties('AWS::Cognito::UserPoolIdentityProvider', {
           ProviderType: 'OIDC',
         });
       });
 
-      test('TC-002: LINE IdP の ProviderName が LINE であること', () => {
-        // 🔵 architecture.md「UserPoolIdentityProviderOidc の追加」より: name: 'LINE' が ProviderName に出力される
+      test('ProviderName が LINE であること', () => {
         const template = Template.fromStack(createStack(devPropsWithLine));
         template.hasResourceProperties('AWS::Cognito::UserPoolIdentityProvider', {
           ProviderName: 'LINE',
         });
       });
 
-      test('TC-003: LINE OIDC エンドポイントが正しく設定されていること', () => {
-        // 🟡 LINE Developers ドキュメントからの推測。CloudFormation プロパティ名は CDK の内部変換に依存
+      test('LINE OIDC エンドポイントが正しく設定されていること', () => {
         const template = Template.fromStack(createStack(devPropsWithLine));
         template.hasResourceProperties('AWS::Cognito::UserPoolIdentityProvider', {
           ProviderDetails: {
             authorize_url: 'https://access.line.me/oauth2/v2.1/authorize',
             token_url: 'https://api.line.me/oauth2/v2.1/token',
-            attributes_url: 'https://api.line.me/v2/profile',
+            attributes_url: 'https://api.line.me/oauth2/v2.1/userinfo',
             jwks_uri: 'https://api.line.me/oauth2/v2.1/certs',
             oidc_issuer: 'https://access.line.me',
           },
         });
       });
 
-      test('TC-004: LINE 属性マッピング（sub, name, picture）が設定されていること', () => {
-        // 🔵 REQ-003・architecture.md「属性マッピング」より: sub→username, name→name, picture→picture
+      test('属性マッピング（name, picture）が設定されていること', () => {
         const template = Template.fromStack(createStack(devPropsWithLine));
         template.hasResourceProperties('AWS::Cognito::UserPoolIdentityProvider', {
           AttributeMapping: {
-            username: 'sub',
             name: 'name',
             picture: 'picture',
           },
         });
       });
 
-      test('TC-005: UserPoolClient の SupportedIdentityProviders に COGNITO と LINE が含まれること', () => {
-        // 🔵 REQ-004/005: supportedIdentityProviders に LINE が条件付きで追加されること
+      test('UserPoolClient の SupportedIdentityProviders に COGNITO と LINE が含まれること', () => {
         const template = Template.fromStack(createStack(devPropsWithLine));
         template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
           SupportedIdentityProviders: ['COGNITO', 'LINE'],
         });
       });
 
-      test('TC-006: LINE IdP の clientId と clientSecret が Props から正しく設定されること', () => {
-        // 🟡 CloudFormation 出力のプロパティ名（client_id/client_secret）は CDK の内部変換に依存
+      test('clientId と clientSecret が Props から正しく設定されること', () => {
         const template = Template.fromStack(createStack(devPropsWithLine));
         template.hasResourceProperties('AWS::Cognito::UserPoolIdentityProvider', {
           ProviderDetails: {
@@ -246,8 +229,7 @@ describe('CognitoStack', () => {
         });
       });
 
-      test('TC-007: LINE IdP の OIDC スコープが openid, profile であること', () => {
-        // 🟡 CDK が scopes 配列をスペース区切り文字列に変換して ProviderDetails に出力する
+      test('OIDC スコープが openid, profile であること', () => {
         const template = Template.fromStack(createStack(devPropsWithLine));
         template.hasResourceProperties('AWS::Cognito::UserPoolIdentityProvider', {
           ProviderDetails: {
@@ -255,67 +237,65 @@ describe('CognitoStack', () => {
           },
         });
       });
+
+      test('UserPoolClient が LINE IdP に DependsOn を持つこと', () => {
+        const template = Template.fromStack(createStack(devPropsWithLine));
+        const clients = template.findResources('AWS::Cognito::UserPoolClient');
+        const clientKey = Object.keys(clients)[0];
+        const client = clients[clientKey];
+        expect(client.DependsOn).toBeDefined();
+        expect(client.DependsOn).toEqual(
+          expect.arrayContaining([
+            expect.stringContaining('LineLoginProvider'),
+          ]),
+        );
+      });
     });
 
-    // ============================================================
-    // スナップショットテスト（LINE あり）
-    // ============================================================
     describe('Snapshot（LINE あり）', () => {
-      test('TC-008: dev + LINE IdP のスナップショットが一致すること', () => {
-        // 🔵 既存テストパターンより: LINE IdP を含む dev 環境テンプレートの整合性を保証
+      test('dev + LINE IdP のスナップショットが一致すること', () => {
         const template = Template.fromStack(createStack(devPropsWithLine));
         expect(template.toJSON()).toMatchSnapshot();
       });
 
-      test('TC-009: prod + LINE IdP のスナップショットが一致すること', () => {
-        // 🔵 prod 固有設定（DeletionProtection: ACTIVE, RemovalPolicy: RETAIN）が LINE IdP 追加後も維持される
+      test('prod + LINE IdP のスナップショットが一致すること', () => {
         const template = Template.fromStack(createStack(prodPropsWithLine));
         expect(template.toJSON()).toMatchSnapshot();
       });
     });
 
-    // ============================================================
-    // 後方互換性テスト（LINE Props 未指定時）
-    // ============================================================
     describe('LINE Props 未指定時（後方互換性）', () => {
-      test('TC-012: LINE Props 未指定時に UserPoolIdentityProvider リソースが存在しないこと', () => {
-        // 🔵 REQ-401: LINE Props 未指定時は既存動作を維持し、IdP リソースは生成されない
+      test('LINE Props 未指定時に IdP リソースが存在しないこと', () => {
         const template = Template.fromStack(createStack(devProps));
         template.resourceCountIs('AWS::Cognito::UserPoolIdentityProvider', 0);
       });
 
-      test('TC-016: LINE Props 未指定時に UserPoolClient の SupportedIdentityProviders が COGNITO のみであること', () => {
-        // 🔵 REQ-401: LINE が追加されず、既存の COGNITO のみが設定されていること
+      test('LINE Props 未指定時に SupportedIdentityProviders が COGNITO のみであること', () => {
         const template = Template.fromStack(createStack(devProps));
         template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
           SupportedIdentityProviders: ['COGNITO'],
         });
       });
 
-      test('TC-010: Channel ID のみ指定（Secret 未指定）で LINE IdP が作成されないこと', () => {
-        // 🟡 条件分岐「両方指定時のみ作成」: Secret 未指定の場合は IdP を作成しない
+      test('Channel ID のみ指定（Secret 未指定）で LINE IdP が作成されないこと', () => {
         const propsWithIdOnly: CognitoStackProps = {
           ...devProps,
           lineLoginChannelId: 'test-channel-id',
-          // lineLoginChannelSecret は未指定（undefined）
         };
         const template = Template.fromStack(createStack(propsWithIdOnly));
         template.resourceCountIs('AWS::Cognito::UserPoolIdentityProvider', 0);
       });
 
-      test('TC-011: Channel Secret のみ指定（ID 未指定）で LINE IdP が作成されないこと', () => {
-        // 🟡 条件分岐「両方指定時のみ作成」: ID 未指定の場合は IdP を作成しない
+      test('Channel Secret のみ指定（ID 未指定）で LINE IdP が作成されないこと', () => {
         const propsWithSecretOnly: CognitoStackProps = {
           ...devProps,
           lineLoginChannelSecret: 'test-channel-secret',
-          // lineLoginChannelId は未指定（undefined）
         };
         const template = Template.fromStack(createStack(propsWithSecretOnly));
         template.resourceCountIs('AWS::Cognito::UserPoolIdentityProvider', 0);
       });
 
-      test('TC-013: LINE Props 両方空文字列で LINE IdP が作成されないこと', () => {
-        // 🟡 TypeScript の truthy/falsy 評価: 空文字列は falsy のため IdP は作成されない
+      test('両方空文字列で LINE IdP が作成されないこと', () => {
         const propsWithEmptyLine: CognitoStackProps = {
           ...devProps,
           lineLoginChannelId: '',
