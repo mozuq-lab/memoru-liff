@@ -533,8 +533,8 @@ export const ReviewPage = () => {
                 onFlip={handleFlip}
                 speechProps={{
                   speechState: { isSpeaking, isSupported },
-                  onSpeakFront: () => speak(regradeCard.front),
-                  onSpeakBack: () => speak(regradeCard.back),
+                  onSpeakFront: () => (isSpeaking ? cancel() : speak(regradeCard.front)),
+                  onSpeakBack: () => (isSpeaking ? cancel() : speak(regradeCard.back)),
                 }}
               />
             </div>
@@ -600,8 +600,8 @@ export const ReviewPage = () => {
                 onFlip={handleFlip}
                 speechProps={{
                   speechState: { isSpeaking, isSupported },
-                  onSpeakFront: () => speak(reconfirmCard.front),
-                  onSpeakBack: () => speak(reconfirmCard.back),
+                  onSpeakFront: () => (isSpeaking ? cancel() : speak(reconfirmCard.front)),
+                  onSpeakBack: () => (isSpeaking ? cancel() : speak(reconfirmCard.back)),
                 }}
               />
             </div>
@@ -662,8 +662,8 @@ export const ReviewPage = () => {
               onFlip={handleFlip}
               speechProps={{
                 speechState: { isSpeaking, isSupported },
-                onSpeakFront: () => speak(currentCard.front),
-                onSpeakBack: () => speak(currentCard.back),
+                onSpeakFront: () => (isSpeaking ? cancel() : speak(currentCard.front)),
+                onSpeakBack: () => (isSpeaking ? cancel() : speak(currentCard.back)),
               }}
             />
           </div>

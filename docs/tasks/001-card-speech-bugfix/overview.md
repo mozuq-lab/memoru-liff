@@ -37,8 +37,8 @@
 
 | 状態 | タスク | 工数 | タイプ | REQ |
 | --- | --- | --- | --- | --- |
-| [ ] | [TASK-0148: useSpeechSettings 修正](TASK-0148.md) | 2h | TDD | REQ-002, REQ-102, REQ-103(b) |
-| [ ] | [TASK-0149: 停止トグル修正](TASK-0149.md) | 2h | TDD | REQ-001, REQ-103(a) |
+| [x] | [TASK-0148: useSpeechSettings 修正](TASK-0148.md) | 2h | TDD | REQ-002, REQ-102, REQ-103(b) |
+| [x] | [TASK-0149: 停止トグル修正](TASK-0149.md) | 2h | TDD | REQ-001, REQ-103(a) |
 | [ ] | [TASK-0150: aria-label 追加](TASK-0150.md) | 0.5h | DIRECT | REQ-101 |
 
 ### 依存関係
