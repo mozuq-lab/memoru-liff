@@ -17,7 +17,7 @@
 
 **Purpose**: 全ユーザーストーリーが依存する型定義を作成する
 
-- [ ] T001 Create `SpeechRate` and `SpeechSettings` type definitions in `frontend/src/types/speech.ts`
+- [x] T001 Create `SpeechRate` and `SpeechSettings` type definitions in `frontend/src/types/speech.ts`
 
 **Checkpoint**: 型定義完了 → フェーズ2 開始可能
 
@@ -29,10 +29,10 @@
 
 **⚠️ CRITICAL**: このフェーズの完了後に各ユーザーストーリーの実装を開始できる
 
-- [ ] T002 [P] Write `useSpeech` contract tests (TDD red) in `frontend/src/hooks/__tests__/useSpeech.test.ts` — isSupported・speak・cancel・isSpeaking・cleanup の各ルールをカバー
-- [ ] T003 [P] Write `useSpeechSettings` contract tests (TDD red) in `frontend/src/hooks/__tests__/useSpeechSettings.test.ts` — userId undefined 時のデフォルト値・parse エラー時のフォールバック・partial update をカバー
-- [ ] T004 Implement `useSpeech` hook (TDD green) in `frontend/src/hooks/useSpeech.ts` — T002 のテストをパスさせる
-- [ ] T005 Implement `useSpeechSettings` hook (TDD green) in `frontend/src/hooks/useSpeechSettings.ts` — T003 のテストをパスさせる
+- [x] T002 [P] Write `useSpeech` contract tests (TDD red) in `frontend/src/hooks/__tests__/useSpeech.test.ts` — isSupported・speak・cancel・isSpeaking・cleanup の各ルールをカバー
+- [x] T003 [P] Write `useSpeechSettings` contract tests (TDD red) in `frontend/src/hooks/__tests__/useSpeechSettings.test.ts` — userId undefined 時のデフォルト値・parse エラー時のフォールバック・partial update をカバー
+- [x] T004 Implement `useSpeech` hook (TDD green) in `frontend/src/hooks/useSpeech.ts` — T002 のテストをパスさせる
+- [x] T005 Implement `useSpeechSettings` hook (TDD green) in `frontend/src/hooks/useSpeechSettings.ts` — T003 のテストをパスさせる
 
 **Checkpoint**: 両 hook のテストがグリーン → US1 / US2 / US3 の並行実装開始可能
 
@@ -46,14 +46,14 @@
 
 ### Tests for User Story 1（TDD red、先に失敗させる）
 
-- [ ] T006 [P] [US1] Write `SpeechButton` contract tests (TDD red) in `frontend/src/components/__tests__/SpeechButton.test.tsx` — disabled・isSpeaking トグル・aria-label・onClick コールバックをカバー
-- [ ] T007 [P] [US1] Add `speechProps` scenarios to `FlipCard` tests (TDD red) in `frontend/src/components/__tests__/FlipCard.test.tsx` — speechProps なし時の後方互換・isSupported false 時の非表示・表面/裏面別ボタン表示をカバー
+- [x] T006 [P] [US1] Write `SpeechButton` contract tests (TDD red) in `frontend/src/components/__tests__/SpeechButton.test.tsx` — disabled・isSpeaking トグル・aria-label・onClick コールバックをカバー
+- [x] T007 [P] [US1] Add `speechProps` scenarios to `FlipCard` tests (TDD red) in `frontend/src/components/__tests__/FlipCard.test.tsx` — speechProps なし時の後方互換・isSupported false 時の非表示・表面/裏面別ボタン表示をカバー
 
 ### Implementation for User Story 1
 
-- [ ] T008 [US1] Implement `SpeechButton` component (TDD green) in `frontend/src/components/SpeechButton.tsx` — T006 のテストをパスさせる
-- [ ] T009 [US1] Extend `FlipCard` with optional `speechProps` prop (TDD green) in `frontend/src/components/FlipCard.tsx` — T007 のテストをパスさせる（後方互換必須）
-- [ ] T010 [US1] Integrate `useSpeech` and `SpeechButton` into `ReviewPage` in `frontend/src/pages/ReviewPage.tsx` — カード遷移時に `cancel()` を呼び出すロジックを含む
+- [x] T008 [US1] Implement `SpeechButton` component (TDD green) in `frontend/src/components/SpeechButton.tsx` — T006 のテストをパスさせる
+- [x] T009 [US1] Extend `FlipCard` with optional `speechProps` prop (TDD green) in `frontend/src/components/FlipCard.tsx` — T007 のテストをパスさせる（後方互換必須）
+- [x] T010 [US1] Integrate `useSpeech` and `SpeechButton` into `ReviewPage` in `frontend/src/pages/ReviewPage.tsx` — カード遷移時に `cancel()` を呼び出すロジックを含む
 
 **Checkpoint**: US1 完了 — 手動読み上げが単独で動作・デモ可能な MVP 状態
 
