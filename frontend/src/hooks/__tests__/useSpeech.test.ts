@@ -202,4 +202,57 @@ describe("useSpeech", () => {
       );
     });
   });
+
+  // ─── rate オプション (US3) ────────────────────────────────────
+
+  describe("rate オプション (US3)", () => {
+    it("rate を指定しない場合、utterance.rate は 1 になる", () => {
+      const { result } = renderHook(() => useSpeech());
+      act(() => {
+        result.current.speak("テスト");
+      });
+      expect(lastUtterance.rate).toBe(1);
+    });
+
+    it("rate 0.5 を指定すると utterance.rate が 0.5 になる", () => {
+      const { result } = renderHook(() => useSpeech({ rate: 0.5 }));
+      act(() => {
+        result.current.speak("テスト");
+      });
+      expect(lastUtterance.rate).toBe(0.5);
+    });
+
+    it("rate 1.5 を指定すると utterance.rate が 1.5 になる", () => {
+      const { result } = renderHook(() => useSpeech({ rate: 1.5 }));
+      act(() => {
+        result.current.speak("テスト");
+      });
+      expect(lastUtterance.rate).toBe(1.5);
+    });
+
+    it("rate 1 を明示的に指定しても utterance.rate が 1 になる", () => {
+      const { result } = renderHook(() => useSpeech({ rate: 1 }));
+      act(() => {
+        result.current.speak("テスト");
+      });
+      expect(lastUtterance.rate).toBe(1);
+    });
+
+    it("options.rate が変わると次回発話から新しい rate が反映される", () => {
+      const { result, rerender } = renderHook(
+        ({ rate }: { rate: 0.5 | 1 | 1.5 }) => useSpeech({ rate }),
+        { initialProps: { rate: 0.5 as const } },
+      );
+      act(() => {
+        result.current.speak("1回目");
+      });
+      expect(lastUtterance.rate).toBe(0.5);
+
+      rerender({ rate: 1.5 });
+      act(() => {
+        result.current.speak("2回目");
+      });
+      expect(lastUtterance.rate).toBe(1.5);
+    });
+  });
 });
