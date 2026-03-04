@@ -21,20 +21,20 @@ function createStack(props: KeycloakStackProps): KeycloakStack {
 }
 
 describe('KeycloakStack', () => {
-  describe('Snapshot', () => {
-    test('dev environment matches snapshot', () => {
+  describe('スナップショット', () => {
+    test('dev 環境のテンプレートがスナップショットと一致する', () => {
       const template = Template.fromStack(createStack(devProps));
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    test('prod environment matches snapshot', () => {
+    test('prod 環境のテンプレートがスナップショットと一致する', () => {
       const template = Template.fromStack(createStack(prodProps));
       expect(template.toJSON()).toMatchSnapshot();
     });
   });
 
-  describe('Validation', () => {
-    test('prod without certificateArn throws error', () => {
+  describe('バリデーション', () => {
+    test('prod 環境で certificateArn 未指定時にエラーが発生する', () => {
       expect(() => createStack({
         environment: 'prod',
         domainName: 'keycloak.example.com',
@@ -42,46 +42,46 @@ describe('KeycloakStack', () => {
     });
   });
 
-  describe('Environment differences', () => {
-    test('dev: no NAT Gateway', () => {
+  describe('環境別設定', () => {
+    test('dev: NAT Gateway がない', () => {
       const template = Template.fromStack(createStack(devProps));
       template.resourceCountIs('AWS::EC2::NatGateway', 0);
     });
 
-    test('prod: 1 NAT Gateway', () => {
+    test('prod: NAT Gateway が 1 つある', () => {
       const template = Template.fromStack(createStack(prodProps));
       template.resourceCountIs('AWS::EC2::NatGateway', 1);
     });
 
-    test('dev: RDS MultiAZ is false', () => {
+    test('dev: RDS MultiAZ が false である', () => {
       const template = Template.fromStack(createStack(devProps));
       template.hasResourceProperties('AWS::RDS::DBInstance', {
         MultiAZ: false,
       });
     });
 
-    test('prod: RDS MultiAZ is true', () => {
+    test('prod: RDS MultiAZ が true である', () => {
       const template = Template.fromStack(createStack(prodProps));
       template.hasResourceProperties('AWS::RDS::DBInstance', {
         MultiAZ: true,
       });
     });
 
-    test('dev: RDS DeletionProtection is false', () => {
+    test('dev: RDS DeletionProtection が false である', () => {
       const template = Template.fromStack(createStack(devProps));
       template.hasResourceProperties('AWS::RDS::DBInstance', {
         DeletionProtection: false,
       });
     });
 
-    test('prod: RDS DeletionProtection is true', () => {
+    test('prod: RDS DeletionProtection が true である', () => {
       const template = Template.fromStack(createStack(prodProps));
       template.hasResourceProperties('AWS::RDS::DBInstance', {
         DeletionProtection: true,
       });
     });
 
-    test('dev: ECS AssignPublicIp is ENABLED', () => {
+    test('dev: ECS AssignPublicIp が ENABLED である', () => {
       const template = Template.fromStack(createStack(devProps));
       template.hasResourceProperties('AWS::ECS::Service', {
         NetworkConfiguration: {
@@ -92,7 +92,7 @@ describe('KeycloakStack', () => {
       });
     });
 
-    test('prod: ECS AssignPublicIp is DISABLED', () => {
+    test('prod: ECS AssignPublicIp が DISABLED である', () => {
       const template = Template.fromStack(createStack(prodProps));
       template.hasResourceProperties('AWS::ECS::Service', {
         NetworkConfiguration: {
@@ -103,7 +103,7 @@ describe('KeycloakStack', () => {
       });
     });
 
-    test('dev: LogGroup retention is 14 days, RemovalPolicy is DESTROY', () => {
+    test('dev: LogGroup の保持期間が 14 日で RemovalPolicy が DESTROY である', () => {
       const template = Template.fromStack(createStack(devProps));
       template.resourceCountIs('AWS::Logs::LogGroup', 1);
       template.hasResource('AWS::Logs::LogGroup', {
@@ -116,7 +116,7 @@ describe('KeycloakStack', () => {
       });
     });
 
-    test('prod: LogGroup retention is 90 days, RemovalPolicy is RETAIN', () => {
+    test('prod: LogGroup の保持期間が 90 日で RemovalPolicy が RETAIN である', () => {
       const template = Template.fromStack(createStack(prodProps));
       template.resourceCountIs('AWS::Logs::LogGroup', 1);
       template.hasResource('AWS::Logs::LogGroup', {
@@ -130,15 +130,15 @@ describe('KeycloakStack', () => {
     });
   });
 
-  describe('Security', () => {
-    test('RDS StorageEncrypted is true', () => {
+  describe('セキュリティ', () => {
+    test('RDS StorageEncrypted が true である', () => {
       const template = Template.fromStack(createStack(devProps));
       template.hasResourceProperties('AWS::RDS::DBInstance', {
         StorageEncrypted: true,
       });
     });
 
-    test('RDS PubliclyAccessible is false', () => {
+    test('RDS PubliclyAccessible が false である', () => {
       const template = Template.fromStack(createStack(devProps));
       template.hasResourceProperties('AWS::RDS::DBInstance', {
         PubliclyAccessible: false,
@@ -146,8 +146,8 @@ describe('KeycloakStack', () => {
     });
   });
 
-  describe('HTTPS and Load Balancer', () => {
-    test('dev: Listener is HTTP on port 80', () => {
+  describe('HTTPS とロードバランサー', () => {
+    test('dev: リスナーがポート 80 の HTTP である', () => {
       const template = Template.fromStack(createStack(devProps));
       template.hasResourceProperties('AWS::ElasticLoadBalancingV2::Listener', {
         Port: 80,
@@ -155,7 +155,7 @@ describe('KeycloakStack', () => {
       });
     });
 
-    test('prod: Listener is HTTPS on port 443 with certificate', () => {
+    test('prod: リスナーがポート 443 の HTTPS で証明書が設定されている', () => {
       const template = Template.fromStack(createStack(prodProps));
       template.hasResourceProperties('AWS::ElasticLoadBalancingV2::Listener', {
         Port: 443,
@@ -166,7 +166,7 @@ describe('KeycloakStack', () => {
       });
     });
 
-    test('prod: HTTP to HTTPS redirect listener exists', () => {
+    test('prod: HTTP から HTTPS へのリダイレクトリスナーが存在する', () => {
       const template = Template.fromStack(createStack(prodProps));
       template.hasResourceProperties('AWS::ElasticLoadBalancingV2::Listener', {
         Port: 80,
@@ -183,20 +183,19 @@ describe('KeycloakStack', () => {
       });
     });
 
-    test('dev: no HTTP redirect listener', () => {
+    test('dev: HTTP リダイレクトリスナーがない', () => {
       const template = Template.fromStack(createStack(devProps));
-      // dev has only 1 listener (HTTP), no redirect
       template.resourceCountIs('AWS::ElasticLoadBalancingV2::Listener', 1);
     });
 
-    test('prod: 2 listeners (HTTPS + HTTP redirect)', () => {
+    test('prod: リスナーが 2 つある（HTTPS + HTTP リダイレクト）', () => {
       const template = Template.fromStack(createStack(prodProps));
       template.resourceCountIs('AWS::ElasticLoadBalancingV2::Listener', 2);
     });
   });
 
-  describe('Health check', () => {
-    test('TargetGroup health check path is /health/ready', () => {
+  describe('ヘルスチェック', () => {
+    test('TargetGroup のヘルスチェックパスが /health/ready である', () => {
       const template = Template.fromStack(createStack(devProps));
       template.hasResourceProperties('AWS::ElasticLoadBalancingV2::TargetGroup', {
         HealthCheckPath: '/health/ready',
@@ -206,7 +205,7 @@ describe('KeycloakStack', () => {
   });
 
   describe('DNS', () => {
-    test('prod: Route53 A record is created', () => {
+    test('prod: Route53 A レコードが作成される', () => {
       const template = Template.fromStack(createStack(prodProps));
       template.hasResourceProperties('AWS::Route53::RecordSet', {
         Name: 'keycloak.example.com.',
@@ -215,7 +214,7 @@ describe('KeycloakStack', () => {
       });
     });
 
-    test('no Route53 record without hostedZoneId', () => {
+    test('hostedZoneId 未指定時は Route53 レコードが作成されない', () => {
       const template = Template.fromStack(createStack(devProps));
       template.resourceCountIs('AWS::Route53::RecordSet', 0);
     });

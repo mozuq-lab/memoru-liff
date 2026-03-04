@@ -1,6 +1,6 @@
 // Jest Snapshot v1, https://goo.gl/fbAQLP
 
-exports[`KeycloakStack Snapshot dev environment matches snapshot 1`] = `
+exports[`KeycloakStack スナップショット dev 環境のテンプレートがスナップショットと一致する 1`] = `
 {
   "Outputs": {
     "ALBDNSName": {
@@ -1094,7 +1094,7 @@ exports[`KeycloakStack Snapshot dev environment matches snapshot 1`] = `
 }
 `;
 
-exports[`KeycloakStack Snapshot prod environment matches snapshot 1`] = `
+exports[`KeycloakStack スナップショット prod 環境のテンプレートがスナップショットと一致する 1`] = `
 {
   "Outputs": {
     "ALBDNSName": {

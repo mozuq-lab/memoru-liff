@@ -22,34 +22,34 @@ function createStack(props: CognitoStackProps): CognitoStack {
 }
 
 describe('CognitoStack', () => {
-  describe('Snapshot', () => {
-    test('dev environment matches snapshot', () => {
+  describe('スナップショット', () => {
+    test('dev 環境のテンプレートがスナップショットと一致する', () => {
       const template = Template.fromStack(createStack(devProps));
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    test('prod environment matches snapshot', () => {
+    test('prod 環境のテンプレートがスナップショットと一致する', () => {
       const template = Template.fromStack(createStack(prodProps));
       expect(template.toJSON()).toMatchSnapshot();
     });
   });
 
-  describe('Environment differences', () => {
-    test('dev: DeletionProtection is INACTIVE', () => {
+  describe('環境別設定', () => {
+    test('dev: DeletionProtection が INACTIVE である', () => {
       const template = Template.fromStack(createStack(devProps));
       template.hasResourceProperties('AWS::Cognito::UserPool', {
         DeletionProtection: 'INACTIVE',
       });
     });
 
-    test('prod: DeletionProtection is ACTIVE', () => {
+    test('prod: DeletionProtection が ACTIVE である', () => {
       const template = Template.fromStack(createStack(prodProps));
       template.hasResourceProperties('AWS::Cognito::UserPool', {
         DeletionProtection: 'ACTIVE',
       });
     });
 
-    test('dev: RemovalPolicy is DESTROY', () => {
+    test('dev: RemovalPolicy が DESTROY である', () => {
       const template = Template.fromStack(createStack(devProps));
       template.hasResource('AWS::Cognito::UserPool', {
         UpdateReplacePolicy: 'Delete',
@@ -57,7 +57,7 @@ describe('CognitoStack', () => {
       });
     });
 
-    test('prod: RemovalPolicy is RETAIN', () => {
+    test('prod: RemovalPolicy が RETAIN である', () => {
       const template = Template.fromStack(createStack(prodProps));
       template.hasResource('AWS::Cognito::UserPool', {
         UpdateReplacePolicy: 'Retain',
@@ -66,8 +66,8 @@ describe('CognitoStack', () => {
     });
   });
 
-  describe('Security', () => {
-    test('password policy meets requirements', () => {
+  describe('セキュリティ', () => {
+    test('パスワードポリシーが要件を満たしている', () => {
       const template = Template.fromStack(createStack(devProps));
       template.hasResourceProperties('AWS::Cognito::UserPool', {
         Policies: {
@@ -82,7 +82,7 @@ describe('CognitoStack', () => {
       });
     });
 
-    test('MFA is OPTIONAL with TOTP', () => {
+    test('MFA が OPTIONAL（TOTP）で設定されている', () => {
       const template = Template.fromStack(createStack(devProps));
       template.hasResourceProperties('AWS::Cognito::UserPool', {
         MfaConfiguration: 'OPTIONAL',
@@ -92,7 +92,7 @@ describe('CognitoStack', () => {
   });
 
   describe('OIDC', () => {
-    test('OAuth flows and scopes are correctly configured', () => {
+    test('OAuth フローとスコープが正しく設定されている', () => {
       const template = Template.fromStack(createStack(devProps));
       template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
         AllowedOAuthFlows: ['code'],
@@ -101,21 +101,21 @@ describe('CognitoStack', () => {
       });
     });
 
-    test('CallbackURLs are set from props', () => {
+    test('CallbackURLs が Props から設定されている', () => {
       const template = Template.fromStack(createStack(devProps));
       template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
         CallbackURLs: ['http://localhost:3000/callback'],
       });
     });
 
-    test('LogoutURLs are set from props', () => {
+    test('LogoutURLs が Props から設定されている', () => {
       const template = Template.fromStack(createStack(devProps));
       template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
         LogoutURLs: ['http://localhost:3000/'],
       });
     });
 
-    test('prod: CallbackURLs and LogoutURLs use production URLs', () => {
+    test('prod: CallbackURLs と LogoutURLs が本番 URL になっている', () => {
       const template = Template.fromStack(createStack(prodProps));
       template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
         CallbackURLs: ['https://app.example.com/callback'],
@@ -123,7 +123,7 @@ describe('CognitoStack', () => {
       });
     });
 
-    test('token validity is configured correctly', () => {
+    test('トークン有効期間が正しく設定されている', () => {
       const template = Template.fromStack(createStack(devProps));
       template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
         AccessTokenValidity: 60,
@@ -137,7 +137,7 @@ describe('CognitoStack', () => {
       });
     });
 
-    test('client is public (no secret)', () => {
+    test('クライアントが Public（シークレットなし）である', () => {
       const template = Template.fromStack(createStack(devProps));
       template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
         GenerateSecret: false,
@@ -145,15 +145,15 @@ describe('CognitoStack', () => {
     });
   });
 
-  describe('Domain', () => {
-    test('UserPool domain prefix is set from props', () => {
+  describe('ドメイン', () => {
+    test('UserPool ドメインプレフィックスが Props から設定されている', () => {
       const template = Template.fromStack(createStack(devProps));
       template.hasResourceProperties('AWS::Cognito::UserPoolDomain', {
         Domain: 'memoru-dev-test',
       });
     });
 
-    test('prod: UserPool domain prefix is set correctly', () => {
+    test('prod: UserPool ドメインプレフィックスが正しく設定されている', () => {
       const template = Template.fromStack(createStack(prodProps));
       template.hasResourceProperties('AWS::Cognito::UserPoolDomain', {
         Domain: 'memoru-prod-test',
@@ -182,14 +182,14 @@ describe('CognitoStack', () => {
         });
       });
 
-      test('ProviderName が LINE であること', () => {
+      test('ProviderName が LINE である', () => {
         const template = Template.fromStack(createStack(devPropsWithLine));
         template.hasResourceProperties('AWS::Cognito::UserPoolIdentityProvider', {
           ProviderName: 'LINE',
         });
       });
 
-      test('LINE OIDC エンドポイントが正しく設定されていること', () => {
+      test('LINE OIDC エンドポイントが正しく設定されている', () => {
         const template = Template.fromStack(createStack(devPropsWithLine));
         template.hasResourceProperties('AWS::Cognito::UserPoolIdentityProvider', {
           ProviderDetails: {
@@ -202,7 +202,7 @@ describe('CognitoStack', () => {
         });
       });
 
-      test('属性マッピング（name, picture）が設定されていること', () => {
+      test('属性マッピング（name, picture）が設定されている', () => {
         const template = Template.fromStack(createStack(devPropsWithLine));
         template.hasResourceProperties('AWS::Cognito::UserPoolIdentityProvider', {
           AttributeMapping: {
@@ -212,14 +212,14 @@ describe('CognitoStack', () => {
         });
       });
 
-      test('UserPoolClient の SupportedIdentityProviders に COGNITO と LINE が含まれること', () => {
+      test('SupportedIdentityProviders に COGNITO と LINE が含まれている', () => {
         const template = Template.fromStack(createStack(devPropsWithLine));
         template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
           SupportedIdentityProviders: ['COGNITO', 'LINE'],
         });
       });
 
-      test('clientId と clientSecret が Props から正しく設定されること', () => {
+      test('client_id と client_secret が Props から設定されている', () => {
         const template = Template.fromStack(createStack(devPropsWithLine));
         template.hasResourceProperties('AWS::Cognito::UserPoolIdentityProvider', {
           ProviderDetails: {
@@ -229,7 +229,7 @@ describe('CognitoStack', () => {
         });
       });
 
-      test('OIDC スコープが openid, profile であること', () => {
+      test('OIDC スコープが openid と profile である', () => {
         const template = Template.fromStack(createStack(devPropsWithLine));
         template.hasResourceProperties('AWS::Cognito::UserPoolIdentityProvider', {
           ProviderDetails: {
@@ -238,7 +238,7 @@ describe('CognitoStack', () => {
         });
       });
 
-      test('UserPoolClient が LINE IdP に DependsOn を持つこと', () => {
+      test('UserPoolClient が LINE IdP に DependsOn を持っている', () => {
         const template = Template.fromStack(createStack(devPropsWithLine));
         const clients = template.findResources('AWS::Cognito::UserPoolClient');
         const clientKey = Object.keys(clients)[0];
@@ -252,32 +252,32 @@ describe('CognitoStack', () => {
       });
     });
 
-    describe('Snapshot（LINE あり）', () => {
-      test('dev + LINE IdP のスナップショットが一致すること', () => {
+    describe('スナップショット（LINE あり）', () => {
+      test('dev + LINE IdP のテンプレートがスナップショットと一致する', () => {
         const template = Template.fromStack(createStack(devPropsWithLine));
         expect(template.toJSON()).toMatchSnapshot();
       });
 
-      test('prod + LINE IdP のスナップショットが一致すること', () => {
+      test('prod + LINE IdP のテンプレートがスナップショットと一致する', () => {
         const template = Template.fromStack(createStack(prodPropsWithLine));
         expect(template.toJSON()).toMatchSnapshot();
       });
     });
 
     describe('LINE Props 未指定時（後方互換性）', () => {
-      test('LINE Props 未指定時に IdP リソースが存在しないこと', () => {
+      test('LINE Props 未指定時は IdP リソースが作成されない', () => {
         const template = Template.fromStack(createStack(devProps));
         template.resourceCountIs('AWS::Cognito::UserPoolIdentityProvider', 0);
       });
 
-      test('LINE Props 未指定時に SupportedIdentityProviders が COGNITO のみであること', () => {
+      test('LINE Props 未指定時は SupportedIdentityProviders が COGNITO のみである', () => {
         const template = Template.fromStack(createStack(devProps));
         template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
           SupportedIdentityProviders: ['COGNITO'],
         });
       });
 
-      test('Channel ID のみ指定（Secret 未指定）で LINE IdP が作成されないこと', () => {
+      test('Channel ID のみ指定時は IdP が作成されない', () => {
         const propsWithIdOnly: CognitoStackProps = {
           ...devProps,
           lineLoginChannelId: 'test-channel-id',
@@ -286,7 +286,7 @@ describe('CognitoStack', () => {
         template.resourceCountIs('AWS::Cognito::UserPoolIdentityProvider', 0);
       });
 
-      test('Channel Secret のみ指定（ID 未指定）で LINE IdP が作成されないこと', () => {
+      test('Channel Secret のみ指定時は IdP が作成されない', () => {
         const propsWithSecretOnly: CognitoStackProps = {
           ...devProps,
           lineLoginChannelSecret: 'test-channel-secret',
@@ -295,7 +295,7 @@ describe('CognitoStack', () => {
         template.resourceCountIs('AWS::Cognito::UserPoolIdentityProvider', 0);
       });
 
-      test('両方空文字列で LINE IdP が作成されないこと', () => {
+      test('空文字列指定時は IdP が作成されない', () => {
         const propsWithEmptyLine: CognitoStackProps = {
           ...devProps,
           lineLoginChannelId: '',
