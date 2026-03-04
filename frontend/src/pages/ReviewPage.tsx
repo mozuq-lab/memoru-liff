@@ -8,6 +8,8 @@ import { Loading } from "@/components/common/Loading";
 import { Error } from "@/components/common/Error";
 import { cardsApi, reviewsApi } from "@/services/api";
 import { useSpeech } from "@/hooks/useSpeech";
+import { useSpeechSettings } from "@/hooks/useSpeechSettings";
+import { useAuth } from "@/hooks/useAuth";
 import type { DueCard, SessionCardResult, ReconfirmCard } from "@/types";
 
 /**
@@ -53,8 +55,13 @@ export const ReviewPage = () => {
   const [reconfirmQueue, setReconfirmQueue] = useState<ReconfirmCard[]>([]);
   const [isReconfirmMode, setIsReconfirmMode] = useState(false);
 
-  // 読み上げ機能
-  const { isSpeaking, isSupported, speak, cancel } = useSpeech();
+  // 読み上げ機能 (US1: 手動読み上げ、US2: 自動読み上げ、US3: 速度設定)
+  const { user: authUser } = useAuth();
+  const userId = authUser?.profile?.sub;
+  const { settings } = useSpeechSettings(userId);
+  const { isSpeaking, isSupported, speak, cancel } = useSpeech({
+    rate: settings.rate,
+  });
 
   const fetchCards = useCallback(async () => {
     setIsLoading(true);
@@ -85,6 +92,32 @@ export const ReviewPage = () => {
       }
     }
   }, [regradeCardIndex, reviewResults, cards]);
+
+  // 【自動読み上げ (US2)】: カードが切り替わった際に autoPlay が有効なら表面テキストを自動再生
+  // 現在表示中カードの表面テキストをモードに応じて導出し、変化したときのみ speak を呼ぶ。
+  // regradeCardIndex は Undo 後の手動再採点フローのため autoPlay をスキップする。
+  const currentCardFront = isReconfirmMode
+    ? reconfirmQueue[0]?.front
+    : cards[currentIndex]?.front;
+  useEffect(() => {
+    if (
+      !settings.autoPlay ||
+      isLoading ||
+      isComplete ||
+      regradeCardIndex !== null
+    )
+      return;
+    if (currentCardFront) {
+      speak(currentCardFront);
+    }
+  }, [
+    settings.autoPlay,
+    currentCardFront,
+    isComplete,
+    isLoading,
+    regradeCardIndex,
+    speak,
+  ]);
 
   /**
    * 【機能概要】: 採点またはスキップ後に次のカードへ進む、またはセッションを完了する
