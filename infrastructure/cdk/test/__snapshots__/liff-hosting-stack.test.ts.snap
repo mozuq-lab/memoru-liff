@@ -1,6 +1,6 @@
 // Jest Snapshot v1, https://goo.gl/fbAQLP
 
-exports[`LiffHostingStack Snapshot dev environment matches snapshot 1`] = `
+exports[`LiffHostingStack スナップショット dev 環境のテンプレートがスナップショットと一致する 1`] = `
 {
   "Outputs": {
     "BucketArn": {
@@ -424,7 +424,7 @@ exports[`LiffHostingStack Snapshot dev environment matches snapshot 1`] = `
 }
 `;
 
-exports[`LiffHostingStack Snapshot prod environment matches snapshot 1`] = `
+exports[`LiffHostingStack スナップショット prod 環境のテンプレートがスナップショットと一致する 1`] = `
 {
   "Mappings": {
     "AWSCloudFrontPartitionHostedZoneIdMap": {

@@ -53,7 +53,7 @@ export class CognitoStack extends cdk.Stack {
     // ============================================================
     // Cognito User Pool Domain (Prefix-based)
     // ============================================================
-    const domain = this.userPool.addDomain('UserPoolDomain', {
+    this.userPool.addDomain('UserPoolDomain', {
       cognitoDomain: {
         domainPrefix: props.cognitoDomainPrefix,
       },
