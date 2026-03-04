@@ -16,6 +16,9 @@ import type {
   CreateDeckRequest,
   UpdateDeckRequest,
   DeckListResponse,
+  StatsResponse,
+  WeakCardsResponse,
+  ForecastResponse,
 } from '@/types';
 import { authService } from './auth';
 
@@ -227,6 +230,25 @@ class ApiClient {
       method: 'DELETE',
     });
   }
+
+  // 統計 API
+  async getStats(): Promise<StatsResponse> {
+    return this.request<StatsResponse>('/stats');
+  }
+
+  async getWeakCards(limit?: number): Promise<WeakCardsResponse> {
+    const searchParams = new URLSearchParams();
+    if (limit) searchParams.set('limit', String(limit));
+    const qs = searchParams.toString();
+    return this.request<WeakCardsResponse>(`/stats/weak-cards${qs ? `?${qs}` : ''}`);
+  }
+
+  async getForecast(days?: number): Promise<ForecastResponse> {
+    const searchParams = new URLSearchParams();
+    if (days) searchParams.set('days', String(days));
+    const qs = searchParams.toString();
+    return this.request<ForecastResponse>(`/stats/forecast${qs ? `?${qs}` : ''}`);
+  }
 }
 
 export const apiClient = new ApiClient();
@@ -261,4 +283,10 @@ export const usersApi = {
   updateUser: (data: UpdateUserRequest) => apiClient.updateUser(data),
   linkLine: (data: LinkLineRequest) => apiClient.linkLine(data),
   unlinkLine: () => apiClient.unlinkLine(),
+};
+
+export const statsApi = {
+  getStats: () => apiClient.getStats(),
+  getWeakCards: (limit?: number) => apiClient.getWeakCards(limit),
+  getForecast: (days?: number) => apiClient.getForecast(days),
 };

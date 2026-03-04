@@ -61,7 +61,7 @@ TASK-0151 → TASK-0152 → TASK-0156
 
 ### タスク一覧
 
-- [ ] [TASK-0153: フロントエンド型定義 + API サービス + useStats フック](TASK-0153.md) - 3h (TDD) 🔵
+- [x] [TASK-0153: フロントエンド型定義 + API サービス + useStats フック](TASK-0153.md) - 3h (TDD) 🔵
 - [ ] [TASK-0154: フロントエンド StatsPage + コンポーネント実装](TASK-0154.md) - 5h (TDD) 🔵
 - [ ] [TASK-0155: ナビゲーション統合 + ルーティング](TASK-0155.md) - 2h (TDD) 🔵
 
