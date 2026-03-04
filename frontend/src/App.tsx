@@ -11,6 +11,7 @@ import {
   LinkLinePage,
   CallbackPage,
   ReviewPage,
+  StatsPage,
 } from '@/pages';
 
 function App() {
@@ -29,6 +30,7 @@ function App() {
                 <Route path="/cards/:id" element={<ProtectedRoute><CardDetailPage /></ProtectedRoute>} />
                 <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
                 <Route path="/review" element={<ProtectedRoute><ReviewPage /></ProtectedRoute>} />
+                <Route path="/stats" element={<ProtectedRoute><StatsPage /></ProtectedRoute>} />
                 <Route path="/link-line" element={<ProtectedRoute><LinkLinePage /></ProtectedRoute>} />
               </Routes>
             </Layout>
