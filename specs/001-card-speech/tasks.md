@@ -102,7 +102,7 @@
 **Purpose**: テストカバレッジの確認とドキュメント整備
 
 - [x] T017 [P] Verify Vitest coverage ≥ 80% for `frontend/src/hooks/useSpeech.ts`, `useSpeechSettings.ts`, `frontend/src/components/SpeechButton.tsx` (`npm run test -- --coverage`)
-- [ ] T018 Create test scenario guide in `specs/001-card-speech/quickstart.md` — SC-001 〜 SC-004 の手動確認手順を記載
+- [x] T018 Create test scenario guide in `specs/001-card-speech/quickstart.md` — SC-001 〜 SC-004 の手動確認手順を記載
 
 ---
 
