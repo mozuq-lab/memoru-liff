@@ -3,7 +3,7 @@
  * 【テスト対象】: CardForm コンポーネント
  * 【テスト対応】: TASK-0017 テストケース2〜5, TASK-0141 AI補足機能
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CardForm } from '../CardForm';
