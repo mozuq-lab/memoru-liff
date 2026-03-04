@@ -147,6 +147,59 @@ describe("useSpeechSettings", () => {
     });
   });
 
+  // ─── autoPlay シナリオ (US2) ──────────────────────────────────
+
+  describe("autoPlay (US2)", () => {
+    it("autoPlay true に設定した後、rate を更新しても autoPlay は true を保持する", () => {
+      const { result } = renderHook(() => useSpeechSettings(TEST_USER_ID));
+
+      act(() => {
+        result.current.updateSettings({ autoPlay: true });
+      });
+      expect(result.current.settings.autoPlay).toBe(true);
+
+      // 「次のカード」相当の操作（rate 変更）をしても autoPlay は維持される
+      act(() => {
+        result.current.updateSettings({ rate: 1.5 });
+      });
+      expect(result.current.settings.autoPlay).toBe(true);
+      expect(result.current.settings.rate).toBe(1.5);
+    });
+
+    it("autoPlay を true → false に戻せる（手動停止が設定変更しない設計の逆：設定変更は可能）", () => {
+      const { result } = renderHook(() => useSpeechSettings(TEST_USER_ID));
+
+      act(() => {
+        result.current.updateSettings({ autoPlay: true });
+      });
+      expect(result.current.settings.autoPlay).toBe(true);
+
+      act(() => {
+        result.current.updateSettings({ autoPlay: false });
+      });
+      expect(result.current.settings.autoPlay).toBe(false);
+    });
+
+    it("localStorage に autoPlay: true が保存されている場合、初期値として読み込む", () => {
+      vi.mocked(localStorage.getItem).mockReturnValueOnce(
+        JSON.stringify({ autoPlay: true, rate: 1 }),
+      );
+      const { result } = renderHook(() => useSpeechSettings(TEST_USER_ID));
+      expect(result.current.settings.autoPlay).toBe(true);
+    });
+
+    it("autoPlay true 設定時に localStorage へ保存される", () => {
+      const { result } = renderHook(() => useSpeechSettings(TEST_USER_ID));
+      act(() => {
+        result.current.updateSettings({ autoPlay: true });
+      });
+      expect(localStorage.setItem).toHaveBeenCalledWith(
+        STORAGE_KEY,
+        JSON.stringify({ autoPlay: true, rate: 1 }),
+      );
+    });
+  });
+
   // ─── ユーザーID によるキー分離 ────────────────────────────────
 
   describe("ユーザーID によるキー分離", () => {
