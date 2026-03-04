@@ -44,7 +44,7 @@
 ### タスク一覧
 
 - [ ] [TASK-0151: バックエンド Pydantic モデル + StatsService](TASK-0151.md) - 4h (TDD) 🔵
-- [ ] [TASK-0152: バックエンド stats_handler + handler.py 登録](TASK-0152.md) - 3h (TDD) 🔵
+- [x] [TASK-0152: バックエンド stats_handler + handler.py 登録](TASK-0152.md) - 3h (TDD) 🔵
 
 ### 依存関係
 
@@ -62,7 +62,7 @@ TASK-0151 → TASK-0152 → TASK-0156
 ### タスク一覧
 
 - [x] [TASK-0153: フロントエンド型定義 + API サービス + useStats フック](TASK-0153.md) - 3h (TDD) 🔵
-- [ ] [TASK-0154: フロントエンド StatsPage + コンポーネント実装](TASK-0154.md) - 5h (TDD) 🔵
+- [x] [TASK-0154: フロントエンド StatsPage + コンポーネント実装](TASK-0154.md) - 5h (TDD) 🔵
 - [ ] [TASK-0155: ナビゲーション統合 + ルーティング](TASK-0155.md) - 2h (TDD) 🔵
 
 ### 依存関係
