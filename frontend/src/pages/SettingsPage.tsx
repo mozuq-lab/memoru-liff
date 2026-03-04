@@ -11,7 +11,9 @@ import { Loading } from '@/components/common/Loading';
 import { Error } from '@/components/common/Error';
 import { usersApi } from '@/services/api';
 import { useAuth } from '@/hooks/useAuth';
+import { useSpeechSettings } from '@/hooks/useSpeechSettings';
 import type { User } from '@/types';
+import type { SpeechRate } from '@/types/speech';
 
 const NOTIFICATION_TIMES = [
   { value: '07:00', label: '07:00' },
@@ -19,6 +21,12 @@ const NOTIFICATION_TIMES = [
   { value: '12:00', label: '12:00' },
   { value: '18:00', label: '18:00' },
   { value: '21:00', label: '21:00' },
+];
+
+const SPEECH_RATES: { value: SpeechRate; label: string }[] = [
+  { value: 0.5, label: '遅め' },
+  { value: 1, label: '標準' },
+  { value: 1.5, label: '速め' },
 ];
 
 const DAY_START_HOURS = Array.from({ length: 24 }, (_, i) => ({
@@ -40,6 +48,12 @@ export const SettingsPage = () => {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  // 【音声設定 (US2/US3)】
+  const isSpeechSupported =
+    typeof window !== 'undefined' && 'speechSynthesis' in window;
+  const { settings: speechSettings, updateSettings: updateSpeechSettings } =
+    useSpeechSettings(authUser?.profile?.sub);
 
   // 【ユーザー情報取得】
   const fetchUser = useCallback(async () => {
@@ -247,6 +261,100 @@ export const SettingsPage = () => {
           >
             {isSaving ? '保存中...' : '設定を保存'}
           </button>
+        </section>
+
+        {/* 音声読み上げ設定セクション (US2/US3) */}
+        <section className="bg-white rounded-lg shadow p-4 mb-6" data-testid="speech-section">
+          <h2 className="text-lg font-semibold text-gray-800 mb-4">
+            音声読み上げ設定
+          </h2>
+
+          {!isSpeechSupported ? (
+            <p className="text-sm text-gray-500" data-testid="speech-not-supported">
+              お使いのブラウザは音声合成に対応していません
+            </p>
+          ) : (
+            <>
+              {/* 自動読み上げ切り替え (US2) */}
+              <div className="mb-5">
+                <label
+                  className="flex items-center justify-between cursor-pointer min-h-[44px]"
+                  data-testid="autoplay-toggle-label"
+                >
+                  <div>
+                    <p className="text-sm font-medium text-gray-700">
+                      自動読み上げ
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      カード表示時に表面テキストを自動で読み上げます
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={speechSettings.autoPlay}
+                    data-testid="autoplay-toggle"
+                    onClick={() =>
+                      updateSpeechSettings({ autoPlay: !speechSettings.autoPlay })
+                    }
+                    className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                      speechSettings.autoPlay ? 'bg-blue-600' : 'bg-gray-300'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                        speechSettings.autoPlay ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </label>
+              </div>
+
+              {/* 読み上げ速度 (US3) */}
+              <div>
+                <p className="text-sm font-medium text-gray-700 mb-2">
+                  読み上げ速度
+                </p>
+                <div className="space-y-2" role="radiogroup" aria-label="読み上げ速度選択">
+                  {SPEECH_RATES.map((rateOption) => (
+                    <label
+                      key={rateOption.value}
+                      className={`flex items-center p-3 rounded-lg border cursor-pointer min-h-[44px] transition-colors ${
+                        speechSettings.rate === rateOption.value
+                          ? 'border-blue-500 bg-blue-50'
+                          : 'border-gray-300 hover:bg-gray-50'
+                      }`}
+                      data-testid={`rate-option-${rateOption.value}`}
+                    >
+                      <input
+                        type="radio"
+                        name="speechRate"
+                        value={rateOption.value}
+                        checked={speechSettings.rate === rateOption.value}
+                        onChange={() =>
+                          updateSpeechSettings({ rate: rateOption.value })
+                        }
+                        className="sr-only"
+                        aria-label={rateOption.label}
+                      />
+                      <div
+                        className={`w-5 h-5 rounded-full border-2 mr-3 flex items-center justify-center flex-shrink-0 ${
+                          speechSettings.rate === rateOption.value
+                            ? 'border-blue-500'
+                            : 'border-gray-400'
+                        }`}
+                      >
+                        {speechSettings.rate === rateOption.value && (
+                          <div className="w-3 h-3 rounded-full bg-blue-500" />
+                        )}
+                      </div>
+                      <span className="text-gray-800">{rateOption.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
         </section>
 
         {/* アカウント情報セクション */}
