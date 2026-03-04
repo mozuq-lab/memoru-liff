@@ -160,4 +160,150 @@ describe('CognitoStack', () => {
       });
     });
   });
+
+  const devPropsWithLine: CognitoStackProps = {
+    ...devProps,
+    lineLoginChannelId: 'test-channel-id',
+    lineLoginChannelSecret: 'test-channel-secret',
+  };
+
+  const prodPropsWithLine: CognitoStackProps = {
+    ...prodProps,
+    lineLoginChannelId: 'test-channel-id',
+    lineLoginChannelSecret: 'test-channel-secret',
+  };
+
+  describe('LINE Login IdP', () => {
+    describe('LINE Props 指定時', () => {
+      test('UserPoolIdentityProvider OIDC リソースが作成される', () => {
+        const template = Template.fromStack(createStack(devPropsWithLine));
+        template.hasResourceProperties('AWS::Cognito::UserPoolIdentityProvider', {
+          ProviderType: 'OIDC',
+        });
+      });
+
+      test('ProviderName が LINE であること', () => {
+        const template = Template.fromStack(createStack(devPropsWithLine));
+        template.hasResourceProperties('AWS::Cognito::UserPoolIdentityProvider', {
+          ProviderName: 'LINE',
+        });
+      });
+
+      test('LINE OIDC エンドポイントが正しく設定されていること', () => {
+        const template = Template.fromStack(createStack(devPropsWithLine));
+        template.hasResourceProperties('AWS::Cognito::UserPoolIdentityProvider', {
+          ProviderDetails: {
+            authorize_url: 'https://access.line.me/oauth2/v2.1/authorize',
+            token_url: 'https://api.line.me/oauth2/v2.1/token',
+            attributes_url: 'https://api.line.me/oauth2/v2.1/userinfo',
+            jwks_uri: 'https://api.line.me/oauth2/v2.1/certs',
+            oidc_issuer: 'https://access.line.me',
+          },
+        });
+      });
+
+      test('属性マッピング（name, picture）が設定されていること', () => {
+        const template = Template.fromStack(createStack(devPropsWithLine));
+        template.hasResourceProperties('AWS::Cognito::UserPoolIdentityProvider', {
+          AttributeMapping: {
+            name: 'name',
+            picture: 'picture',
+          },
+        });
+      });
+
+      test('UserPoolClient の SupportedIdentityProviders に COGNITO と LINE が含まれること', () => {
+        const template = Template.fromStack(createStack(devPropsWithLine));
+        template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
+          SupportedIdentityProviders: ['COGNITO', 'LINE'],
+        });
+      });
+
+      test('clientId と clientSecret が Props から正しく設定されること', () => {
+        const template = Template.fromStack(createStack(devPropsWithLine));
+        template.hasResourceProperties('AWS::Cognito::UserPoolIdentityProvider', {
+          ProviderDetails: {
+            client_id: 'test-channel-id',
+            client_secret: 'test-channel-secret',
+          },
+        });
+      });
+
+      test('OIDC スコープが openid, profile であること', () => {
+        const template = Template.fromStack(createStack(devPropsWithLine));
+        template.hasResourceProperties('AWS::Cognito::UserPoolIdentityProvider', {
+          ProviderDetails: {
+            authorize_scopes: 'openid profile',
+          },
+        });
+      });
+
+      test('UserPoolClient が LINE IdP に DependsOn を持つこと', () => {
+        const template = Template.fromStack(createStack(devPropsWithLine));
+        const clients = template.findResources('AWS::Cognito::UserPoolClient');
+        const clientKey = Object.keys(clients)[0];
+        const client = clients[clientKey];
+        expect(client.DependsOn).toBeDefined();
+        expect(client.DependsOn).toEqual(
+          expect.arrayContaining([
+            expect.stringContaining('LineLoginProvider'),
+          ]),
+        );
+      });
+    });
+
+    describe('Snapshot（LINE あり）', () => {
+      test('dev + LINE IdP のスナップショットが一致すること', () => {
+        const template = Template.fromStack(createStack(devPropsWithLine));
+        expect(template.toJSON()).toMatchSnapshot();
+      });
+
+      test('prod + LINE IdP のスナップショットが一致すること', () => {
+        const template = Template.fromStack(createStack(prodPropsWithLine));
+        expect(template.toJSON()).toMatchSnapshot();
+      });
+    });
+
+    describe('LINE Props 未指定時（後方互換性）', () => {
+      test('LINE Props 未指定時に IdP リソースが存在しないこと', () => {
+        const template = Template.fromStack(createStack(devProps));
+        template.resourceCountIs('AWS::Cognito::UserPoolIdentityProvider', 0);
+      });
+
+      test('LINE Props 未指定時に SupportedIdentityProviders が COGNITO のみであること', () => {
+        const template = Template.fromStack(createStack(devProps));
+        template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
+          SupportedIdentityProviders: ['COGNITO'],
+        });
+      });
+
+      test('Channel ID のみ指定（Secret 未指定）で LINE IdP が作成されないこと', () => {
+        const propsWithIdOnly: CognitoStackProps = {
+          ...devProps,
+          lineLoginChannelId: 'test-channel-id',
+        };
+        const template = Template.fromStack(createStack(propsWithIdOnly));
+        template.resourceCountIs('AWS::Cognito::UserPoolIdentityProvider', 0);
+      });
+
+      test('Channel Secret のみ指定（ID 未指定）で LINE IdP が作成されないこと', () => {
+        const propsWithSecretOnly: CognitoStackProps = {
+          ...devProps,
+          lineLoginChannelSecret: 'test-channel-secret',
+        };
+        const template = Template.fromStack(createStack(propsWithSecretOnly));
+        template.resourceCountIs('AWS::Cognito::UserPoolIdentityProvider', 0);
+      });
+
+      test('両方空文字列で LINE IdP が作成されないこと', () => {
+        const propsWithEmptyLine: CognitoStackProps = {
+          ...devProps,
+          lineLoginChannelId: '',
+          lineLoginChannelSecret: '',
+        };
+        const template = Template.fromStack(createStack(propsWithEmptyLine));
+        template.resourceCountIs('AWS::Cognito::UserPoolIdentityProvider', 0);
+      });
+    });
+  });
 });

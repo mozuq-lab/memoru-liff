@@ -9,6 +9,10 @@ export interface CognitoStackProps extends cdk.StackProps {
   cognitoDomainPrefix: string;
   callbackUrls: string[];
   logoutUrls: string[];
+  /** LINE Login Channel ID（両方指定時のみ LINE IdP を登録） */
+  lineLoginChannelId?: string;
+  /** LINE Login Channel Secret */
+  lineLoginChannelSecret?: string;
 }
 
 export class CognitoStack extends cdk.Stack {
@@ -55,6 +59,36 @@ export class CognitoStack extends cdk.Stack {
       },
     });
 
+    // LINE Login 外部 OIDC IdP（両方の Props が指定された場合のみ作成）
+    let lineProvider: cognito.UserPoolIdentityProviderOidc | undefined;
+    if (props.lineLoginChannelId && props.lineLoginChannelSecret) {
+      // LINE OIDC エンドポイントは .well-known/openid-configuration から取得可能だが、
+      // CDK の UserPoolIdentityProviderOidc は手動指定が必要
+      // ref: https://access.line.me/.well-known/openid-configuration
+      lineProvider = new cognito.UserPoolIdentityProviderOidc(this, 'LineLoginProvider', {
+        userPool: this.userPool,
+        name: 'LINE',
+        clientId: props.lineLoginChannelId,
+        clientSecret: props.lineLoginChannelSecret,
+        issuerUrl: 'https://access.line.me',
+        scopes: ['openid', 'profile'],
+        endpoints: {
+          authorization: 'https://access.line.me/oauth2/v2.1/authorize',
+          token: 'https://api.line.me/oauth2/v2.1/token',
+          userInfo: 'https://api.line.me/oauth2/v2.1/userinfo',
+          jwksUri: 'https://api.line.me/oauth2/v2.1/certs',
+        },
+        attributeMapping: {
+          // Cognito は federated user の username を自動で LINE_<sub> に設定するため、
+          // username マッピングは不要。name と picture のみマッピングする。
+          custom: {
+            name: cognito.ProviderAttribute.other('name'),
+            picture: cognito.ProviderAttribute.other('picture'),
+          },
+        },
+      });
+    }
+
     // ============================================================
     // Cognito User Pool Client (Public, PKCE)
     // ============================================================
@@ -77,12 +111,18 @@ export class CognitoStack extends cdk.Stack {
       },
       supportedIdentityProviders: [
         cognito.UserPoolClientIdentityProvider.COGNITO,
+        ...(lineProvider ? [cognito.UserPoolClientIdentityProvider.custom('LINE')] : []),
       ],
       accessTokenValidity: cdk.Duration.hours(1),
       idTokenValidity: cdk.Duration.hours(1),
       refreshTokenValidity: cdk.Duration.days(30),
       preventUserExistenceErrors: true,
     });
+
+    // UserPoolClient が LINE IdP より先に作成されると CloudFormation エラーになるため明示的に依存を追加
+    if (lineProvider) {
+      this.userPoolClient.node.addDependency(lineProvider);
+    }
 
     // ============================================================
     // Outputs
