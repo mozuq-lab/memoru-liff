@@ -200,6 +200,92 @@ describe("useSpeechSettings", () => {
     });
   });
 
+  // ─── userId 遅延確定 (REQ-002) ───────────────────────────────
+
+  describe("userId 遅延確定 (REQ-002)", () => {
+    it("userId が undefined → 有効値に変化したとき、保存済み設定が読み込まれる", () => {
+      // 【テスト目的】: useEffect([userId]) による遅延読み込みの動作確認
+      // 【テスト内容】: userId を undefined → "test-user-123" に rerender し、localStorage の設定が反映されるか検証
+      // 【期待される動作】: rerender 後に保存済みの { autoPlay: true, rate: 1.5 } が settings に反映される
+      // 🔵 REQ-002 受け入れ基準に基づく
+
+      // 【テストデータ準備】: localStorage に保存済み設定をセットアップ
+      const saved: SpeechSettings = { autoPlay: true, rate: 1.5 };
+      vi.mocked(localStorage.getItem).mockReturnValue(JSON.stringify(saved));
+
+      // 【初期条件設定】: userId=undefined で hook を初期化
+      const { result, rerender } = renderHook(
+        ({ userId }: { userId: string | undefined }) => useSpeechSettings(userId),
+        { initialProps: { userId: undefined as string | undefined } },
+      );
+
+      // 【前提条件確認】: 初期状態はデフォルト設定
+      // 【検証項目】: userId=undefined 時はデフォルト設定が適用される
+      expect(result.current.settings).toEqual({ autoPlay: false, rate: 1 });
+
+      // 【実際の処理実行】: userId を有効値に変更して rerender
+      // 【処理内容】: useEffect([userId]) が発火し、loadSettings を実行する
+      rerender({ userId: "test-user-123" });
+
+      // 【結果検証】: localStorage から保存済み設定が読み込まれた
+      // 【期待値確認】: autoPlay: true, rate: 1.5 が反映されていること
+      // 【検証項目】: useEffect による遅延読み込みが正しく動作する 🔵
+      expect(result.current.settings).toEqual(saved);
+    });
+  });
+
+  // ─── localStorage.setItem 例外処理 (REQ-102) ─────────────────
+
+  describe("localStorage.setItem 例外処理 (REQ-102)", () => {
+    it("localStorage.setItem が throw しても state が更新される", () => {
+      // 【テスト目的】: try/catch による localStorage 例外時の state 更新保証
+      // 【テスト内容】: setItem が QuotaExceededError を throw する状態で updateSettings を呼び、state が更新されるか検証
+      // 【期待される動作】: 例外発生時でも settings.autoPlay が true に更新される
+      // 🟡 REQ-102 受け入れ基準 + loadSettings パターンからの推測
+
+      // 【テストデータ準備】: setItem を例外を throw するモックに設定
+      vi.mocked(localStorage.setItem).mockImplementation(() => {
+        throw new Error("QuotaExceededError");
+      });
+
+      // 【初期条件設定】: userId 有効状態で hook を初期化
+      const { result } = renderHook(() => useSpeechSettings(TEST_USER_ID));
+
+      // 【実際の処理実行】: updateSettings で autoPlay を true に変更
+      // 【処理内容】: setItem は throw するが、try/catch で抑制されるはず
+      act(() => {
+        result.current.updateSettings({ autoPlay: true });
+      });
+
+      // 【結果検証】: state は正常に更新されている
+      // 【検証項目】: localStorage 例外時でも state 更新が保証される 🟡
+      expect(result.current.settings.autoPlay).toBe(true);
+    });
+
+    it("localStorage.setItem が throw してもエラーがスローされない", () => {
+      // 【テスト目的】: try/catch による localStorage 例外時のエラー非伝播確認
+      // 【テスト内容】: setItem が例外を throw しても updateSettings 呼び出し元にエラーが伝播しないことを検証
+      // 【期待される動作】: act 内の updateSettings 呼び出しが例外なく完了する
+      // 🟡 REQ-102 受け入れ基準 + loadSettings パターンからの推測
+
+      // 【テストデータ準備】: setItem を例外を throw するモックに設定
+      vi.mocked(localStorage.setItem).mockImplementation(() => {
+        throw new Error("QuotaExceededError");
+      });
+
+      // 【初期条件設定】: userId 有効状態で hook を初期化
+      const { result } = renderHook(() => useSpeechSettings(TEST_USER_ID));
+
+      // 【結果検証】: updateSettings がエラーをスローしないこと
+      // 【検証項目】: 例外が呼び出し元に伝播しない 🟡
+      expect(() => {
+        act(() => {
+          result.current.updateSettings({ rate: 1.5 });
+        });
+      }).not.toThrow();
+    });
+  });
+
   // ─── ユーザーID によるキー分離 ────────────────────────────────
 
   describe("ユーザーID によるキー分離", () => {

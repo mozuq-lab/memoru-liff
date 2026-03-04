@@ -2,7 +2,7 @@
  * 【機能概要】: localStorage に保存された SpeechSettings を読み書きするフック
  * 【テスト対応】: useSpeechSettings.test.ts
  */
-import { useState } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import type { SpeechRate, SpeechSettings } from "@/types/speech";
 
 const DEFAULT_SETTINGS: SpeechSettings = { autoPlay: false, rate: 1 };
@@ -43,15 +43,48 @@ export const useSpeechSettings = (
     return loadSettings(userId);
   });
 
-  const updateSettings = (patch: Partial<SpeechSettings>) => {
-    setSettings((prev) => {
-      const next = { ...prev, ...patch };
-      if (userId) {
-        localStorage.setItem(`speech-settings:${userId}`, JSON.stringify(next));
-      }
-      return next;
-    });
-  };
+  // 【実装方針】: useState 初期化関数は1回のみ実行されるため、userId の遅延確定に対応できない。
+  //               useRef で初回マウントフラグを保持し、useEffect([userId]) で userId 変化時のみ再読み込みする。
+  // 🔵 REQ-002 受け入れ基準 + architecture.md 設計方針に基づく
+  const isFirstRender = useRef(true);
+
+  // 【機能概要】: userId が変化したとき localStorage から設定を再読み込みする (REQ-002)
+  useEffect(() => {
+    // 【初回スキップ】: useState 初期化で既に loadSettings を実行済みのため、初回マウントはスキップ
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    if (userId) {
+      // 【外部ストア同期】: localStorage（外部ストア）との同期が目的であり、useEffect 内での setState は意図的
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSettings(loadSettings(userId));
+    }
+  }, [userId]);
+
+  // 【機能概要】: 設定を更新して localStorage に保存する。
+  //               Safari Private Mode や容量超過時の setItem 例外を抑制し、state 更新は保証する。
+  // 【参照安定性】: useCallback でメモ化し、子コンポーネントへの prop 渡し時の不要な再レンダリングを防ぐ
+  // 🟡 REQ-102 受け入れ基準 + loadSettings 側の既存 try/catch パターンからの推測
+  const updateSettings = useCallback(
+    (patch: Partial<SpeechSettings>) => {
+      setSettings((prev) => {
+        const next = { ...prev, ...patch };
+        if (userId) {
+          try {
+            localStorage.setItem(
+              `speech-settings:${userId}`,
+              JSON.stringify(next),
+            );
+          } catch {
+            // Safari Private Mode / quota exceeded — state only update
+          }
+        }
+        return next;
+      });
+    },
+    [userId],
+  );
 
   return { settings, updateSettings };
 };
