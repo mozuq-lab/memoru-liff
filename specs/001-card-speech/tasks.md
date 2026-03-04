@@ -67,12 +67,12 @@
 
 ### Tests for User Story 2（TDD red）
 
-- [ ] T011 [P] [US2] Add autoPlay behavior tests to `frontend/src/hooks/__tests__/useSpeechSettings.test.ts` — autoPlay のデフォルト false・更新・次カードで継続するシナリオをカバー
+- [x] T011 [P] [US2] Add autoPlay behavior tests to `frontend/src/hooks/__tests__/useSpeechSettings.test.ts` — autoPlay のデフォルト false・更新・次カードで継続するシナリオをカバー
 
 ### Implementation for User Story 2
 
-- [ ] T012 [P] [US2] Add autoPlay logic to `ReviewPage` in `frontend/src/pages/ReviewPage.tsx` — `useEffect` でカード遷移時に `settings.autoPlay` が true なら自動発話。手動停止は現在カードのみ（設定変更しない）
-- [ ] T013 [P] [US2] Add `SpeechSettingsSection` (autoPlay toggle) to `SettingsPage` in `frontend/src/pages/SettingsPage.tsx` — isSupported false 時は非対応メッセージを表示しセクション非表示
+- [x] T012 [P] [US2] Add autoPlay logic to `ReviewPage` in `frontend/src/pages/ReviewPage.tsx` — `useEffect` でカード遷移時に `settings.autoPlay` が true なら自動発話。手動停止は現在カードのみ（設定変更しない）
+- [x] T013 [P] [US2] Add `SpeechSettingsSection` (autoPlay toggle) to `SettingsPage` in `frontend/src/pages/SettingsPage.tsx` — isSupported false 時は非対応メッセージを表示しセクション非表示
 
 **Checkpoint**: US2 完了 — US1（手動）と US2（自動）が両方独立して動作
 
@@ -86,12 +86,12 @@
 
 ### Tests for User Story 3（TDD red）
 
-- [ ] T014 [P] [US3] Add `rate` option tests to `frontend/src/hooks/__tests__/useSpeech.test.ts` — rate 0.5 / 1 / 1.5 が `SpeechSynthesisUtterance.rate` に正しく渡されることをカバー
+- [x] T014 [P] [US3] Add `rate` option tests to `frontend/src/hooks/__tests__/useSpeech.test.ts` — rate 0.5 / 1 / 1.5 が `SpeechSynthesisUtterance.rate` に正しく渡されることをカバー
 
 ### Implementation for User Story 3
 
-- [ ] T015 [US3] Connect `rate` option in `useSpeech` hook in `frontend/src/hooks/useSpeech.ts` — T014 のテストをパスさせる（`utter.rate = options.rate ?? 1` を設定）
-- [ ] T016 [US3] Add rate radio buttons (`遅め` / `標準` / `速め`) to `SettingsPage` in `frontend/src/pages/SettingsPage.tsx` — SpeechSettingsSection 内に追加
+- [x] T015 [US3] Connect `rate` option in `useSpeech` hook in `frontend/src/hooks/useSpeech.ts` — T014 のテストをパスさせる（`utter.rate = options.rate ?? 1` を設定）
+- [x] T016 [US3] Add rate radio buttons (`遅め` / `標準` / `速め`) to `SettingsPage` in `frontend/src/pages/SettingsPage.tsx` — SpeechSettingsSection 内に追加
 
 **Checkpoint**: US3 完了 — 全ユーザーストーリーが独立して動作
 
