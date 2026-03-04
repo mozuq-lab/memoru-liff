@@ -446,5 +446,13 @@ describe('SettingsPage', () => {
 
       expect(mockUpdateSpeechSettings).toHaveBeenCalledWith({ rate: 1.5 });
     });
+
+    it('自動読み上げスイッチボタンに aria-label="自動読み上げ" が設定されている', async () => {
+      renderSettingsPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('autoplay-toggle')).toHaveAttribute('aria-label', '自動読み上げ');
+      });
+    });
   });
 });

@@ -293,6 +293,7 @@ export const SettingsPage = () => {
                     type="button"
                     role="switch"
                     aria-checked={speechSettings.autoPlay}
+                    aria-label="自動読み上げ"
                     data-testid="autoplay-toggle"
                     onClick={() =>
                       updateSpeechSettings({ autoPlay: !speechSettings.autoPlay })
