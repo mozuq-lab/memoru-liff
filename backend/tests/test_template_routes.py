@@ -164,7 +164,7 @@ def test_link_line_event_exists_with_correct_path(api_events):
 
 
 def test_total_http_api_event_count(api_events):
-    """TC-042-04: 整合性 - ApiFunction の HttpApi イベント総数が 18 個
+    """TC-042-04: 整合性 - ApiFunction の HttpApi イベント総数が 21 個
 
     期待イベント:
     1. GetUser          - GET /users/me
@@ -185,9 +185,12 @@ def test_total_http_api_event_count(api_events):
     16. CreateDeck      - POST /decks
     17. UpdateDeck      - PUT /decks/{deckId}
     18. DeleteDeck      - DELETE /decks/{deckId}
+    19. GetStats        - GET /stats
+    20. GetWeakCards    - GET /stats/weak-cards
+    21. GetForecast     - GET /stats/forecast
     """
-    assert len(api_events) == 18, (
-        f"期待: 18 イベント、実際: {len(api_events)} イベント\n"
+    assert len(api_events) == 21, (
+        f"期待: 21 イベント、実際: {len(api_events)} イベント\n"
         f"現在のイベント: {list(api_events.keys())}"
     )
 
@@ -303,7 +306,7 @@ def test_event_path_and_method(api_events, event_name, expected_path, expected_m
 def test_no_duplicate_event_names(sam_template):
     """TC-042-09: 品質 - イベント名の重複がないこと
 
-    YAML で重複キーは後勝ちになるため、イベント数が期待通りの 18 個かで検証する。
+    YAML で重複キーは後勝ちになるため、イベント数が期待通りの 21 個かで検証する。
     """
     events = sam_template["Resources"]["ApiFunction"]["Properties"]["Events"]
     http_api_events = {
@@ -311,8 +314,8 @@ def test_no_duplicate_event_names(sam_template):
         if ev.get("Type") == "HttpApi"
     }
     # YAML で重複キーは後勝ちになるため、パース後にイベント数が期待通りかで検証
-    assert len(http_api_events) == 18, (
-        f"期待: 18 イベント, 実際: {len(http_api_events)} イベント\n"
+    assert len(http_api_events) == 21, (
+        f"期待: 21 イベント, 実際: {len(http_api_events)} イベント\n"
         f"イベント: {list(http_api_events.keys())}"
     )
 

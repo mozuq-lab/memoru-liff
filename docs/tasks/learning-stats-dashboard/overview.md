@@ -25,8 +25,8 @@
 ## 全体進捗
 
 - [ ] Phase 1: バックエンド API
-- [ ] Phase 2: フロントエンド UI
-- [ ] Phase 3: 統合
+- [x] Phase 2: フロントエンド UI
+- [x] Phase 3: 統合
 
 ## マイルストーン
 
@@ -80,7 +80,7 @@ TASK-0153 → TASK-0154 → TASK-0155 → TASK-0156
 
 ### タスク一覧
 
-- [ ] [TASK-0156: SAM template 更新 + 統合テスト](TASK-0156.md) - 2h (DIRECT) 🔵
+- [x] [TASK-0156: SAM template 更新 + 統合テスト](TASK-0156.md) - 2h (DIRECT) 🔵
 
 ### 依存関係
 
