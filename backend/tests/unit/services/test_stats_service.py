@@ -210,6 +210,14 @@ class TestGetStats:
         # algebra: 1 pass out of 1 review = 1.0
         assert result.tag_performance["algebra"] == 1.0
 
+    def test_get_stats_cards_without_next_review_at_not_due(self, stats_service, dynamodb_tables):
+        """Test that cards without next_review_at are NOT counted as due."""
+        _put_card(dynamodb_tables, "user-1", "card-1",
+                  repetitions=0)  # No next_review_at
+
+        result = stats_service.get_stats("user-1")
+        assert result.cards_due_today == 0
+
     def test_get_stats_cards_due_includes_past_due(self, stats_service, dynamodb_tables):
         """Test that past-due cards are counted in cards_due_today."""
         past = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()

@@ -1,6 +1,9 @@
 """Stats API route handlers."""
 
+import json
+
 from aws_lambda_powertools import Logger, Tracer
+from aws_lambda_powertools.event_handler import Response, content_types
 from aws_lambda_powertools.event_handler.api_gateway import Router
 
 from api.shared import get_user_id_from_context
@@ -36,7 +39,14 @@ def get_weak_cards():
     logger.info(f"Getting weak cards for user_id: {user_id}")
 
     params = router.current_event.query_string_parameters or {}
-    limit = min(int(params.get("limit", 10)), 50)
+    try:
+        limit = max(1, min(int(params.get("limit", 10)), 50))
+    except (ValueError, TypeError):
+        return Response(
+            status_code=400,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"message": "limit must be a positive integer"}),
+        )
 
     try:
         response = stats_service.get_weak_cards(user_id, limit=limit)
@@ -54,7 +64,14 @@ def get_forecast():
     logger.info(f"Getting forecast for user_id: {user_id}")
 
     params = router.current_event.query_string_parameters or {}
-    days = min(int(params.get("days", 7)), 30)
+    try:
+        days = max(1, min(int(params.get("days", 7)), 30))
+    except (ValueError, TypeError):
+        return Response(
+            status_code=400,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"message": "days must be a positive integer"}),
+        )
 
     try:
         response = stats_service.get_forecast(user_id, days=days)

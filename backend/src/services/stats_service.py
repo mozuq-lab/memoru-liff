@@ -7,8 +7,6 @@ from typing import Dict, List, Optional
 import boto3
 from aws_lambda_powertools import Logger
 from boto3.dynamodb.conditions import Key
-from botocore.exceptions import ClientError
-
 from models.stats import (
     ForecastDay,
     ForecastResponse,
@@ -116,30 +114,28 @@ class StatsService:
         Returns:
             StatsResponse with aggregated statistics.
         """
-        try:
-            cards = self._fetch_all_cards(user_id)
-            reviews = self._fetch_all_reviews(user_id)
-        except ClientError:
-            return StatsResponse(
-                total_cards=0,
-                learned_cards=0,
-                unlearned_cards=0,
-                cards_due_today=0,
-                total_reviews=0,
-                average_grade=0.0,
-                streak_days=0,
-                tag_performance={},
-            )
+        cards = self._fetch_all_cards(user_id)
+        reviews = self._fetch_all_reviews(user_id)
 
         total_cards = len(cards)
         learned_cards = sum(1 for c in cards if int(c.get("repetitions", 0)) >= 1)
         unlearned_cards = total_cards - learned_cards
 
         # Cards due today: next_review_at <= now
-        now_iso = datetime.now(timezone.utc).isoformat()
-        cards_due_today = sum(
-            1 for c in cards if c.get("next_review_at", "") <= now_iso
-        )
+        now = datetime.now(timezone.utc)
+        cards_due_today = 0
+        for c in cards:
+            raw = c.get("next_review_at")
+            if not raw:
+                continue
+            try:
+                dt = datetime.fromisoformat(str(raw))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                if dt <= now:
+                    cards_due_today += 1
+            except (ValueError, TypeError):
+                continue
 
         # Review stats
         total_reviews = len(reviews)
@@ -197,10 +193,7 @@ class StatsService:
         Returns:
             WeakCardsResponse with weak cards list.
         """
-        try:
-            cards = self._fetch_all_cards(user_id)
-        except ClientError:
-            return WeakCardsResponse(weak_cards=[], total_count=0)
+        cards = self._fetch_all_cards(user_id)
 
         # Filter to cards with at least one review
         reviewed_cards = [
@@ -243,10 +236,7 @@ class StatsService:
         Returns:
             ForecastResponse with daily forecast.
         """
-        try:
-            cards = self._fetch_all_cards(user_id)
-        except ClientError:
-            return ForecastResponse(forecast=[])
+        cards = self._fetch_all_cards(user_id)
 
         today = date.today()
         end_date = today + timedelta(days=days - 1)

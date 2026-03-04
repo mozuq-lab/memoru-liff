@@ -12,7 +12,7 @@ from models.stats import (
     WeakCard,
     WeakCardsResponse,
 )
-from services.stats_service import StatsServiceError
+from services.stats_service import StatsServiceError  # noqa: F401
 
 
 # =============================================================================
@@ -292,6 +292,41 @@ class TestGetWeakCardsEndpoint:
         assert body["weak_cards"] == []
         assert body["total_count"] == 0
 
+    def test_get_weak_cards_invalid_limit(self, api_gateway_event, lambda_context):
+        """limit が数値でない場合は 400."""
+        event = api_gateway_event(
+            method="GET",
+            path="/stats/weak-cards",
+            query_string_parameters={"limit": "abc"},
+        )
+
+        with patch("api.handlers.stats_handler.stats_service"):
+            from api.handler import handler
+
+            response = handler(event, lambda_context)
+
+        assert response["statusCode"] == 400
+        body = json.loads(response["body"])
+        assert "limit" in body["message"]
+
+    def test_get_weak_cards_negative_limit_clamped(self, api_gateway_event, lambda_context):
+        """負の limit は 1 にクランプされること."""
+        event = api_gateway_event(
+            method="GET",
+            path="/stats/weak-cards",
+            query_string_parameters={"limit": "-5"},
+        )
+
+        mock_response = _make_weak_cards_response()
+
+        with patch("api.handlers.stats_handler.stats_service") as mock_service:
+            mock_service.get_weak_cards.return_value = mock_response
+            from api.handler import handler
+
+            handler(event, lambda_context)
+
+        mock_service.get_weak_cards.assert_called_once_with("test-user-id", limit=1)
+
     def test_get_weak_cards_service_error(self, api_gateway_event, lambda_context):
         """サービス層でエラーが発生した場合は例外が伝播する."""
         event = api_gateway_event(
@@ -408,6 +443,41 @@ class TestGetForecastEndpoint:
         assert response["statusCode"] == 200
         body = json.loads(response["body"])
         assert body["forecast"] == []
+
+    def test_get_forecast_invalid_days(self, api_gateway_event, lambda_context):
+        """days が数値でない場合は 400."""
+        event = api_gateway_event(
+            method="GET",
+            path="/stats/forecast",
+            query_string_parameters={"days": "abc"},
+        )
+
+        with patch("api.handlers.stats_handler.stats_service"):
+            from api.handler import handler
+
+            response = handler(event, lambda_context)
+
+        assert response["statusCode"] == 400
+        body = json.loads(response["body"])
+        assert "days" in body["message"]
+
+    def test_get_forecast_negative_days_clamped(self, api_gateway_event, lambda_context):
+        """負の days は 1 にクランプされること."""
+        event = api_gateway_event(
+            method="GET",
+            path="/stats/forecast",
+            query_string_parameters={"days": "-3"},
+        )
+
+        mock_response = _make_forecast_response()
+
+        with patch("api.handlers.stats_handler.stats_service") as mock_service:
+            mock_service.get_forecast.return_value = mock_response
+            from api.handler import handler
+
+            handler(event, lambda_context)
+
+        mock_service.get_forecast.assert_called_once_with("test-user-id", days=1)
 
     def test_get_forecast_service_error(self, api_gateway_event, lambda_context):
         """サービス層でエラーが発生した場合は例外が伝播する."""
