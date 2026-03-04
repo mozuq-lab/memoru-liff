@@ -7,6 +7,54 @@ import type { ReconfirmCard, SessionCardResultType } from '@/types/card';
 
 const mockNavigate = vi.fn();
 
+// ============================================================
+// TASK-0149: 停止トグル修正テスト用モック
+// 【テスト前準備】: useSpeech hook をモックして isSpeaking/speak/cancel を制御可能にする
+// 【設計方針】: 既存テストへの影響を避けるため isSupported=false をデフォルトとする
+//              新しいテストでのみ isSupported=true/isSpeaking=true に上書き
+// 🔵 青信号: note.md の useSpeech 仕様 + testcases.md のモック戦略より
+// ============================================================
+
+const mockSpeak = vi.fn();
+const mockCancel = vi.fn();
+// isSpeaking の状態をテストで制御可能にするため、let で宣言
+// 既存テストでは false のまま（SpeechButton が非表示）
+let mockIsSpeaking = false;
+// isSupported をテストで制御可能にする
+// 既存テストでは false のまま（SpeechButton が非表示となり既存テストに影響なし）
+let mockIsSupported = false;
+
+vi.mock('@/hooks/useSpeech', () => ({
+  useSpeech: () => ({
+    isSpeaking: mockIsSpeaking,
+    isSupported: mockIsSupported,
+    speak: mockSpeak,
+    cancel: mockCancel,
+  }),
+}));
+
+// 【テスト前準備】: useAuth hook をモックして userId を提供
+// 🔵 青信号: SettingsPage.test.tsx の既存パターンより
+vi.mock('@/hooks/useAuth', () => ({
+  useAuth: () => ({
+    user: {
+      profile: { sub: 'test-user' },
+    },
+    isAuthenticated: true,
+    isLoading: false,
+    logout: vi.fn(),
+  }),
+}));
+
+// 【テスト前準備】: useSpeechSettings hook をモックして settings を提供
+// 🔵 青信号: SettingsPage.test.tsx の既存パターンより
+vi.mock('@/hooks/useSpeechSettings', () => ({
+  useSpeechSettings: () => ({
+    settings: { autoPlay: false, rate: 1 },
+    updateSettings: vi.fn(),
+  }),
+}));
+
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual('react-router-dom');
   return {
@@ -1681,6 +1729,182 @@ describe('ReviewPage', () => {
       });
 
       expect(mockUndoReview).toHaveBeenCalledWith('card-1');
+    });
+  });
+
+  // ============================================================
+  // TASK-0149: 停止トグル修正 - 失敗テスト (Red フェーズ)
+  // 【テスト概要】: ReviewPage の speechProps コールバックが isSpeaking 状態に応じて
+  //               cancel() または speak() を正しく呼ぶことを検証する
+  // 【現状の問題】: onSpeakFront/onSpeakBack が常に speak() を呼ぶため停止できない
+  // 【修正目標】: isSpeaking=true のとき cancel() を呼び、false のとき speak(text) を呼ぶ
+  // 🔵 青信号: TASK-0149.md 完了条件 + architecture.md REQ-001 より
+  // ============================================================
+
+  describe('TASK-0149: 停止トグル修正 - 通常モード', () => {
+    // 【テスト前準備】: 各テスト前に SpeechButton が表示される状態を設定
+    // 【環境初期化】: mockIsSpeaking/mockIsSupported をリセットし、モック関数をクリア
+    beforeEach(() => {
+      // 【テスト前準備】: isSupported=true にして SpeechButton を表示させる
+      // 【重要】: FlipCard は speechProps.speechState.isSupported=true のときのみ SpeechButton を描画する
+      mockIsSupported = true;
+      // 【テスト前準備】: 各テスト開始時に isSpeaking=false（デフォルト停止状態）
+      mockIsSpeaking = false;
+      // 【テスト前準備】: モック関数をクリアして前のテストの呼び出し履歴を消去
+      mockSpeak.mockClear();
+      mockCancel.mockClear();
+    });
+
+    // 【テスト後処理】: テスト終了後に isSupported/isSpeaking をデフォルト値に戻す
+    // 【状態復元】: 既存テストへの影響を防ぐため、各テスト後にモック状態をリセット
+    afterEach(() => {
+      mockIsSupported = false;
+      mockIsSpeaking = false;
+    });
+
+    // TC-001: 通常モード - 表面読み上げ中にボタンクリックで cancel() が呼ばれる
+    it('TC-001: 通常モード: 表面読み上げ中にボタンをクリックすると cancel() が呼ばれ、speak() は呼ばれない', async () => {
+      // 【テスト目的】: isSpeaking=true の状態で表面の読み上げボタンをクリックしたとき、
+      //               ReviewPage が生成する onSpeakFront コールバックが cancel() を呼ぶことを確認
+      // 【テスト内容】: 発話中の状態を再現し、停止トグル動作を検証する
+      // 【期待される動作】: speak() ではなく cancel() が呼ばれ、読み上げが停止する
+      // 🔵 青信号: TASK-0149.md 完了条件 + architecture.md REQ-001 より
+
+      const user = userEvent.setup();
+
+      // 【テストデータ準備】: 1枚のカードで通常モードをセットアップ
+      // 【初期条件設定】: isSupported=true で SpeechButton が表示される状態
+      mockGetDueCards.mockResolvedValue({
+        due_cards: [{ card_id: 'card-1', front: '質問1', back: '解答1', overdue_days: 0 }],
+        total_due_count: 1,
+        next_due_date: null,
+      });
+
+      // 【テストデータ準備】: isSpeaking=true（発話中）の状態を設定
+      // 【重要】: ReviewPage はコールバック生成時に useSpeech の isSpeaking を参照する
+      mockIsSpeaking = true;
+
+      renderReviewPage();
+
+      // 【前提条件確認】: カードが表示されることを確認
+      await waitFor(() => {
+        expect(screen.getByText('質問1')).toBeInTheDocument();
+      });
+
+      // 【前提条件確認】: isSpeaking=true の状態で表面の読み上げボタン（停止アイコン）が表示されることを確認
+      // SpeechButton は isSpeaking=true のとき aria-label="表面の読み上げを停止" になる
+      const frontSpeechButton = screen.getByRole('button', { name: '表面の読み上げを停止' });
+      expect(frontSpeechButton).toBeInTheDocument(); // 【確認内容】: SpeechButton が isSupported=true/isSpeaking=true で表示されること 🔵
+
+      // 【実際の処理実行】: 表面の読み上げボタンをクリック
+      // 【処理内容】: SpeechButton.onClick → FlipCard.onSpeakFront → ReviewPage の speechProps.onSpeakFront
+      await user.click(frontSpeechButton);
+
+      // 【結果検証】: cancel() が1回呼ばれたことを確認
+      // 【期待値確認】: REQ-001 により、発話中にボタンをクリックすると停止すべき
+      expect(mockCancel).toHaveBeenCalledTimes(1); // 【確認内容】: cancel() が1回呼ばれたこと 🔵
+
+      // 【結果検証】: speak() が呼ばれていないことを確認
+      // 【期待値確認】: 発話中のクリックは停止であり、speak() は呼ばれない（停止トグルの核心）
+      expect(mockSpeak).not.toHaveBeenCalled(); // 【確認内容】: speak() が呼ばれていないこと 🔵
+    });
+
+    // TC-002: 通常モード - 裏面読み上げ中にボタンクリックで cancel() が呼ばれる
+    it('TC-002: 通常モード: 裏面読み上げ中にボタンをクリックすると cancel() が呼ばれ、speak() は呼ばれない', async () => {
+      // 【テスト目的】: isSpeaking=true の状態で裏面の読み上げボタンをクリックしたとき、
+      //               onSpeakBack コールバックが cancel() を呼ぶことを確認
+      // 【テスト内容】: 発話中の裏面表示状態を再現する
+      // 【期待される動作】: speak() ではなく cancel() が呼ばれ、読み上げが停止する
+      // 🔵 青信号: TASK-0149.md 完了条件 + architecture.md REQ-001 より
+
+      const user = userEvent.setup();
+
+      // 【テストデータ準備】: 1枚のカードで通常モードをセットアップ
+      mockGetDueCards.mockResolvedValue({
+        due_cards: [{ card_id: 'card-1', front: '質問1', back: '解答1', overdue_days: 0 }],
+        total_due_count: 1,
+        next_due_date: null,
+      });
+
+      // 【テストデータ準備】: isSpeaking=true（発話中）の状態を設定
+      mockIsSpeaking = true;
+
+      renderReviewPage();
+
+      // 【前提条件確認】: カードが表示されることを確認
+      await waitFor(() => {
+        expect(screen.getByText('質問1')).toBeInTheDocument();
+      });
+
+      // 【実際の処理実行】: カードをフリップして裏面を表示
+      // 【処理内容】: カードをクリックして isFlipped=true にし、裏面の SpeechButton を表示
+      const card = screen.getByRole('button', { name: /カード表面を表示中/ });
+      await user.click(card);
+
+      // 【前提条件確認】: isFlipped=true の状態で裏面の読み上げボタン（停止アイコン）が表示されることを確認
+      // SpeechButton は isSpeaking=true のとき aria-label="裏面の読み上げを停止" になる
+      const backSpeechButton = screen.getByRole('button', { name: '裏面の読み上げを停止' });
+      expect(backSpeechButton).toBeInTheDocument(); // 【確認内容】: 裏面の SpeechButton が表示されること 🔵
+
+      // モック関数をクリア（フリップ時に speak が呼ばれた場合の呼び出しをリセット）
+      mockSpeak.mockClear();
+      mockCancel.mockClear();
+
+      // 【実際の処理実行】: 裏面の読み上げボタンをクリック
+      await user.click(backSpeechButton);
+
+      // 【結果検証】: cancel() が1回呼ばれたことを確認
+      // 【期待値確認】: REQ-001 により、裏面でも停止トグル動作は同一であるべき
+      expect(mockCancel).toHaveBeenCalledTimes(1); // 【確認内容】: cancel() が1回呼ばれたこと 🔵
+
+      // 【結果検証】: speak() が呼ばれていないことを確認
+      expect(mockSpeak).not.toHaveBeenCalled(); // 【確認内容】: speak() が呼ばれていないこと 🔵
+    });
+
+    // TC-003: 通常モード - 停止中にボタンクリックで speak() が呼ばれる
+    it('TC-003: 通常モード: 停止中にボタンをクリックすると speak(text) が呼ばれ、cancel() は呼ばれない', async () => {
+      // 【テスト目的】: isSpeaking=false の状態で表面の読み上げボタンをクリックしたとき、
+      //               speak(text) が正しいテキストで呼ばれることを確認
+      // 【テスト内容】: 停止中の状態から読み上げを開始するシナリオ
+      // 【期待される動作】: cancel() ではなく speak(currentCard.front) が呼ばれる
+      // 🔵 青信号: TASK-0149.md 基本テスト要件「停止後に再タップ → speak() が呼ばれる」より
+
+      const user = userEvent.setup();
+
+      // 【テストデータ準備】: 1枚のカードで通常モードをセットアップ
+      // 【初期条件設定】: isSpeaking=false（停止中）の状態（beforeEach で設定済み）
+      mockGetDueCards.mockResolvedValue({
+        due_cards: [{ card_id: 'card-1', front: '質問1', back: '解答1', overdue_days: 0 }],
+        total_due_count: 1,
+        next_due_date: null,
+      });
+
+      // 【前提確認】: mockIsSpeaking=false（停止中）のまま
+      // mockIsSpeaking は beforeEach で false に設定済み
+
+      renderReviewPage();
+
+      // 【前提条件確認】: カードが表示されることを確認
+      await waitFor(() => {
+        expect(screen.getByText('質問1')).toBeInTheDocument();
+      });
+
+      // 【前提条件確認】: isSpeaking=false の状態で表面の読み上げボタン（再生アイコン）が表示されることを確認
+      // SpeechButton は isSpeaking=false のとき aria-label="表面を読み上げ" になる
+      const frontSpeechButton = screen.getByRole('button', { name: '表面を読み上げ' });
+      expect(frontSpeechButton).toBeInTheDocument(); // 【確認内容】: SpeechButton が isSupported=true で表示されること 🔵
+
+      // 【実際の処理実行】: 停止中に表面の読み上げボタンをクリック
+      // 【処理内容】: SpeechButton.onClick → FlipCard.onSpeakFront → ReviewPage の speechProps.onSpeakFront
+      await user.click(frontSpeechButton);
+
+      // 【結果検証】: speak() が正しいテキスト「質問1」で呼ばれたことを確認
+      // 【期待値確認】: 停止中のボタンクリックは新規読み上げ開始であるべき
+      expect(mockSpeak).toHaveBeenCalledWith('質問1'); // 【確認内容】: speak() がカード表面テキストで呼ばれたこと 🔵
+
+      // 【結果検証】: cancel() が呼ばれていないことを確認
+      // 【期待値確認】: 停止中のクリックは読み上げ開始であり、cancel() は呼ばれない
+      expect(mockCancel).not.toHaveBeenCalled(); // 【確認内容】: cancel() が呼ばれていないこと 🔵
     });
   });
 });
