@@ -29,6 +29,7 @@ from services.ai_service import (
     AIRateLimitError,
     AIServiceError,
     AITimeoutError,
+    CardType,
     DifficultyLevel,
     GeneratedCard,
     GenerationResult,
@@ -47,6 +48,10 @@ from services.prompts.advice import ADVICE_SYSTEM_PROMPT
 from services.prompts.generate import CARD_GENERATION_SYSTEM_PROMPT
 from services.prompts.grading import GRADING_SYSTEM_PROMPT
 from services.prompts.refine import get_refine_system_prompt
+from services.prompts.url_generate import (
+    URL_CARD_GENERATION_SYSTEM_PROMPT,
+    get_url_card_generation_prompt,
+)
 
 # Bedrock のデフォルトモデル ID
 _DEFAULT_BEDROCK_MODEL_ID = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
@@ -255,6 +260,83 @@ class StrandsAIService:
             )
 
         return cards
+
+    def generate_cards_from_chunks(
+        self,
+        chunks: List[str],
+        card_type: CardType = "qa",
+        target_count: int = 10,
+        difficulty: DifficultyLevel = "medium",
+        language: Language = "ja",
+        page_title: str = "",
+    ) -> GenerationResult:
+        """テキストチャンクからフラッシュカードを Strands Agent 経由で生成する.
+
+        各チャンクから個別にカードを生成し、結果をマージして重複除去する。
+
+        Args:
+            chunks: テキストチャンクのリスト。
+            card_type: カードタイプ（qa/definition/cloze）。
+            target_count: 目標生成枚数。
+            difficulty: 難易度。
+            language: 出力言語。
+            page_title: ページタイトル（コンテキスト用）。
+
+        Returns:
+            GenerationResult: 生成されたカードとメタ情報。
+        """
+        start_time = time.time()
+        all_cards: List[GeneratedCard] = []
+        total_input_length = sum(len(c) for c in chunks)
+
+        # Distribute target count across chunks
+        cards_per_chunk = max(3, target_count // max(len(chunks), 1))
+
+        with _handle_ai_errors():
+            for chunk_text in chunks:
+                user_prompt = get_url_card_generation_prompt(
+                    chunk_text=chunk_text,
+                    card_count=cards_per_chunk,
+                    card_type=card_type,
+                    difficulty=difficulty,
+                    language=language,
+                    page_title=page_title,
+                )
+
+                agent = Agent(
+                    model=self.model,
+                    system_prompt=URL_CARD_GENERATION_SYSTEM_PROMPT,
+                )
+                response = agent(user_prompt)
+
+                response_text = str(response)
+                try:
+                    cards = self._parse_generation_result(response_text)
+                    all_cards.extend(cards)
+                except AIParseError:
+                    # Skip chunks that fail to parse
+                    continue
+
+        # Deduplicate by front text (case-insensitive)
+        seen_fronts: set[str] = set()
+        unique_cards: List[GeneratedCard] = []
+        for card in all_cards:
+            front_key = card.front.strip().lower()
+            if front_key not in seen_fronts:
+                seen_fronts.add(front_key)
+                unique_cards.append(card)
+
+        # Trim to target count
+        unique_cards = unique_cards[:target_count]
+
+        processing_time_ms = int((time.time() - start_time) * 1000)
+
+        return GenerationResult(
+            cards=unique_cards,
+            input_length=total_input_length,
+            model_used=self.model_used,
+            processing_time_ms=processing_time_ms,
+        )
 
     def grade_answer(
         self,

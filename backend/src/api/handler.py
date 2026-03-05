@@ -207,6 +207,14 @@ def advice_handler(event: dict, context: Any) -> dict:
         return _make_lambda_response(500, {"error": "Internal Server Error"})
 
 
+def url_generate_handler(event: dict, context: Any) -> dict:
+    """POST /cards/generate-from-url の Lambda ハンドラー。
+
+    専用 Lambda 関数（120s タイムアウト、512MB メモリ）として実行される。
+    """
+    return handler(event, context)
+
+
 # =============================================================================
 # Lambda Handler
 # =============================================================================

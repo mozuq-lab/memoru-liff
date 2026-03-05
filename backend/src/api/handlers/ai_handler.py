@@ -16,10 +16,18 @@ from models.generate import (
     RefineCardRequest,
     RefineCardResponse,
 )
+from models.url_generate import (
+    GenerateFromUrlRequest,
+    GenerateFromUrlResponse,
+    PageInfoResponse,
+    UrlGenerationInfoResponse,
+)
 from services.ai_service import (
     create_ai_service,
     AIServiceError,
 )
+from services.content_chunker import chunk_content
+from services.url_content_service import ContentFetchError, UrlContentService
 
 logger = Logger()
 tracer = Tracer()
@@ -91,6 +99,117 @@ def generate_cards():
         return map_ai_error_to_http(e)
     except Exception as e:
         logger.error(f"Error generating cards: {e}")
+        raise
+
+
+@router.post("/cards/generate-from-url")
+@tracer.capture_method
+def generate_from_url():
+    """Generate flashcards from a URL using AI."""
+    user_id = get_user_id_from_context(router)
+    logger.info(f"Generating cards from URL for user_id: {user_id}")
+
+    try:
+        body = router.current_event.json_body
+        if not isinstance(body, dict):
+            return Response(
+                status_code=400,
+                content_type=content_types.APPLICATION_JSON,
+                body=json.dumps({"error": "Request body must be a JSON object"}),
+            )
+        request = GenerateFromUrlRequest(**body)
+    except ValidationError as e:
+        logger.warning(f"Validation error: {e}")
+        return Response(
+            status_code=400,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": "Invalid request", "details": e.errors()}),
+        )
+    except json.JSONDecodeError:
+        return Response(
+            status_code=400,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": "Invalid JSON body"}),
+        )
+
+    # Fetch page content
+    try:
+        content_service = UrlContentService()
+        page = content_service.fetch_content(request.url)
+    except ContentFetchError as e:
+        logger.warning(f"Content fetch error for user_id {user_id}: {e}")
+        error_msg = str(e)
+        if "timeout" in error_msg.lower():
+            status_code = 408
+        elif "private" in error_msg.lower() or "blocked" in error_msg.lower():
+            status_code = 403
+        elif "supported" in error_msg.lower() or "meaningful" in error_msg.lower():
+            status_code = 422
+        else:
+            status_code = 502
+        return Response(
+            status_code=status_code,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": error_msg}),
+        )
+
+    # Chunk content
+    chunks = chunk_content(page.text_content, page_title=page.title)
+    chunk_texts = [c.text for c in chunks]
+
+    if not chunk_texts:
+        return Response(
+            status_code=422,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": "Could not extract meaningful text content from the page"}),
+        )
+
+    # Generate cards
+    try:
+        ai_service = create_ai_service()
+        result = ai_service.generate_cards_from_chunks(
+            chunks=chunk_texts,
+            card_type=request.card_type,
+            target_count=request.target_count,
+            difficulty=request.difficulty,
+            language=request.language,
+            page_title=page.title,
+        )
+        logger.info(
+            f"URL card generation succeeded: model={result.model_used}, "
+            f"cards={len(result.cards)}, chunks={len(chunk_texts)}, "
+            f"time_ms={result.processing_time_ms}"
+        )
+
+        response = GenerateFromUrlResponse(
+            generated_cards=[
+                GeneratedCardResponse(
+                    front=card.front,
+                    back=card.back,
+                    suggested_tags=card.suggested_tags,
+                )
+                for card in result.cards
+            ],
+            generation_info=UrlGenerationInfoResponse(
+                model_used=result.model_used,
+                processing_time_ms=result.processing_time_ms,
+                fetch_method=page.fetch_method,
+                chunk_count=len(chunk_texts),
+                content_length=len(page.text_content),
+            ),
+            page_info=PageInfoResponse(
+                url=page.url,
+                title=page.title,
+                fetched_at=page.fetched_at,
+            ),
+        )
+        return response.model_dump(mode="json")
+
+    except AIServiceError as e:
+        logger.warning(f"AI service error for user_id {user_id}: {type(e).__name__}: {e}")
+        return map_ai_error_to_http(e)
+    except Exception as e:
+        logger.error(f"Error generating cards from URL: {e}")
         raise
 
 

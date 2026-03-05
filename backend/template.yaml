@@ -601,6 +601,47 @@ Resources:
         Environment: !Ref Environment
         Application: memoru
 
+  # URL Card Generation Function (dedicated for longer timeout)
+  UrlGenerateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub memoru-url-generate-${Environment}
+      CodeUri: src/
+      Handler: api.handler.url_generate_handler
+      Description: AI card generation from URL handler for POST /cards/generate-from-url
+      Timeout: 120
+      MemorySize: 512
+      ReservedConcurrentExecutions: 10
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UsersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CardsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DecksTable
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource:
+                - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
+                - !Sub arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0
+      Environment:
+        Variables:
+          OIDC_ISSUER: !Ref OidcIssuer
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+      Events:
+        UrlGenerate:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /cards/generate-from-url
+            Method: POST
+      Tags:
+        Environment: !Ref Environment
+        Application: memoru
+
   #============================================================
   # CloudWatch Logs - LogGroups with Retention
   #============================================================

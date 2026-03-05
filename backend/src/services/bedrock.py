@@ -12,12 +12,14 @@ from botocore.config import Config
 from botocore.exceptions import ClientError
 
 from .prompts import DifficultyLevel, Language, get_card_generation_prompt, get_grading_prompt, get_advice_prompt, get_refine_user_prompt, get_refine_system_prompt
+from .prompts.url_generate import get_url_card_generation_prompt
 from services.ai_service import (
     AIServiceError,
     AITimeoutError,
     AIRateLimitError,
     AIInternalError,
     AIParseError,
+    CardType,
     GeneratedCard,
     GenerationResult,
     GradingResult,
@@ -143,6 +145,68 @@ class BedrockService:
         return GenerationResult(
             cards=cards,
             input_length=len(input_text),
+            model_used=self.model_id,
+            processing_time_ms=processing_time_ms,
+        )
+
+    def generate_cards_from_chunks(
+        self,
+        chunks: List[str],
+        card_type: CardType = "qa",
+        target_count: int = 10,
+        difficulty: DifficultyLevel = "medium",
+        language: Language = "ja",
+        page_title: str = "",
+    ) -> GenerationResult:
+        """Generate cards from text chunks using Bedrock.
+
+        Args:
+            chunks: Text chunks to generate cards from.
+            card_type: Card type (qa/definition/cloze).
+            target_count: Target number of cards.
+            difficulty: Difficulty level.
+            language: Output language.
+            page_title: Page title for context.
+
+        Returns:
+            GenerationResult with generated cards and metadata.
+        """
+        start_time = time.time()
+        all_cards: List[GeneratedCard] = []
+        total_input_length = sum(len(c) for c in chunks)
+        cards_per_chunk = max(3, target_count // max(len(chunks), 1))
+
+        for chunk_text in chunks:
+            prompt = get_url_card_generation_prompt(
+                chunk_text=chunk_text,
+                card_count=cards_per_chunk,
+                card_type=card_type,
+                difficulty=difficulty,
+                language=language,
+                page_title=page_title,
+            )
+            try:
+                response_text = self._invoke_with_retry(prompt)
+                cards = self._parse_response(response_text)
+                all_cards.extend(cards)
+            except (BedrockParseError, BedrockServiceError):
+                continue
+
+        # Deduplicate by front text
+        seen_fronts: set[str] = set()
+        unique_cards: List[GeneratedCard] = []
+        for card in all_cards:
+            front_key = card.front.strip().lower()
+            if front_key not in seen_fronts:
+                seen_fronts.add(front_key)
+                unique_cards.append(card)
+
+        unique_cards = unique_cards[:target_count]
+        processing_time_ms = int((time.time() - start_time) * 1000)
+
+        return GenerationResult(
+            cards=unique_cards,
+            input_length=total_input_length,
             model_used=self.model_id,
             processing_time_ms=processing_time_ms,
         )
