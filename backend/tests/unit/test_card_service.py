@@ -11,6 +11,7 @@ from services.card_service import (
     CardLimitExceededError,
     CardServiceError,
 )
+from models.card import Reference
 
 
 @pytest.fixture
@@ -1358,3 +1359,172 @@ class TestDeleteCardReviewCleanup:
             call_args = mock_logger.warning.call_args
             assert "best-effort" in call_args[0][0].lower() or "failed" in call_args[0][0].lower()
             assert call_args[1]["extra"]["card_id"] == "some-card"
+
+
+class TestCardServiceReferences:
+    """Tests for CardService references support."""
+
+    def test_create_card_with_references(self, card_service):
+        """Test creating a card with references."""
+        refs = [
+            Reference(type="url", value="https://example.com"),
+            Reference(type="book", value="Test Book p.42"),
+        ]
+        card = card_service.create_card(
+            user_id="test-user-id",
+            front="Question",
+            back="Answer",
+            references=refs,
+        )
+
+        assert len(card.references) == 2
+        assert card.references[0].type == "url"
+        assert card.references[0].value == "https://example.com"
+        assert card.references[1].type == "book"
+        assert card.references[1].value == "Test Book p.42"
+
+        # Verify persisted to DynamoDB
+        fetched = card_service.get_card("test-user-id", card.card_id)
+        assert len(fetched.references) == 2
+        assert fetched.references[0].type == "url"
+        assert fetched.references[0].value == "https://example.com"
+
+    def test_create_card_without_references(self, card_service):
+        """Test creating a card without references defaults to empty list."""
+        card = card_service.create_card(
+            user_id="test-user-id",
+            front="Question",
+            back="Answer",
+        )
+
+        assert card.references == []
+
+        # Verify persisted
+        fetched = card_service.get_card("test-user-id", card.card_id)
+        assert fetched.references == []
+
+    def test_update_card_add_references(self, card_service):
+        """Test adding references to a card that has none."""
+        created = card_service.create_card(
+            user_id="test-user-id",
+            front="Question",
+            back="Answer",
+        )
+        assert created.references == []
+
+        refs = [Reference(type="url", value="https://example.com")]
+        updated = card_service.update_card(
+            user_id="test-user-id",
+            card_id=created.card_id,
+            references=refs,
+        )
+
+        assert len(updated.references) == 1
+        assert updated.references[0].type == "url"
+        assert updated.references[0].value == "https://example.com"
+
+        # Verify persisted
+        fetched = card_service.get_card("test-user-id", created.card_id)
+        assert len(fetched.references) == 1
+        assert fetched.references[0].value == "https://example.com"
+
+    def test_update_card_replace_references(self, card_service):
+        """Test replacing existing references."""
+        refs_v1 = [Reference(type="url", value="https://old.com")]
+        created = card_service.create_card(
+            user_id="test-user-id",
+            front="Question",
+            back="Answer",
+            references=refs_v1,
+        )
+
+        refs_v2 = [
+            Reference(type="book", value="New Book"),
+            Reference(type="note", value="My note"),
+        ]
+        updated = card_service.update_card(
+            user_id="test-user-id",
+            card_id=created.card_id,
+            references=refs_v2,
+        )
+
+        assert len(updated.references) == 2
+        assert updated.references[0].type == "book"
+        assert updated.references[1].type == "note"
+
+        # Verify persisted
+        fetched = card_service.get_card("test-user-id", created.card_id)
+        assert len(fetched.references) == 2
+
+    def test_update_card_clear_references(self, card_service):
+        """Test clearing references by passing empty list."""
+        refs = [Reference(type="url", value="https://example.com")]
+        created = card_service.create_card(
+            user_id="test-user-id",
+            front="Question",
+            back="Answer",
+            references=refs,
+        )
+
+        updated = card_service.update_card(
+            user_id="test-user-id",
+            card_id=created.card_id,
+            references=[],
+        )
+
+        assert updated.references == []
+
+        # Verify persisted
+        fetched = card_service.get_card("test-user-id", created.card_id)
+        assert fetched.references == []
+
+    def test_update_card_references_none_preserves_existing(self, card_service):
+        """Test that references=None (not provided) preserves existing references."""
+        refs = [Reference(type="url", value="https://example.com")]
+        created = card_service.create_card(
+            user_id="test-user-id",
+            front="Question",
+            back="Answer",
+            references=refs,
+        )
+
+        # Update only front, references not provided (None)
+        updated = card_service.update_card(
+            user_id="test-user-id",
+            card_id=created.card_id,
+            front="New Question",
+        )
+
+        assert updated.front == "New Question"
+        assert len(updated.references) == 1
+        assert updated.references[0].value == "https://example.com"
+
+    def test_get_card_backward_compat_no_references_field(self, card_service):
+        """Test that cards without references field in DynamoDB return empty list."""
+        # Directly insert a card item without references field (simulating old data)
+        cards_table = card_service.dynamodb.Table("memoru-cards-test")
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc)
+        cards_table.put_item(
+            Item={
+                "user_id": "test-user-id",
+                "card_id": "legacy-card-001",
+                "front": "Old Question",
+                "back": "Old Answer",
+                "tags": [],
+                "interval": 0,
+                "ease_factor": "2.5",
+                "repetitions": 0,
+                "next_review_at": now.isoformat(),
+                "created_at": now.isoformat(),
+            }
+        )
+
+        card = card_service.get_card("test-user-id", "legacy-card-001")
+        assert card.references == []
+        assert card.front == "Old Question"
+
+        # Verify to_response also returns empty list
+        response = card.to_response()
+        assert response.references == []

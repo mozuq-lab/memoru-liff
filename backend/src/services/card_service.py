@@ -9,7 +9,7 @@ from aws_lambda_powertools import Logger
 from boto3.dynamodb.types import TypeSerializer
 from botocore.exceptions import ClientError
 
-from models.card import Card
+from models.card import Card, Reference
 from .srs import calculate_next_review_boundary
 
 # 【ロガー設定】: TransactionCanceledException などの内部エラーをログ出力するために必要 (EARS-009)
@@ -106,6 +106,7 @@ class CardService:
         back: str,
         deck_id: Optional[str] = None,
         tags: Optional[List[str]] = None,
+        references: Optional[List[Reference]] = None,
     ) -> Card:
         """Create a new card.
 
@@ -115,6 +116,7 @@ class CardService:
             back: Back side text.
             deck_id: Optional deck ID.
             tags: Optional list of tags.
+            references: Optional list of references.
 
         Returns:
             Created Card object.
@@ -129,6 +131,7 @@ class CardService:
             back=back,
             deck_id=deck_id,
             tags=tags or [],
+            references=references or [],
             next_review_at=now,  # Due immediately for new cards
             created_at=now,
         )
@@ -219,6 +222,7 @@ class CardService:
         back: Optional[str] = None,
         deck_id=_UNSET,
         tags: Optional[List[str]] = None,
+        references: Optional[List[Reference]] = None,
         interval: Optional[int] = None,
         user_timezone: Optional[str] = None,
         day_start_hour: Optional[int] = None,
@@ -232,6 +236,7 @@ class CardService:
             back: Optional new back text.
             deck_id: Optional new deck ID.
             tags: Optional new tags.
+            references: Optional new references.
             interval: Optional new review interval in days (1-365).
                       When specified, next_review_at is recalculated as now + interval days.
 
@@ -284,6 +289,12 @@ class CardService:
             update_parts.append("tags = :tags")
             expression_values[":tags"] = tags
             card.tags = tags
+
+        if references is not None:
+            update_parts.append("#references = :references")
+            expression_values[":references"] = [ref.model_dump() for ref in references]
+            expression_names["#references"] = "references"
+            card.references = references
 
         # 【interval 更新処理】: interval が指定された場合に interval と next_review_at を更新する
         # 【実装方針】: DynamoDB の予約語 interval を ExpressionAttributeNames でエスケープ

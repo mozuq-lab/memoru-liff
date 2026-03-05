@@ -25,8 +25,8 @@
 
 ## 全体進捗
 
-- [ ] Phase 1: バックエンド
-- [ ] Phase 2: フロントエンド
+- [x] Phase 1: バックエンド
+- [x] Phase 2: フロントエンド
 
 ---
 
@@ -40,7 +40,7 @@
 | 状態 | タスク | 工数 | タイプ | 概要 |
 | --- | --- | --- | --- | --- |
 | [x] | [TASK-0157: Reference モデル + Card モデル拡張](TASK-0157.md) | 3h | TDD | Pydantic モデル + DynamoDB 変換 |
-| [ ] | [TASK-0158: CardService 参考情報対応](TASK-0158.md) | 2h | TDD | create/update + 後方互換性 |
+| [x] | [TASK-0158: CardService 参考情報対応](TASK-0158.md) | 2h | TDD | create/update + 後方互換性 |
 
 ### 依存関係
 
@@ -60,7 +60,7 @@ TASK-0157 → TASK-0158
 | 状態 | タスク | 工数 | タイプ | 概要 |
 | --- | --- | --- | --- | --- |
 | [x] | [TASK-0159: 型定義 + ReferenceEditor/Display](TASK-0159.md) | 3h | TDD | 型 + 入力/表示コンポーネント |
-| [ ] | [TASK-0160: CardForm + CardDetailPage + ReviewPage 統合](TASK-0160.md) | 3h | TDD | ページ統合 |
+| [x] | [TASK-0160: CardForm + CardDetailPage + ReviewPage 統合](TASK-0160.md) | 3h | TDD | ページ統合 |
 
 ### 依存関係
 
