@@ -8,6 +8,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { CardForm } from '@/components/CardForm';
 import { DeckSelector } from '@/components/DeckSelector';
+import { ReferenceDisplay } from '@/components/ReferenceDisplay';
+import type { Reference } from '@/types/card';
 import { Navigation } from '@/components/Navigation';
 import { Loading } from '@/components/common/Loading';
 import { Error } from '@/components/common/Error';
@@ -76,14 +78,14 @@ export const CardDetailPage = () => {
   }, [successMessage]);
 
   // 【保存ハンドラ】
-  const handleSave = async (front: string, back: string) => {
+  const handleSave = async (front: string, back: string, references: Reference[]) => {
     if (!id) return;
 
     setIsSaving(true);
     setError(null);
 
     try {
-      const updatedCard = await cardsApi.updateCard(id, { front, back });
+      const updatedCard = await cardsApi.updateCard(id, { front, back, references });
       setCard(updatedCard);
       setIsEditing(false);
       setSuccessMessage('カードを保存しました');
@@ -264,6 +266,7 @@ export const CardDetailPage = () => {
           <CardForm
             initialFront={card.front}
             initialBack={card.back}
+            initialReferences={card.references ?? []}
             onSave={handleSave}
             onCancel={() => setIsEditing(false)}
             isSaving={isSaving}
@@ -285,6 +288,9 @@ export const CardDetailPage = () => {
                   {card.back}
                 </p>
               </div>
+
+              {/* 参考情報 */}
+              <ReferenceDisplay references={card.references ?? []} />
             </div>
 
             {/* メタ情報 */}

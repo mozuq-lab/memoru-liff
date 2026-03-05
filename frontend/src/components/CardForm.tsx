@@ -6,11 +6,14 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { cardsApi } from '@/services/api';
+import { ReferenceEditor } from '@/components/ReferenceEditor';
+import type { Reference } from '@/types/card';
 
 interface CardFormProps {
   initialFront: string;
   initialBack: string;
-  onSave: (front: string, back: string) => Promise<void>;
+  initialReferences?: Reference[];
+  onSave: (front: string, back: string, references: Reference[]) => Promise<void>;
   onCancel: () => void;
   isSaving: boolean;
 }
@@ -22,12 +25,14 @@ interface CardFormProps {
 export const CardForm = ({
   initialFront,
   initialBack,
+  initialReferences = [],
   onSave,
   onCancel,
   isSaving,
 }: CardFormProps) => {
   const [front, setFront] = useState(initialFront);
   const [back, setBack] = useState(initialBack);
+  const [references, setReferences] = useState<Reference[]>(initialReferences);
   const [isRefining, setIsRefining] = useState(false);
   const [refineError, setRefineError] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -42,7 +47,7 @@ export const CardForm = ({
   // 【バリデーション】: 空でないかチェック
   const isValid = front.trim().length > 0 && back.trim().length > 0;
   // 【変更検知】: 初期値から変更があるかチェック
-  const hasChanges = front !== initialFront || back !== initialBack;
+  const hasChanges = front !== initialFront || back !== initialBack || JSON.stringify(references) !== JSON.stringify(initialReferences);
   // 【保存可否】: 有効かつ変更があり、保存中でない場合のみ保存可能
   const canSave = isValid && hasChanges && !isSaving && !isRefining;
   // 【AI補足可否】: 表面または裏面に入力があり、処理中でない場合のみ
@@ -52,7 +57,7 @@ export const CardForm = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canSave) return;
-    await onSave(front.trim(), back.trim());
+    await onSave(front.trim(), back.trim(), references);
   };
 
   // 【AI補足ハンドラ】
@@ -126,6 +131,10 @@ export const CardForm = ({
           disabled={isSaving || isRefining}
           data-testid="input-back"
         />
+      </div>
+
+      <div className="mb-6">
+        <ReferenceEditor references={references} onChange={setReferences} />
       </div>
 
       {refineError && (

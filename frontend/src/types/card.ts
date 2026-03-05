@@ -165,6 +165,7 @@ export interface DueCard {
   deck_id?: string | null;
   due_date?: string | null;
   overdue_days: number;
+  references?: Reference[];
 }
 
 export interface DueCardsResponse {
