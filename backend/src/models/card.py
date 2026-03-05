@@ -2,9 +2,16 @@
 
 import uuid
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
+
+
+class Reference(BaseModel):
+    """参考情報モデル。"""
+
+    type: Literal["url", "book", "note"]
+    value: str = Field(..., min_length=1, max_length=500)
 
 
 class CreateCardRequest(BaseModel):
@@ -14,6 +21,7 @@ class CreateCardRequest(BaseModel):
     back: str = Field(..., min_length=1, max_length=2000, description="Back side text")
     deck_id: Optional[str] = Field(None, description="Optional deck ID")
     tags: List[str] = Field(default_factory=list, description="Optional tags")
+    references: List[Reference] = Field(default_factory=list, description="Optional references")
 
     @field_validator("tags")
     @classmethod
@@ -22,6 +30,14 @@ class CreateCardRequest(BaseModel):
         if len(v) > 10:
             raise ValueError("Maximum 10 tags allowed")
         return [tag.strip()[:50] for tag in v if tag.strip()]
+
+    @field_validator("references")
+    @classmethod
+    def validate_references(cls, v: List[Reference]) -> List[Reference]:
+        """Validate references."""
+        if len(v) > 5:
+            raise ValueError("Maximum 5 references allowed")
+        return v
 
 
 class UpdateCardRequest(BaseModel):
@@ -36,6 +52,7 @@ class UpdateCardRequest(BaseModel):
     # 【Optional の理由】: 未指定時は既存の interval/next_review_at を変更しない（後方互換性）
     # 🔵 信頼性レベル: 要件定義 REQ-101, REQ-102 より
     interval: Optional[int] = Field(None, ge=1, le=365, description="Review interval in days (1-365)")
+    references: Optional[List[Reference]] = None
 
     @field_validator("tags")
     @classmethod
@@ -46,6 +63,16 @@ class UpdateCardRequest(BaseModel):
         if len(v) > 10:
             raise ValueError("Maximum 10 tags allowed")
         return [tag.strip()[:50] for tag in v if tag.strip()]
+
+    @field_validator("references")
+    @classmethod
+    def validate_references(cls, v: Optional[List[Reference]]) -> Optional[List[Reference]]:
+        """Validate references."""
+        if v is None:
+            return v
+        if len(v) > 5:
+            raise ValueError("Maximum 5 references allowed")
+        return v
 
 
 class CardResponse(BaseModel):
@@ -61,6 +88,7 @@ class CardResponse(BaseModel):
     interval: int = 0
     ease_factor: float = 2.5
     repetitions: int = 0
+    references: List[Reference] = Field(default_factory=list)
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -82,6 +110,7 @@ class Card(BaseModel):
     back: str
     deck_id: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
+    references: List[Reference] = Field(default_factory=list)
     next_review_at: Optional[datetime] = None
     interval: int = 0  # Days until next review
     ease_factor: float = 2.5  # SM-2 ease factor
@@ -98,6 +127,7 @@ class Card(BaseModel):
             back=self.back,
             deck_id=self.deck_id,
             tags=self.tags,
+            references=self.references,
             next_review_at=self.next_review_at,
             interval=self.interval,
             ease_factor=self.ease_factor,
@@ -119,6 +149,8 @@ class Card(BaseModel):
             "repetitions": self.repetitions,
             "created_at": self.created_at.isoformat(),
         }
+        if self.references:
+            item["references"] = [ref.model_dump() for ref in self.references]
         if self.deck_id:
             item["deck_id"] = self.deck_id
         if self.next_review_at:
@@ -137,6 +169,7 @@ class Card(BaseModel):
             back=item["back"],
             deck_id=item.get("deck_id"),
             tags=item.get("tags", []),
+            references=[Reference(**ref) for ref in item.get("references", [])],
             next_review_at=datetime.fromisoformat(item["next_review_at"]) if item.get("next_review_at") else None,
             interval=int(item.get("interval", 0)),
             ease_factor=float(item.get("ease_factor", 2.5)),
