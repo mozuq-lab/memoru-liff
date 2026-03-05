@@ -10,7 +10,7 @@
 **Location**: `backend/src/`
 **Purpose**: API ハンドラー → サービス → モデルの3層構造
 **Patterns**:
-- `api/handler.py`: Lambda Powertools の `APIGatewayHttpResolver` でルーティング。単一ファイルに全エンドポイント定義
+- `api/handler.py`: Lambda Powertools の `APIGatewayHttpResolver` でルーティング。サブルーター（`api/handlers/` 内の `Router`）を `include_router()` で登録
 - `services/`: ビジネスロジック層。各ドメインごとにサービスクラス（`UserService`, `CardService`, `ReviewService` など）
 - `models/`: Pydantic モデル。リクエスト/レスポンスの型定義とバリデーション
 - `services/prompts/`: AI プロンプトテンプレート。生成・採点・アドバイスごとに分離
@@ -22,11 +22,11 @@
 **Purpose**: React SPA のソースコード
 **Patterns**:
 - `pages/`: ルーティング対応のページコンポーネント（1ページ1ファイル）
-- `components/`: UI コンポーネント。共通部品は `components/common/` に分離
-- `contexts/`: React Context によるグローバル状態管理（`AuthContext`, `CardsContext`）
+- `components/`: UI コンポーネント。共通部品は `components/common/`、機能別部品は `components/{feature}/`（例: `components/stats/`）に分離
+- `contexts/`: React Context によるグローバル状態管理（`AuthContext`, `CardsContext`, `DecksContext`）
 - `hooks/`: カスタムフック（`useAuth` など）
 - `services/`: API 通信・認証・LIFF SDK のサービス層
-- `types/`: TypeScript 型定義（`card.ts`, `user.ts`）
+- `types/`: TypeScript 型定義（`card.ts`, `user.ts`, `deck.ts`, `stats.ts`）
 - `config/`: 設定（OIDC 設定など）
 
 ### Infrastructure: IaC (AWS CDK)

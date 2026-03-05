@@ -338,6 +338,14 @@ GitHub Actions (`deploy.yml`) で CI/CD が設定されています。
 | POST | `/reviews/{cardId}/undo` | 復習取り消し |
 | POST | `/reviews/{cardId}/grade-ai` | AI による回答採点 |
 
+### 統計
+
+| メソッド | パス | 説明 |
+|---------|------|------|
+| GET | `/stats` | 基本統計サマリー取得 |
+| GET | `/stats/weak-cards` | 苦手カード一覧取得 |
+| GET | `/stats/forecast` | 復習予測取得 |
+
 ### AI・学習
 
 | メソッド | パス | 説明 |
