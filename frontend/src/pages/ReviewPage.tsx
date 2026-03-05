@@ -1,13 +1,16 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { FlipCard } from '@/components/FlipCard';
-import { GradeButtons } from '@/components/GradeButtons';
-import { ReviewProgress } from '@/components/ReviewProgress';
-import { ReviewComplete } from '@/components/ReviewComplete';
-import { Loading } from '@/components/common/Loading';
-import { Error } from '@/components/common/Error';
-import { cardsApi, reviewsApi } from '@/services/api';
-import type { DueCard, SessionCardResult, ReconfirmCard } from '@/types';
+import { useState, useEffect, useCallback } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { FlipCard } from "@/components/FlipCard";
+import { GradeButtons } from "@/components/GradeButtons";
+import { ReviewProgress } from "@/components/ReviewProgress";
+import { ReviewComplete } from "@/components/ReviewComplete";
+import { Loading } from "@/components/common/Loading";
+import { Error } from "@/components/common/Error";
+import { cardsApi, reviewsApi } from "@/services/api";
+import { useSpeech } from "@/hooks/useSpeech";
+import { useSpeechSettings } from "@/hooks/useSpeechSettings";
+import { useAuth } from "@/hooks/useAuth";
+import type { DueCard, SessionCardResult, ReconfirmCard } from "@/types";
 
 /**
  * 【ヘルパー関数】: ReconfirmCard オブジェクトを生成する
@@ -20,7 +23,12 @@ import type { DueCard, SessionCardResult, ReconfirmCard } from '@/types';
  * @param grade - quality 評価値（0, 1, or 2）
  * @returns ReconfirmCard オブジェクト
  */
-const buildReconfirmCard = (cardId: string, front: string, back: string, grade: number): ReconfirmCard => ({
+const buildReconfirmCard = (
+  cardId: string,
+  front: string,
+  back: string,
+  grade: number,
+): ReconfirmCard => ({
   cardId,
   front,
   back,
@@ -30,7 +38,7 @@ const buildReconfirmCard = (cardId: string, front: string, back: string, grade: 
 export const ReviewPage = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const deckId = searchParams.get('deck_id') || undefined;
+  const deckId = searchParams.get("deck_id") || undefined;
 
   const [cards, setCards] = useState<DueCard[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -47,6 +55,14 @@ export const ReviewPage = () => {
   const [reconfirmQueue, setReconfirmQueue] = useState<ReconfirmCard[]>([]);
   const [isReconfirmMode, setIsReconfirmMode] = useState(false);
 
+  // 読み上げ機能 (US1: 手動読み上げ、US2: 自動読み上げ、US3: 速度設定)
+  const { user: authUser } = useAuth();
+  const userId = authUser?.profile?.sub;
+  const { settings } = useSpeechSettings(userId);
+  const { isSpeaking, isSupported, speak, cancel } = useSpeech({
+    rate: settings.rate,
+  });
+
   const fetchCards = useCallback(async () => {
     setIsLoading(true);
     setError(null);
@@ -54,7 +70,7 @@ export const ReviewPage = () => {
       const response = await cardsApi.getDueCards(undefined, deckId);
       setCards(response.due_cards);
     } catch {
-      setError('復習カードの取得に失敗しました');
+      setError("復習カードの取得に失敗しました");
     } finally {
       setIsLoading(false);
     }
@@ -77,6 +93,32 @@ export const ReviewPage = () => {
     }
   }, [regradeCardIndex, reviewResults, cards]);
 
+  // 【自動読み上げ (US2)】: カードが切り替わった際に autoPlay が有効なら表面テキストを自動再生
+  // 現在表示中カードの表面テキストをモードに応じて導出し、変化したときのみ speak を呼ぶ。
+  // regradeCardIndex は Undo 後の手動再採点フローのため autoPlay をスキップする。
+  const currentCardFront = isReconfirmMode
+    ? reconfirmQueue[0]?.front
+    : cards[currentIndex]?.front;
+  useEffect(() => {
+    if (
+      !settings.autoPlay ||
+      isLoading ||
+      isComplete ||
+      regradeCardIndex !== null
+    )
+      return;
+    if (currentCardFront) {
+      speak(currentCardFront);
+    }
+  }, [
+    settings.autoPlay,
+    currentCardFront,
+    isComplete,
+    isLoading,
+    regradeCardIndex,
+    speak,
+  ]);
+
   /**
    * 【機能概要】: 採点またはスキップ後に次のカードへ進む、またはセッションを完了する
    * 【設計方針】: 通常カードを優先して消化し、全消化後に再確認キューへ遷移する
@@ -91,20 +133,28 @@ export const ReviewPage = () => {
    * @param currentCardIndex - 現在のカードインデックス
    * @param currentCardsLength - 通常カードの総数
    */
-  const moveToNext = useCallback((currentReconfirmQueue: ReconfirmCard[], currentCardIndex: number, currentCardsLength: number) => {
-    setIsFlipped(false);
-    if (currentCardIndex >= currentCardsLength - 1) {
-      // 【通常カード全消化】: 再確認キューの有無でセッション継続か完了かを決定
-      if (currentReconfirmQueue.length > 0) {
-        setIsReconfirmMode(true);
+  const moveToNext = useCallback(
+    (
+      currentReconfirmQueue: ReconfirmCard[],
+      currentCardIndex: number,
+      currentCardsLength: number,
+    ) => {
+      cancel();
+      setIsFlipped(false);
+      if (currentCardIndex >= currentCardsLength - 1) {
+        // 【通常カード全消化】: 再確認キューの有無でセッション継続か完了かを決定
+        if (currentReconfirmQueue.length > 0) {
+          setIsReconfirmMode(true);
+        } else {
+          setIsComplete(true);
+        }
       } else {
-        setIsComplete(true);
+        // 【次の通常カードへ】: インデックスをインクリメント
+        setCurrentIndex((prev) => prev + 1);
       }
-    } else {
-      // 【次の通常カードへ】: インデックスをインクリメント
-      setCurrentIndex((prev) => prev + 1);
-    }
-  }, []);
+    },
+    [cancel],
+  );
 
   /**
    * 【機能概要】: カードの採点を送信し、結果に応じて次のカードへ進む
@@ -115,81 +165,108 @@ export const ReviewPage = () => {
    * 🔵 信頼性レベル: 要件定義書 REQ-001, REQ-103・dataflow.md より
    * @param grade - quality 評価値（0-5）
    */
-  const handleGrade = useCallback(async (grade: number) => {
-    // 【再採点モード】: Undo された採点を再送信する
-    if (regradeCardIndex !== null) {
-      const result = reviewResults[regradeCardIndex];
+  const handleGrade = useCallback(
+    async (grade: number) => {
+      // 【再採点モード】: Undo された採点を再送信する
+      if (regradeCardIndex !== null) {
+        const result = reviewResults[regradeCardIndex];
+        setIsSubmitting(true);
+        setError(null);
+        try {
+          const response = await reviewsApi.submitReview(result.cardId, grade);
+
+          // 【再確認キュー追加判定】: quality 0-2 の場合のみキューに追加
+          if (grade < 3) {
+            const back =
+              cards.find((c) => c.card_id === result.cardId)?.back ?? "";
+            setReconfirmQueue((prev) => [
+              ...prev,
+              buildReconfirmCard(result.cardId, result.front, back, grade),
+            ]);
+          }
+
+          setReviewResults((prev) =>
+            prev.map((r, i) =>
+              i === regradeCardIndex
+                ? {
+                    ...r,
+                    grade,
+                    nextReviewDate: response.updated.due_date,
+                    type: "graded" as const,
+                  }
+                : r,
+            ),
+          );
+          setReviewedCount((prev) => prev + 1);
+
+          // 【再採点後の遷移判定】: grade < 3 → 再確認モードに遷移、grade >= 3 → 完了画面に遷移
+          setRegradeCardIndex(null);
+          if (grade < 3) {
+            setIsFlipped(false);
+            setIsReconfirmMode(true);
+          } else {
+            setIsComplete(true);
+          }
+        } catch {
+          setError("再採点の送信に失敗しました");
+          setRegradeCardIndex(null);
+          setIsComplete(true);
+        } finally {
+          setIsSubmitting(false);
+        }
+        return;
+      }
+
+      // 【通常モード】: 現在表示中のカードを採点する
+      const currentCard = cards[currentIndex];
       setIsSubmitting(true);
       setError(null);
       try {
-        const response = await reviewsApi.submitReview(result.cardId, grade);
+        const response = await reviewsApi.submitReview(
+          currentCard.card_id,
+          grade,
+        );
 
         // 【再確認キュー追加判定】: quality 0-2 の場合のみキューに追加
+        let newReconfirmQueue = reconfirmQueue;
         if (grade < 3) {
-          const back = cards.find((c) => c.card_id === result.cardId)?.back ?? '';
-          setReconfirmQueue((prev) => [...prev, buildReconfirmCard(result.cardId, result.front, back, grade)]);
+          const newCard = buildReconfirmCard(
+            currentCard.card_id,
+            currentCard.front,
+            currentCard.back,
+            grade,
+          );
+          newReconfirmQueue = [...reconfirmQueue, newCard];
+          setReconfirmQueue(newReconfirmQueue);
         }
 
-        setReviewResults((prev) =>
-          prev.map((r, i) =>
-            i === regradeCardIndex
-              ? { ...r, grade, nextReviewDate: response.updated.due_date, type: 'graded' as const }
-              : r
-          )
-        );
+        setReviewResults((prev) => [
+          ...prev,
+          {
+            cardId: currentCard.card_id,
+            front: currentCard.front,
+            grade,
+            nextReviewDate: response.updated.due_date,
+            type: "graded" as const,
+          },
+        ]);
         setReviewedCount((prev) => prev + 1);
-
-        // 【再採点後の遷移判定】: grade < 3 → 再確認モードに遷移、grade >= 3 → 完了画面に遷移
-        setRegradeCardIndex(null);
-        if (grade < 3) {
-          setIsFlipped(false);
-          setIsReconfirmMode(true);
-        } else {
-          setIsComplete(true);
-        }
+        moveToNext(newReconfirmQueue, currentIndex, cards.length);
       } catch {
-        setError('再採点の送信に失敗しました');
-        setRegradeCardIndex(null);
-        setIsComplete(true);
+        setError("採点の送信に失敗しました");
       } finally {
         setIsSubmitting(false);
       }
-      return;
-    }
-
-    // 【通常モード】: 現在表示中のカードを採点する
-    const currentCard = cards[currentIndex];
-    setIsSubmitting(true);
-    setError(null);
-    try {
-      const response = await reviewsApi.submitReview(currentCard.card_id, grade);
-
-      // 【再確認キュー追加判定】: quality 0-2 の場合のみキューに追加
-      let newReconfirmQueue = reconfirmQueue;
-      if (grade < 3) {
-        const newCard = buildReconfirmCard(currentCard.card_id, currentCard.front, currentCard.back, grade);
-        newReconfirmQueue = [...reconfirmQueue, newCard];
-        setReconfirmQueue(newReconfirmQueue);
-      }
-
-      setReviewResults((prev) => [
-        ...prev,
-        {
-          cardId: currentCard.card_id,
-          front: currentCard.front,
-          grade,
-          nextReviewDate: response.updated.due_date,
-          type: 'graded' as const,
-        },
-      ]);
-      setReviewedCount((prev) => prev + 1);
-      moveToNext(newReconfirmQueue, currentIndex, cards.length);
-    } catch {
-      setError('採点の送信に失敗しました');
-    } finally {
-      setIsSubmitting(false);
-    }
-  }, [cards, currentIndex, moveToNext, regradeCardIndex, reviewResults, reconfirmQueue]);
+    },
+    [
+      cards,
+      currentIndex,
+      moveToNext,
+      regradeCardIndex,
+      reviewResults,
+      reconfirmQueue,
+    ],
+  );
 
   /**
    * 【機能概要】: 現在のカードをスキップして次のカードへ進む
@@ -204,7 +281,7 @@ export const ReviewPage = () => {
       {
         cardId: currentCard.card_id,
         front: currentCard.front,
-        type: 'skipped' as const,
+        type: "skipped" as const,
       },
     ]);
     moveToNext(reconfirmQueue, currentIndex, cards.length);
@@ -231,10 +308,14 @@ export const ReviewPage = () => {
     // 【ガード条件】: type === 'graded' のカードのみ更新対象とし、undone 等の誤更新を防止
     setReviewResults((results) =>
       results.map((r) =>
-        r.cardId === current.cardId && r.type === 'graded'
-          ? { ...r, type: 'reconfirmed' as const, reconfirmResult: 'remembered' as const }
-          : r
-      )
+        r.cardId === current.cardId && r.type === "graded"
+          ? {
+              ...r,
+              type: "reconfirmed" as const,
+              reconfirmResult: "remembered" as const,
+            }
+          : r,
+      ),
     );
 
     // 【セッション進行判定】: 残りキューが空なら完了、まだあれば再確認モード継続
@@ -271,36 +352,43 @@ export const ReviewPage = () => {
    * 🔵 信頼性レベル: 要件定義書 REQ-404・ヒアリング Q4 回答より
    * @param index - reviewResults 内の対象カードのインデックス
    */
-  const handleUndo = useCallback(async (index: number) => {
-    const result = reviewResults[index];
-    setIsUndoing(true);
-    setUndoingIndex(index);
-    setError(null);
-    try {
-      await reviewsApi.undoReview(result.cardId);
+  const handleUndo = useCallback(
+    async (index: number) => {
+      const result = reviewResults[index];
+      setIsUndoing(true);
+      setUndoingIndex(index);
+      setError(null);
+      try {
+        await reviewsApi.undoReview(result.cardId);
 
-      // 【再確認キューから除去】: 対象カードが存在しない場合も filter は安全に空振りする
-      setReconfirmQueue((prev) => prev.filter((c) => c.cardId !== result.cardId));
+        // 【再確認キューから除去】: 対象カードが存在しない場合も filter は安全に空振りする
+        setReconfirmQueue((prev) =>
+          prev.filter((c) => c.cardId !== result.cardId),
+        );
 
-      setReviewResults((prev) =>
-        prev.map((r, i) =>
-          i === index ? { ...r, type: 'undone' as const, reconfirmResult: undefined } : r
-        )
-      );
-      setReviewedCount((prev) => Math.max(0, prev - 1));
+        setReviewResults((prev) =>
+          prev.map((r, i) =>
+            i === index
+              ? { ...r, type: "undone" as const, reconfirmResult: undefined }
+              : r,
+          ),
+        );
+        setReviewedCount((prev) => Math.max(0, prev - 1));
 
-      // 【再採点モードへ移行】: isReconfirmMode をリセットして通常の採点 UI を表示
-      setRegradeCardIndex(index);
-      setIsComplete(false);
-      setIsReconfirmMode(false);
-      setIsFlipped(false);
-    } catch {
-      setError('取り消しに失敗しました');
-    } finally {
-      setIsUndoing(false);
-      setUndoingIndex(null);
-    }
-  }, [reviewResults]);
+        // 【再採点モードへ移行】: isReconfirmMode をリセットして通常の採点 UI を表示
+        setRegradeCardIndex(index);
+        setIsComplete(false);
+        setIsReconfirmMode(false);
+        setIsFlipped(false);
+      } catch {
+        setError("取り消しに失敗しました");
+      } finally {
+        setIsUndoing(false);
+        setUndoingIndex(null);
+      }
+    },
+    [reviewResults],
+  );
 
   const handleFlip = useCallback(() => {
     setIsFlipped((prev) => !prev);
@@ -330,8 +418,19 @@ export const ReviewPage = () => {
             className="text-gray-600 min-h-[44px] min-w-[44px] flex items-center"
             aria-label="戻る"
           >
-            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            <svg
+              className="h-6 w-6"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M15 19l-7-7 7-7"
+              />
             </svg>
           </button>
         </header>
@@ -352,15 +451,28 @@ export const ReviewPage = () => {
             className="text-gray-600 min-h-[44px] min-w-[44px] flex items-center"
             aria-label="戻る"
           >
-            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            <svg
+              className="h-6 w-6"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M15 19l-7-7 7-7"
+              />
             </svg>
           </button>
         </header>
         <div className="flex-1 flex items-center justify-center px-6 text-center">
           <div>
             <p className="text-lg text-gray-600 mb-4">
-              {deckId ? 'このデッキに復習対象のカードはありません' : '復習対象のカードはありません'}
+              {deckId
+                ? "このデッキに復習対象のカードはありません"
+                : "復習対象のカードはありません"}
             </p>
             <button
               type="button"
@@ -379,7 +491,10 @@ export const ReviewPage = () => {
     return (
       <div className="flex flex-col min-h-screen bg-gray-50">
         {error && (
-          <p className="text-red-500 text-sm text-center mt-4 px-4" role="alert">
+          <p
+            className="text-red-500 text-sm text-center mt-4 px-4"
+            role="alert"
+          >
             {error}
           </p>
         )}
@@ -416,6 +531,11 @@ export const ReviewPage = () => {
                 back={regradeCard.back}
                 isFlipped={isFlipped}
                 onFlip={handleFlip}
+                speechProps={{
+                  speechState: { isSpeaking, isSupported },
+                  onSpeakFront: () => (isSpeaking ? cancel() : speak(regradeCard.front)),
+                  onSpeakBack: () => (isSpeaking ? cancel() : speak(regradeCard.back)),
+                }}
               />
             </div>
           </div>
@@ -428,10 +548,7 @@ export const ReviewPage = () => {
 
           <div className="pb-6 min-h-[200px]">
             {isFlipped && (
-              <GradeButtons
-                onGrade={handleGrade}
-                disabled={isSubmitting}
-              />
+              <GradeButtons onGrade={handleGrade} disabled={isSubmitting} />
             )}
           </div>
         </main>
@@ -451,14 +568,27 @@ export const ReviewPage = () => {
             className="text-gray-600 min-h-[44px] min-w-[44px] flex items-center"
             aria-label="戻る"
           >
-            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            <svg
+              className="h-6 w-6"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M15 19l-7-7 7-7"
+              />
             </svg>
           </button>
           <span className="inline-flex items-center bg-amber-100 text-amber-700 rounded-full px-2 py-0.5 text-xs font-medium">
             再確認
           </span>
-          <span className="text-xs text-gray-500">残り {reconfirmQueue.length} 枚</span>
+          <span className="text-xs text-gray-500">
+            残り {reconfirmQueue.length} 枚
+          </span>
         </header>
         <main className="flex-1 flex flex-col px-4">
           <div className="flex-1 flex items-center justify-center">
@@ -468,6 +598,11 @@ export const ReviewPage = () => {
                 back={reconfirmCard.back}
                 isFlipped={isFlipped}
                 onFlip={handleFlip}
+                speechProps={{
+                  speechState: { isSpeaking, isSupported },
+                  onSpeakFront: () => (isSpeaking ? cancel() : speak(reconfirmCard.front)),
+                  onSpeakBack: () => (isSpeaking ? cancel() : speak(reconfirmCard.back)),
+                }}
               />
             </div>
           </div>
@@ -497,8 +632,19 @@ export const ReviewPage = () => {
           className="text-gray-600 min-h-[44px] min-w-[44px] flex items-center"
           aria-label="戻る"
         >
-          <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          <svg
+            className="h-6 w-6"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M15 19l-7-7 7-7"
+            />
           </svg>
         </button>
         <div className="flex-1 mx-4">
@@ -514,6 +660,11 @@ export const ReviewPage = () => {
               back={currentCard.back}
               isFlipped={isFlipped}
               onFlip={handleFlip}
+              speechProps={{
+                speechState: { isSpeaking, isSupported },
+                onSpeakFront: () => (isSpeaking ? cancel() : speak(currentCard.front)),
+                onSpeakBack: () => (isSpeaking ? cancel() : speak(currentCard.back)),
+              }}
             />
           </div>
         </div>

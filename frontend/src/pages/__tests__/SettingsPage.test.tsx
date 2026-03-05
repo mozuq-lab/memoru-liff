@@ -3,7 +3,7 @@
  * 【テスト対象】: SettingsPage コンポーネント
  * 【テスト対応】: TASK-0018 テストケース1〜7
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
@@ -24,6 +24,16 @@ vi.mock('@/services/api', () => ({
     getCurrentUser: () => mockGetCurrentUser(),
     updateUser: (...args: unknown[]) => mockUpdateUser(...args),
   },
+}));
+
+// useSpeechSettings モック
+const mockUpdateSpeechSettings = vi.fn();
+const mockSpeechSettings = { autoPlay: false, rate: 1 as const };
+vi.mock('@/hooks/useSpeechSettings', () => ({
+  useSpeechSettings: () => ({
+    settings: mockSpeechSettings,
+    updateSettings: mockUpdateSpeechSettings,
+  }),
 }));
 
 // useAuth モック
@@ -338,6 +348,110 @@ describe('SettingsPage', () => {
 
       await waitFor(() => {
         expect(screen.getByTestId('line-link-button')).toHaveAttribute('href', '/link-line');
+      });
+    });
+  });
+
+  describe('音声読み上げ設定セクション (US2/US3)', () => {
+    beforeEach(() => {
+      // jsdom は speechSynthesis を提供しないため、サポート済みとして stub する
+      vi.stubGlobal('speechSynthesis', {
+        speak: vi.fn(),
+        cancel: vi.fn(),
+        speaking: false,
+      });
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+    it('音声合成対応ブラウザの場合、音声設定セクションが表示される', async () => {
+      renderSettingsPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('speech-section')).toBeInTheDocument();
+      });
+    });
+
+    it('自動読み上げトグルが表示される', async () => {
+      renderSettingsPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('autoplay-toggle')).toBeInTheDocument();
+      });
+    });
+
+    it('デフォルトで自動読み上げは OFF (aria-checked=false)', async () => {
+      renderSettingsPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('autoplay-toggle')).toHaveAttribute('aria-checked', 'false');
+      });
+    });
+
+    it('自動読み上げトグルをクリックすると updateSettings が呼ばれる', async () => {
+      const user = userEvent.setup();
+      renderSettingsPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('autoplay-toggle')).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByTestId('autoplay-toggle'));
+
+      expect(mockUpdateSpeechSettings).toHaveBeenCalledWith({ autoPlay: true });
+    });
+
+    it('読み上げ速度ラジオボタンが 3 個表示される（遅め・標準・速め）', async () => {
+      renderSettingsPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('rate-option-0.5')).toBeInTheDocument();
+        expect(screen.getByTestId('rate-option-1')).toBeInTheDocument();
+        expect(screen.getByTestId('rate-option-1.5')).toBeInTheDocument();
+      });
+    });
+
+    it('デフォルトで「標準 (1)」が選択状態になる', async () => {
+      renderSettingsPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('rate-option-1')).toHaveClass('border-blue-500');
+        expect(screen.getByTestId('rate-option-0.5')).not.toHaveClass('border-blue-500');
+      });
+    });
+
+    it('「遅め」を選択すると updateSettings が rate: 0.5 で呼ばれる', async () => {
+      const user = userEvent.setup();
+      renderSettingsPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('rate-option-0.5')).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByTestId('rate-option-0.5'));
+
+      expect(mockUpdateSpeechSettings).toHaveBeenCalledWith({ rate: 0.5 });
+    });
+
+    it('「速め」を選択すると updateSettings が rate: 1.5 で呼ばれる', async () => {
+      const user = userEvent.setup();
+      renderSettingsPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('rate-option-1.5')).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByTestId('rate-option-1.5'));
+
+      expect(mockUpdateSpeechSettings).toHaveBeenCalledWith({ rate: 1.5 });
+    });
+
+    it('自動読み上げスイッチボタンに aria-label="自動読み上げ" が設定されている', async () => {
+      renderSettingsPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('autoplay-toggle')).toHaveAttribute('aria-label', '自動読み上げ');
       });
     });
   });
