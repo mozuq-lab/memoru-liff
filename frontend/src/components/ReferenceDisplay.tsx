@@ -42,7 +42,7 @@ export const ReferenceDisplay = ({ references }: ReferenceDisplayProps) => {
             data-testid={`reference-display-item-${index}`}
           >
             <span aria-hidden="true">{getTypeIcon(ref.type)}</span>
-            {ref.type === 'url' ? (
+            {ref.type === 'url' && /^https?:\/\//i.test(ref.value) ? (
               <a
                 href={ref.value}
                 target="_blank"
@@ -50,11 +50,11 @@ export const ReferenceDisplay = ({ references }: ReferenceDisplayProps) => {
                 className="text-blue-600 hover:text-blue-800 hover:underline truncate"
                 data-testid={`reference-display-link-${index}`}
               >
-                {ref.label || ref.value}
+                {ref.value}
               </a>
             ) : (
               <span className="text-gray-800 truncate">
-                {ref.label || ref.value}
+                {ref.value}
               </span>
             )}
           </li>

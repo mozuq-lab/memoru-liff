@@ -41,12 +41,19 @@ describe('ReferenceDisplay', () => {
       expect(link).toHaveAttribute('rel', 'noopener noreferrer');
     });
 
-    it('URL に label がある場合、label がリンクテキストになる', () => {
-      renderDisplay([{ type: 'url', value: 'https://example.com', label: 'Example Site' }]);
+    it('javascript: スキームの URL はリンク化されずテキスト表示になる', () => {
+      renderDisplay([{ type: 'url', value: 'javascript:alert(1)' }]);
+
+      expect(screen.queryByTestId('reference-display-link-0')).not.toBeInTheDocument();
+      const item = screen.getByTestId('reference-display-item-0');
+      expect(item).toHaveTextContent('javascript:alert(1)');
+    });
+
+    it('http:// で始まる URL はリンク化される', () => {
+      renderDisplay([{ type: 'url', value: 'http://example.com' }]);
 
       const link = screen.getByTestId('reference-display-link-0');
-      expect(link).toHaveTextContent('Example Site');
-      expect(link).toHaveAttribute('href', 'https://example.com');
+      expect(link).toHaveAttribute('href', 'http://example.com');
     });
   });
 

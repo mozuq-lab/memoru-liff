@@ -4,7 +4,6 @@ export type ReferenceType = "url" | "book" | "note";
 export interface Reference {
   type: ReferenceType;
   value: string;
-  label?: string;
 }
 
 export interface Card {

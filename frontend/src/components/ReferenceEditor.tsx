@@ -32,7 +32,7 @@ const TYPE_OPTIONS: { value: ReferenceType; label: string }[] = [
 export const ReferenceEditor = ({
   references,
   onChange,
-  maxItems = 10,
+  maxItems = 5,
 }: ReferenceEditorProps) => {
   const [newType, setNewType] = useState<ReferenceType>('url');
   const [newValue, setNewValue] = useState('');

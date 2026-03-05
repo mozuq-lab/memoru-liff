@@ -87,6 +87,7 @@ def create_card():
             back=request.back,
             deck_id=request.deck_id,
             tags=request.tags,
+            references=request.references,
         )
         return Response(
             status_code=201,
@@ -153,6 +154,7 @@ def update_card(card_id: str):
             "front": request.front,
             "back": request.back,
             "tags": request.tags,
+            "references": request.references,
             "interval": request.interval,
         }
         if "deck_id" in body:

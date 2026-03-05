@@ -5,6 +5,8 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+from models.card import Reference
+
 
 class ReviewRequest(BaseModel):
     """Request model for submitting a review."""
@@ -74,6 +76,7 @@ class DueCardInfo(BaseModel):
     deck_id: Optional[str] = None
     due_date: Optional[str] = None
     overdue_days: int = 0
+    references: List[Reference] = Field(default_factory=list)
 
 
 class DueCardsResponse(BaseModel):
