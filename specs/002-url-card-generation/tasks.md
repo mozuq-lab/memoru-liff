@@ -19,9 +19,9 @@
 
 **Purpose**: プロジェクト依存関係の追加と基本構造のセットアップ
 
-- [ ] T001 Add Python dependencies (beautifulsoup4, markdownify) to backend/requirements.txt
-- [ ] T002 [P] Create URL generation Pydantic models in backend/src/models/url_generate.py
-- [ ] T003 [P] Add TypeScript type definitions for URL generation in frontend/src/types/generate.ts
+- [x] T001 Add Python dependencies (beautifulsoup4, markdownify) to backend/requirements.txt
+- [x] T002 [P] Create URL generation Pydantic models in backend/src/models/url_generate.py
+- [x] T003 [P] Add TypeScript type definitions for URL generation in frontend/src/types/generate.ts
 
 ---
 
@@ -31,12 +31,12 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T004 Write unit tests for URL validator in backend/tests/unit/test_url_validator.py
-- [ ] T005 Implement URL validator (https enforcement, SSRF prevention, length check) in backend/src/utils/url_validator.py
-- [ ] T006 Write unit tests for content chunker in backend/tests/unit/test_content_chunker.py
-- [ ] T007 Implement content chunker (heading-based section split, 3000 char limit, context attachment) in backend/src/services/content_chunker.py
-- [ ] T008 Add `generate_cards_from_url` method to AIService protocol in backend/src/services/ai_service.py
-- [ ] T009 Create URL generation prompt templates (card_type variants: qa, definition, cloze) in backend/src/services/prompts/url_generate.py
+- [x] T004 Write unit tests for URL validator in backend/tests/unit/test_url_validator.py
+- [x] T005 Implement URL validator (https enforcement, SSRF prevention, length check) in backend/src/utils/url_validator.py
+- [x] T006 Write unit tests for content chunker in backend/tests/unit/test_content_chunker.py
+- [x] T007 Implement content chunker (heading-based section split, 3000 char limit, context attachment) in backend/src/services/content_chunker.py
+- [x] T008 Add `generate_cards_from_url` method to AIService protocol in backend/src/services/ai_service.py
+- [x] T009 Create URL generation prompt templates (card_type variants: qa, definition, cloze) in backend/src/services/prompts/url_generate.py
 
 **Checkpoint**: Foundation ready — URL validation, chunking, prompt templates, and protocol defined
 
@@ -52,20 +52,20 @@
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T010 [P] [US1] Write unit tests for HTTP content fetcher in backend/tests/unit/test_url_content_service.py
-- [ ] T011 [P] [US1] Write integration tests for generate-from-url API endpoint in backend/tests/integration/test_url_generate_api.py
+- [x] T010 [P] [US1] Write unit tests for HTTP content fetcher in backend/tests/unit/test_url_content_service.py
+- [x] T011 [P] [US1] Write integration tests for generate-from-url API endpoint in backend/tests/integration/test_url_generate_api.py
 
 ### Implementation for User Story 1
 
-- [ ] T012 [US1] Implement HTTP content fetcher (HEAD check, GET with timeout, HTML→text via BeautifulSoup+markdownify) in backend/src/services/url_content_service.py
-- [ ] T013 [US1] Implement `generate_cards_from_url` in StrandsAIService (chunk→generate→merge→deduplicate) in backend/src/services/strands_service.py
-- [ ] T014 [US1] Implement `generate_cards_from_url` in BedrockService in backend/src/services/bedrock.py
-- [ ] T015 [US1] Add `generate_from_url` handler to API router in backend/src/api/handlers/ai_handler.py
-- [ ] T016 [US1] Add UrlGenerateFunction Lambda definition (120s timeout, 512MB, IAM for Bedrock) in backend/template.yaml
-- [ ] T017 [P] [US1] Create UrlInput component (URL input form with validation display) in frontend/src/components/UrlInput.tsx
-- [ ] T018 [P] [US1] Create GenerateProgress component (3-step progress: fetch→analyze→generate) in frontend/src/components/GenerateProgress.tsx
-- [ ] T019 [US1] Add `generateFromUrl()` method to API client in frontend/src/services/api.ts
-- [ ] T020 [US1] Extend GeneratePage with URL tab (tab switch between text/URL, integrate UrlInput and GenerateProgress) in frontend/src/pages/GeneratePage.tsx
+- [x] T012 [US1] Implement HTTP content fetcher (HEAD check, GET with timeout, HTML→text via BeautifulSoup+markdownify) in backend/src/services/url_content_service.py
+- [x] T013 [US1] Implement `generate_cards_from_url` in StrandsAIService (chunk→generate→merge→deduplicate) in backend/src/services/strands_service.py
+- [x] T014 [US1] Implement `generate_cards_from_url` in BedrockService in backend/src/services/bedrock.py
+- [x] T015 [US1] Add `generate_from_url` handler to API router in backend/src/api/handlers/ai_handler.py
+- [x] T016 [US1] Add UrlGenerateFunction Lambda definition (120s timeout, 512MB, IAM for Bedrock) in backend/template.yaml
+- [x] T017 [P] [US1] Create UrlInput component (URL input form with validation display) in frontend/src/components/UrlInput.tsx
+- [x] T018 [P] [US1] Create GenerateProgress component (3-step progress: fetch→analyze→generate) in frontend/src/components/GenerateProgress.tsx
+- [x] T019 [US1] Add `generateFromUrl()` method to API client in frontend/src/services/api.ts
+- [x] T020 [US1] Extend GeneratePage with URL tab (tab switch between text/URL, integrate UrlInput and GenerateProgress) in frontend/src/pages/GeneratePage.tsx
 
 **Checkpoint**: 公開ページの URL からカード生成→プレビュー→保存の一連のフローが動作する
 
