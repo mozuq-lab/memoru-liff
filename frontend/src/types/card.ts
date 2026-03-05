@@ -67,6 +67,38 @@ export interface GenerateCardsResponse {
   };
 }
 
+// URL-based card generation types
+export type CardType = 'qa' | 'definition' | 'cloze';
+
+export interface GenerateFromUrlRequest {
+  url: string;
+  card_type?: CardType;
+  target_count?: number;
+  difficulty?: 'easy' | 'medium' | 'hard';
+  language?: 'ja' | 'en';
+  deck_id?: string;
+}
+
+export interface UrlGenerationInfo {
+  model_used: string;
+  processing_time_ms: number;
+  fetch_method: 'http' | 'browser';
+  chunk_count: number;
+  content_length: number;
+}
+
+export interface PageInfo {
+  url: string;
+  title: string;
+  fetched_at: string;
+}
+
+export interface GenerateFromUrlResponse {
+  generated_cards: GeneratedCard[];
+  generation_info: UrlGenerationInfo;
+  page_info: PageInfo;
+}
+
 // AI Refine types
 export interface RefineCardRequest {
   front: string;
