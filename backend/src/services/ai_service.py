@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Dict, List, Literal, Protocol, runtime_checkable
+from typing import Dict, List, Literal, Optional, Protocol, runtime_checkable
 
 # Type aliases
 DifficultyLevel = Literal["easy", "medium", "hard"]
@@ -76,6 +76,24 @@ class RefineResult:
     refined_back: str
     model_used: str
     processing_time_ms: int
+
+
+CardType = Literal["qa", "definition", "cloze"]
+
+
+@dataclass
+class UrlGenerationResult:
+    """URL ベースカード生成結果."""
+
+    cards: List[GeneratedCard]
+    model_used: str
+    processing_time_ms: int
+    fetch_method: str  # "http" or "browser"
+    chunk_count: int
+    content_length: int
+    page_url: str
+    page_title: str
+    fetched_at: str
 
 
 # Exception hierarchy
@@ -191,6 +209,30 @@ class AIService(Protocol):
 
         Returns:
             改善されたカードの表面・裏面。
+        """
+        ...
+
+    def generate_cards_from_chunks(
+        self,
+        chunks: List[str],
+        card_type: CardType = "qa",
+        target_count: int = 10,
+        difficulty: DifficultyLevel = "medium",
+        language: Language = "ja",
+        page_title: str = "",
+    ) -> GenerationResult:
+        """テキストチャンクからフラッシュカードを生成する.
+
+        Args:
+            chunks: テキストチャンクのリスト。
+            card_type: カードタイプ（qa/definition/cloze）。
+            target_count: 目標生成枚数。
+            difficulty: 難易度。
+            language: 出力言語。
+            page_title: ページタイトル（コンテキスト用）。
+
+        Returns:
+            生成されたカードとメタ情報。
         """
         ...
 
