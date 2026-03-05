@@ -4,6 +4,8 @@ import type {
   UpdateCardRequest,
   GenerateCardsRequest,
   GenerateCardsResponse,
+  GenerateFromUrlRequest,
+  GenerateFromUrlResponse,
   RefineCardRequest,
   RefineCardResponse,
   DueCardsResponse,
@@ -145,6 +147,14 @@ class ApiClient {
     });
   }
 
+  async generateFromUrl(data: GenerateFromUrlRequest, options?: { signal?: AbortSignal }): Promise<GenerateFromUrlResponse> {
+    return this.request<GenerateFromUrlResponse>('/cards/generate-from-url', {
+      method: 'POST',
+      body: JSON.stringify(data),
+      signal: options?.signal,
+    });
+  }
+
   async refineCard(data: RefineCardRequest, options?: { signal?: AbortSignal }): Promise<RefineCardResponse> {
     return this.request<RefineCardResponse>('/cards/refine', {
       method: 'POST',
@@ -261,6 +271,7 @@ export const cardsApi = {
   updateCard: (id: string, data: UpdateCardRequest) => apiClient.updateCard(id, data),
   deleteCard: (id: string) => apiClient.deleteCard(id),
   generateCards: (data: GenerateCardsRequest, options?: { signal?: AbortSignal }) => apiClient.generateCards(data, options),
+  generateFromUrl: (data: GenerateFromUrlRequest, options?: { signal?: AbortSignal }) => apiClient.generateFromUrl(data, options),
   refineCard: (data: RefineCardRequest, options?: { signal?: AbortSignal }) => apiClient.refineCard(data, options),
   getDueCards: (limit?: number, deckId?: string) => apiClient.getDueCards(limit, deckId),
   getDueCount: () => apiClient.getDueCount(),

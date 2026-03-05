@@ -1,31 +1,39 @@
 /**
- * 【機能概要】: AIカード生成画面
- * 【実装方針】: テキスト入力→AI生成→カード選択・編集→保存のフロー
- * 【テスト対応】: TASK-0015 テストケース1〜9
- * 🔵 青信号: user-stories.md 2.1より
+ * AIカード生成画面 - テキスト入力 / URL入力の2モード対応
  */
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CardPreview } from '@/components/CardPreview';
 import { DeckSelector } from '@/components/DeckSelector';
 import { Navigation } from '@/components/Navigation';
 import { Loading } from '@/components/common/Loading';
 import { Error } from '@/components/common/Error';
+import { UrlInput } from '@/components/UrlInput';
+import { GenerateProgress } from '@/components/GenerateProgress';
 import { cardsApi } from '@/services/api';
 import { useDecksContext } from '@/contexts/DecksContext';
-import type { GeneratedCardWithId, GenerateCardsRequest, CreateCardRequest } from '@/types';
+import type {
+  GeneratedCardWithId,
+  GenerateCardsRequest,
+  GenerateFromUrlRequest,
+  CreateCardRequest,
+  PageInfo,
+} from '@/types';
+
+type InputMode = 'text' | 'url';
+type UrlProgressStage = 'fetching' | 'analyzing' | 'generating';
 
 const MIN_CHARS = 5;
 const MAX_CHARS = 2000;
 const MAX_GENERATION_TIME = 30000; // 30秒
+const MAX_URL_GENERATION_TIME = 90000; // 90秒
 
-/**
- * 【機能概要】: AIカード生成ページコンポーネント
- */
 export const GeneratePage = () => {
   const navigate = useNavigate();
   const { fetchDecks } = useDecksContext();
-  const [inputText, setInputText] = useState('');
+
+  // 共通 state
+  const [inputMode, setInputMode] = useState<InputMode>('text');
   const [generatedCards, setGeneratedCards] = useState<GeneratedCardWithId[]>([]);
   const [selectedCards, setSelectedCards] = useState<Set<string>>(new Set());
   const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
@@ -33,25 +41,43 @@ export const GeneratePage = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // デッキ一覧を取得
+  // テキストモード state
+  const [inputText, setInputText] = useState('');
+
+  // URLモード state
+  const [inputUrl, setInputUrl] = useState('');
+  const [urlProgressStage, setUrlProgressStage] = useState<UrlProgressStage>('fetching');
+  const [pageInfo, setPageInfo] = useState<PageInfo | null>(null);
+  const progressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     fetchDecks();
   }, [fetchDecks]);
 
+  // テキストモード計算
   const charCount = inputText.length;
   const isUnderLimit = inputText.trim().length > 0 && inputText.trim().length < MIN_CHARS;
   const isOverLimit = charCount > MAX_CHARS;
-  const canGenerate = inputText.trim().length >= MIN_CHARS && !isOverLimit && !isGenerating;
+  const canGenerateText = inputText.trim().length >= MIN_CHARS && !isOverLimit && !isGenerating;
+  const canGenerateUrl = inputUrl.trim().length > 0 && !isGenerating;
 
-  // 【テキスト入力ハンドラ】
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInputText(e.target.value);
     setError(null);
   };
 
-  // 【AI生成実行】
-  const handleGenerate = useCallback(async () => {
-    if (!canGenerate) return;
+  const handleTabSwitch = (mode: InputMode) => {
+    if (isGenerating) return;
+    setInputMode(mode);
+    setError(null);
+    setGeneratedCards([]);
+    setSelectedCards(new Set());
+    setPageInfo(null);
+  };
+
+  // テキストからカード生成
+  const handleGenerateFromText = useCallback(async () => {
+    if (!canGenerateText) return;
 
     setIsGenerating(true);
     setError(null);
@@ -69,7 +95,6 @@ export const GeneratePage = () => {
       const response = await cardsApi.generateCards(request, { signal: controller.signal });
       clearTimeout(timeoutId);
 
-      // tempIdを付与
       const cardsWithId: GeneratedCardWithId[] = response.generated_cards.map((card, index) => ({
         ...card,
         tempId: `temp-${Date.now()}-${index}`,
@@ -87,9 +112,71 @@ export const GeneratePage = () => {
     } finally {
       setIsGenerating(false);
     }
-  }, [canGenerate, inputText]);
+  }, [canGenerateText, inputText]);
 
-  // 【カード選択切り替え】
+  // URLからカード生成
+  const handleGenerateFromUrl = useCallback(async () => {
+    if (!canGenerateUrl) return;
+
+    setIsGenerating(true);
+    setError(null);
+    setGeneratedCards([]);
+    setSelectedCards(new Set());
+    setPageInfo(null);
+    setUrlProgressStage('fetching');
+
+    // プログレスステージのシミュレーション
+    const timer1 = setTimeout(() => setUrlProgressStage('analyzing'), 3000);
+    const timer2 = setTimeout(() => setUrlProgressStage('generating'), 8000);
+    progressTimerRef.current = timer1;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), MAX_URL_GENERATION_TIME);
+
+    try {
+      const request: GenerateFromUrlRequest = {
+        url: inputUrl,
+        language: 'ja',
+      };
+      const response = await cardsApi.generateFromUrl(request, { signal: controller.signal });
+      clearTimeout(timeoutId);
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+
+      setPageInfo(response.page_info);
+
+      const cardsWithId: GeneratedCardWithId[] = response.generated_cards.map((card, index) => ({
+        ...card,
+        tempId: `temp-${Date.now()}-${index}`,
+      }));
+
+      setGeneratedCards(cardsWithId);
+      setSelectedCards(new Set());
+    } catch (err) {
+      clearTimeout(timeoutId);
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        setError('生成がタイムアウトしました。URLが正しいか確認してください。');
+      } else if (err instanceof Error) {
+        setError(err.message || 'URLからのカード生成に失敗しました。');
+      } else {
+        setError('URLからのカード生成に失敗しました。');
+      }
+    } finally {
+      setIsGenerating(false);
+      progressTimerRef.current = null;
+    }
+  }, [canGenerateUrl, inputUrl]);
+
+  useEffect(() => {
+    return () => {
+      if (progressTimerRef.current) {
+        clearTimeout(progressTimerRef.current);
+      }
+    };
+  }, []);
+
   const handleToggleCard = (tempId: string) => {
     setSelectedCards(prev => {
       const next = new Set(prev);
@@ -102,7 +189,6 @@ export const GeneratePage = () => {
     });
   };
 
-  // 【カード編集】
   const handleEditCard = (tempId: string, front: string, back: string) => {
     setGeneratedCards(prev =>
       prev.map(card =>
@@ -111,7 +197,6 @@ export const GeneratePage = () => {
     );
   };
 
-  // 【カード保存】
   const handleSave = useCallback(async () => {
     const cardsToSave = generatedCards.filter(c => selectedCards.has(c.tempId));
     if (cardsToSave.length === 0) return;
@@ -120,23 +205,25 @@ export const GeneratePage = () => {
     setError(null);
 
     try {
-      // 各カードを個別に保存
       for (const card of cardsToSave) {
         const request: CreateCardRequest = {
           front: card.front,
           back: card.back,
           tags: card.suggested_tags,
           ...(selectedDeckId ? { deck_id: selectedDeckId } : {}),
+          ...(inputMode === 'url' && pageInfo
+            ? { references: [{ type: 'url' as const, value: pageInfo.url }] }
+            : {}),
         };
         await cardsApi.createCard(request);
       }
       navigate('/cards', { state: { message: `${cardsToSave.length}枚のカードを保存しました` } });
-    } catch (err) {
+    } catch {
       setError('カードの保存に失敗しました。もう一度お試しください。');
     } finally {
       setIsSaving(false);
     }
-  }, [generatedCards, selectedCards, selectedDeckId, navigate]);
+  }, [generatedCards, selectedCards, selectedDeckId, inputMode, pageInfo, navigate]);
 
   const selectedCount = selectedCards.size;
 
@@ -147,58 +234,126 @@ export const GeneratePage = () => {
       </header>
 
       <main className="flex-1 px-4">
-        {/* テキスト入力エリア */}
-        <section className="mb-6" aria-label="テキスト入力">
-          <label htmlFor="input-text" className="block text-sm font-medium text-gray-700 mb-2">
-            学習したいテキストを入力してください
-          </label>
-          <textarea
-            id="input-text"
-            value={inputText}
-            onChange={handleInputChange}
-            placeholder="テキストを入力..."
-            className={`w-full h-40 p-3 border rounded-lg resize-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
-              isOverLimit ? 'border-red-500' : 'border-gray-300'
+        {/* タブ切り替え */}
+        <div className="flex mb-4 border-b border-gray-200">
+          <button
+            onClick={() => handleTabSwitch('text')}
+            className={`flex-1 py-2 text-sm font-medium border-b-2 transition-colors ${
+              inputMode === 'text'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}
-            disabled={isGenerating}
-            data-testid="input-text"
-          />
-          <div className="flex justify-between mt-2">
-            <span
-              className={`text-sm ${isOverLimit ? 'text-red-500' : 'text-gray-500'}`}
-              data-testid="char-count"
+            data-testid="tab-text"
+          >
+            テキスト入力
+          </button>
+          <button
+            onClick={() => handleTabSwitch('url')}
+            className={`flex-1 py-2 text-sm font-medium border-b-2 transition-colors ${
+              inputMode === 'url'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+            data-testid="tab-url"
+          >
+            URLから生成
+          </button>
+        </div>
+
+        {/* テキスト入力モード */}
+        {inputMode === 'text' && (
+          <>
+            <section className="mb-6" aria-label="テキスト入力">
+              <label htmlFor="input-text" className="block text-sm font-medium text-gray-700 mb-2">
+                学習したいテキストを入力してください
+              </label>
+              <textarea
+                id="input-text"
+                value={inputText}
+                onChange={handleInputChange}
+                placeholder="テキストを入力..."
+                className={`w-full h-40 p-3 border rounded-lg resize-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
+                  isOverLimit ? 'border-red-500' : 'border-gray-300'
+                }`}
+                disabled={isGenerating}
+                data-testid="input-text"
+              />
+              <div className="flex justify-between mt-2">
+                <span
+                  className={`text-sm ${isOverLimit ? 'text-red-500' : 'text-gray-500'}`}
+                  data-testid="char-count"
+                >
+                  {charCount} / {MAX_CHARS}文字
+                </span>
+                {isUnderLimit && (
+                  <span className="text-sm text-orange-500" data-testid="under-limit-error">
+                    {MIN_CHARS}文字以上入力してください
+                  </span>
+                )}
+                {isOverLimit && (
+                  <span className="text-sm text-red-500" data-testid="over-limit-error">
+                    文字数制限を超えています
+                  </span>
+                )}
+              </div>
+            </section>
+
+            <button
+              onClick={handleGenerateFromText}
+              disabled={!canGenerateText}
+              className={`w-full py-3 rounded-lg font-medium min-h-[44px] transition-colors ${
+                canGenerateText
+                  ? 'bg-green-600 text-white hover:bg-green-700 active:bg-green-800'
+                  : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+              }`}
+              data-testid="generate-button"
             >
-              {charCount} / {MAX_CHARS}文字
-            </span>
-            {isUnderLimit && (
-              <span className="text-sm text-orange-500" data-testid="under-limit-error">
-                {MIN_CHARS}文字以上入力してください
-              </span>
-            )}
-            {isOverLimit && (
-              <span className="text-sm text-red-500" data-testid="over-limit-error">
-                文字数制限を超えています
-              </span>
-            )}
-          </div>
-        </section>
+              {isGenerating ? '生成中...' : 'AIでカードを生成'}
+            </button>
+          </>
+        )}
 
-        {/* 生成ボタン */}
-        <button
-          onClick={handleGenerate}
-          disabled={!canGenerate}
-          className={`w-full py-3 rounded-lg font-medium min-h-[44px] transition-colors ${
-            canGenerate
-              ? 'bg-green-600 text-white hover:bg-green-700 active:bg-green-800'
-              : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-          }`}
-          data-testid="generate-button"
-        >
-          {isGenerating ? '生成中...' : 'AIでカードを生成'}
-        </button>
+        {/* URL入力モード */}
+        {inputMode === 'url' && (
+          <>
+            <section className="mb-6" aria-label="URL入力">
+              <UrlInput
+                value={inputUrl}
+                onChange={setInputUrl}
+                disabled={isGenerating}
+              />
+            </section>
 
-        {/* ローディング状態 */}
-        {isGenerating && (
+            <button
+              onClick={handleGenerateFromUrl}
+              disabled={!canGenerateUrl}
+              className={`w-full py-3 rounded-lg font-medium min-h-[44px] transition-colors ${
+                canGenerateUrl
+                  ? 'bg-green-600 text-white hover:bg-green-700 active:bg-green-800'
+                  : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+              }`}
+              data-testid="generate-from-url-button"
+            >
+              {isGenerating ? '生成中...' : 'URLからカードを生成'}
+            </button>
+
+            {isGenerating && (
+              <div className="mt-4">
+                <GenerateProgress stage={urlProgressStage} />
+              </div>
+            )}
+
+            {pageInfo && !isGenerating && (
+              <div className="mt-4 p-3 bg-blue-50 rounded-lg text-sm" data-testid="page-info">
+                <p className="font-medium text-blue-800">{pageInfo.title}</p>
+                <p className="text-blue-600 truncate">{pageInfo.url}</p>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ローディング状態（テキストモード） */}
+        {isGenerating && inputMode === 'text' && (
           <div className="mt-6" data-testid="loading">
             <Loading message="カードを生成中...（最大30秒）" />
           </div>
@@ -207,7 +362,10 @@ export const GeneratePage = () => {
         {/* エラー表示 */}
         {error && (
           <div className="mt-6" data-testid="error">
-            <Error message={error} onRetry={handleGenerate} />
+            <Error
+              message={error}
+              onRetry={inputMode === 'text' ? handleGenerateFromText : handleGenerateFromUrl}
+            />
           </div>
         )}
 
