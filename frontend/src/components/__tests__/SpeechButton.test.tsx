@@ -8,7 +8,13 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SpeechButton } from "../SpeechButton";
 
-const defaultProps = {
+const defaultProps: {
+  text: string;
+  isSpeaking: boolean;
+  onClick: () => void;
+  label?: string;
+  disabled?: boolean;
+} = {
   text: "読み上げテキスト",
   isSpeaking: false,
   onClick: vi.fn(),

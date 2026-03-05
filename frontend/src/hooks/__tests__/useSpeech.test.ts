@@ -6,6 +6,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useSpeech } from "../useSpeech";
+import type { SpeechRate } from "@/types/speech";
 
 // モック SpeechSynthesisUtterance インスタンス型
 interface MockUtteranceInstance {
@@ -240,8 +241,8 @@ describe("useSpeech", () => {
 
     it("options.rate が変わると次回発話から新しい rate が反映される", () => {
       const { result, rerender } = renderHook(
-        ({ rate }: { rate: 0.5 | 1 | 1.5 }) => useSpeech({ rate }),
-        { initialProps: { rate: 0.5 as const } },
+        ({ rate }: { rate: SpeechRate }) => useSpeech({ rate }),
+        { initialProps: { rate: 0.5 as SpeechRate } },
       );
       act(() => {
         result.current.speak("1回目");
