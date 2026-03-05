@@ -417,6 +417,25 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /decks/{deckId}
             Method: DELETE
+        # Stats endpoints
+        GetStats:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /stats
+            Method: GET
+        GetWeakCards:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /stats/weak-cards
+            Method: GET
+        GetForecast:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /stats/forecast
+            Method: GET
       Tags:
         Environment: !Ref Environment
         Application: memoru

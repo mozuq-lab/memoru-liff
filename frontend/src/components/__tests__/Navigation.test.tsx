@@ -33,9 +33,9 @@ describe('Navigation', () => {
       expect(screen.getByText('カード')).toBeInTheDocument();
     });
 
-    it('設定リンクが表示される', () => {
+    it('統計リンクが表示される', () => {
       renderNavigation();
-      expect(screen.getByText('設定')).toBeInTheDocument();
+      expect(screen.getByText('統計')).toBeInTheDocument();
     });
   });
 
@@ -61,11 +61,11 @@ describe('Navigation', () => {
       expect(cardsLink).toHaveClass('text-blue-600');
     });
 
-    it('設定ページで設定がアクティブ', () => {
-      renderNavigation('/settings');
-      const settingsLink = screen.getByText('設定').closest('a');
-      expect(settingsLink).toHaveAttribute('aria-current', 'page');
-      expect(settingsLink).toHaveClass('text-blue-600');
+    it('統計ページで統計がアクティブ', () => {
+      renderNavigation('/stats');
+      const statsLink = screen.getByText('統計').closest('a');
+      expect(statsLink).toHaveAttribute('aria-current', 'page');
+      expect(statsLink).toHaveClass('text-blue-600');
     });
 
     it('サブページでも親パスがアクティブ', () => {
@@ -94,10 +94,10 @@ describe('Navigation', () => {
       expect(cardsLink).toHaveAttribute('href', '/cards');
     });
 
-    it('設定リンクのパスが正しい', () => {
+    it('統計リンクのパスが正しい', () => {
       renderNavigation();
-      const settingsLink = screen.getByText('設定').closest('a');
-      expect(settingsLink).toHaveAttribute('href', '/settings');
+      const statsLink = screen.getByText('統計').closest('a');
+      expect(statsLink).toHaveAttribute('href', '/stats');
     });
   });
 

@@ -90,6 +90,26 @@ describe('HomePage', () => {
     });
   });
 
+  describe('設定アイコン', () => {
+    it('設定への歯車アイコンが表示される', () => {
+      renderHomePage();
+      const settingsLink = screen.getByRole('link', { name: '設定' });
+      expect(settingsLink).toBeInTheDocument();
+    });
+
+    it('歯車アイコンが /settings へリンクする', () => {
+      renderHomePage();
+      const settingsLink = screen.getByRole('link', { name: '設定' });
+      expect(settingsLink).toHaveAttribute('href', '/settings');
+    });
+
+    it('歯車アイコンに適切な aria-label が設定されている', () => {
+      renderHomePage();
+      const settingsLink = screen.getByLabelText('設定');
+      expect(settingsLink).toBeInTheDocument();
+    });
+  });
+
   describe('テストケース2: 復習待ちカード数表示', () => {
     it('復習待ちカード数が正しく表示される', () => {
       renderHomePage();

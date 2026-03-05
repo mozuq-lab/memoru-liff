@@ -45,6 +45,7 @@ vi.mock('@/pages', () => ({
   LinkLinePage: () => <div>LinkLinePage</div>,
   CallbackPage: () => <div>CallbackPage</div>,
   ReviewPage: () => <div>ReviewPage</div>,
+  StatsPage: () => <div>StatsPage</div>,
 }));
 
 // 【テスト前準備】: Layout をモック（子要素をそのまま描画）
