@@ -211,6 +211,34 @@ describe('CardDetailPage', () => {
       });
     });
 
+    it('保存時に references も含めて updateCard API が呼ばれる', async () => {
+      const user = userEvent.setup();
+      const updatedCard = { ...mockCard, front: '更新された質問' };
+      mockUpdateCard.mockResolvedValue(updatedCard);
+
+      renderCardDetailPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('edit-button')).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByTestId('edit-button'));
+
+      const frontInput = screen.getByTestId('input-front');
+      await user.clear(frontInput);
+      await user.type(frontInput, '更新された質問');
+
+      await user.click(screen.getByTestId('save-button'));
+
+      await waitFor(() => {
+        expect(mockUpdateCard).toHaveBeenCalledWith('card-1', {
+          front: '更新された質問',
+          back: 'テスト回答',
+          references: [],
+        });
+      });
+    });
+
     it('保存成功後に表示モードに戻る', async () => {
       const user = userEvent.setup();
       const updatedCard = { ...mockCard, front: '更新された質問' };
@@ -1205,6 +1233,77 @@ describe('CardDetailPage', () => {
       await act(async () => {
         resolveFirst(mockCard);
       });
+    });
+  });
+
+  // ============================================================
+  // TASK-0160: 参考情報（ReferenceDisplay）統合テスト
+  // ============================================================
+  describe('参考情報の表示', () => {
+    it('参考情報付きカードで ReferenceDisplay が表示される', async () => {
+      const cardWithRefs = {
+        ...mockCard,
+        references: [
+          { type: 'url' as const, value: 'https://example.com' },
+          { type: 'book' as const, value: '参考書籍' },
+        ],
+      };
+      mockGetCard.mockResolvedValue(cardWithRefs);
+
+      renderCardDetailPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('reference-display')).toBeInTheDocument();
+      });
+      expect(screen.getByTestId('reference-display-item-0')).toBeInTheDocument();
+      expect(screen.getByTestId('reference-display-item-1')).toBeInTheDocument();
+    });
+
+    it('参考情報なしカードでもエラーなく表示される', async () => {
+      renderCardDetailPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('card-detail')).toBeInTheDocument();
+      });
+
+      // ReferenceDisplay は空配列で null を返すため、表示されない
+      expect(screen.queryByTestId('reference-display')).not.toBeInTheDocument();
+    });
+
+    it('参考情報が undefined のカードでもエラーなく表示される', async () => {
+      const cardWithoutRefs = { ...mockCard };
+      delete (cardWithoutRefs as Record<string, unknown>).references;
+      mockGetCard.mockResolvedValue(cardWithoutRefs);
+
+      renderCardDetailPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('card-detail')).toBeInTheDocument();
+      });
+
+      expect(screen.queryByTestId('reference-display')).not.toBeInTheDocument();
+    });
+
+    it('編集モードで ReferenceEditor が CardForm 内に表示される', async () => {
+      const user = userEvent.setup();
+      const cardWithRefs = {
+        ...mockCard,
+        references: [
+          { type: 'url' as const, value: 'https://example.com' },
+        ],
+      };
+      mockGetCard.mockResolvedValue(cardWithRefs);
+
+      renderCardDetailPage();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('edit-button')).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByTestId('edit-button'));
+
+      expect(screen.getByTestId('reference-editor')).toBeInTheDocument();
+      expect(screen.getByTestId('reference-item-0')).toHaveTextContent('https://example.com');
     });
   });
 });

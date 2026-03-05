@@ -1,3 +1,11 @@
+// 参考情報の型定義
+export type ReferenceType = "url" | "book" | "note";
+
+export interface Reference {
+  type: ReferenceType;
+  value: string;
+}
+
 export interface Card {
   card_id: string;
   user_id: string;
@@ -5,6 +13,7 @@ export interface Card {
   back: string;
   deck_id?: string | null;
   tags: string[];
+  references?: Reference[];
   next_review_at?: string | null;
   interval: number;
   ease_factor: number;
@@ -18,6 +27,7 @@ export interface CreateCardRequest {
   back: string;
   deck_id?: string;
   tags?: string[];
+  references?: Reference[];
 }
 
 export interface UpdateCardRequest {
@@ -25,6 +35,7 @@ export interface UpdateCardRequest {
   back?: string;
   deck_id?: string | null;
   tags?: string[];
+  references?: Reference[];
   // 【追加フィールド】: 復習間隔調整機能（TASK-0079）で追加。1〜365の整数を受け付ける 🔵
   interval?: number;
 }
@@ -153,6 +164,7 @@ export interface DueCard {
   deck_id?: string | null;
   due_date?: string | null;
   overdue_days: number;
+  references?: Reference[];
 }
 
 export interface DueCardsResponse {

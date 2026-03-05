@@ -1907,4 +1907,103 @@ describe('ReviewPage', () => {
       expect(mockCancel).not.toHaveBeenCalled(); // 【確認内容】: cancel() が呼ばれていないこと 🔵
     });
   });
+
+  // ============================================================
+  // TASK-0160: 参考情報（ReferenceDisplay）統合テスト
+  // ============================================================
+  describe('参考情報の表示', () => {
+    it('カード裏面表示時に参考情報が表示される', async () => {
+      const user = userEvent.setup();
+      const cardsWithRefs = [
+        {
+          card_id: 'card-1',
+          front: '質問1',
+          back: '解答1',
+          overdue_days: 0,
+          references: [
+            { type: 'url' as const, value: 'https://example.com' },
+            { type: 'book' as const, value: '参考書籍' },
+          ],
+        },
+      ];
+      mockGetDueCards.mockResolvedValue({
+        due_cards: cardsWithRefs,
+        total_due_count: 1,
+        next_due_date: null,
+      });
+
+      renderReviewPage();
+
+      await waitFor(() => {
+        expect(screen.getByText('質問1')).toBeInTheDocument();
+      });
+
+      // フリップ前は参考情報が表示されない
+      expect(screen.queryByTestId('reference-display')).not.toBeInTheDocument();
+
+      // フリップ
+      const card = screen.getByRole('button', { name: /カード表面を表示中/ });
+      await user.click(card);
+
+      // フリップ後に参考情報が表示される
+      await waitFor(() => {
+        expect(screen.getByTestId('reference-display')).toBeInTheDocument();
+      });
+      expect(screen.getByTestId('reference-display-item-0')).toBeInTheDocument();
+      expect(screen.getByTestId('reference-display-item-1')).toBeInTheDocument();
+    });
+
+    it('参考情報なしカードの裏面でもエラーなく表示される', async () => {
+      const user = userEvent.setup();
+      renderReviewPage();
+
+      await waitFor(() => {
+        expect(screen.getByText('質問1')).toBeInTheDocument();
+      });
+
+      // フリップ
+      const card = screen.getByRole('button', { name: /カード表面を表示中/ });
+      await user.click(card);
+
+      // 参考情報なしなので reference-display は表示されない
+      expect(screen.queryByTestId('reference-display')).not.toBeInTheDocument();
+    });
+
+    it('参考情報付きカードで URL がリンクとして表示される', async () => {
+      const user = userEvent.setup();
+      const cardsWithRefs = [
+        {
+          card_id: 'card-1',
+          front: '質問1',
+          back: '解答1',
+          overdue_days: 0,
+          references: [
+            { type: 'url' as const, value: 'https://example.com' },
+          ],
+        },
+      ];
+      mockGetDueCards.mockResolvedValue({
+        due_cards: cardsWithRefs,
+        total_due_count: 1,
+        next_due_date: null,
+      });
+
+      renderReviewPage();
+
+      await waitFor(() => {
+        expect(screen.getByText('質問1')).toBeInTheDocument();
+      });
+
+      // フリップ
+      const card = screen.getByRole('button', { name: /カード表面を表示中/ });
+      await user.click(card);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('reference-display-link-0')).toBeInTheDocument();
+      });
+      const link = screen.getByTestId('reference-display-link-0');
+      expect(link).toHaveAttribute('href', 'https://example.com');
+      expect(link).toHaveAttribute('target', '_blank');
+    });
+  });
 });

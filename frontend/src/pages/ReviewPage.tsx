@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { FlipCard } from "@/components/FlipCard";
+import { ReferenceDisplay } from "@/components/ReferenceDisplay";
 import { GradeButtons } from "@/components/GradeButtons";
 import { ReviewProgress } from "@/components/ReviewProgress";
 import { ReviewComplete } from "@/components/ReviewComplete";
@@ -537,6 +538,9 @@ export const ReviewPage = () => {
                   onSpeakBack: () => (isSpeaking ? cancel() : speak(regradeCard.back)),
                 }}
               />
+              {isFlipped && (
+                <ReferenceDisplay references={regradeCard.references ?? []} />
+              )}
             </div>
           </div>
 
@@ -604,6 +608,9 @@ export const ReviewPage = () => {
                   onSpeakBack: () => (isSpeaking ? cancel() : speak(reconfirmCard.back)),
                 }}
               />
+              {isFlipped && (
+                <ReferenceDisplay references={cards.find((c) => c.card_id === reconfirmCard.cardId)?.references ?? []} />
+              )}
             </div>
           </div>
 
@@ -666,6 +673,9 @@ export const ReviewPage = () => {
                 onSpeakBack: () => (isSpeaking ? cancel() : speak(currentCard.back)),
               }}
             />
+            {isFlipped && (
+              <ReferenceDisplay references={currentCard.references ?? []} />
+            )}
           </div>
         </div>
 

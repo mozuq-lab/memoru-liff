@@ -139,7 +139,7 @@ describe('CardForm', () => {
       const saveButton = screen.getByTestId('save-button');
       await user.click(saveButton);
 
-      expect(onSave).toHaveBeenCalledWith('新しい質問', '元の回答');
+      expect(onSave).toHaveBeenCalledWith('新しい質問', '元の回答', []);
     });
 
     it('保存中はボタンに「保存中...」と表示される', () => {
@@ -173,7 +173,7 @@ describe('CardForm', () => {
       const saveButton = screen.getByTestId('save-button');
       await user.click(saveButton);
 
-      expect(onSave).toHaveBeenCalledWith('新しい質問', '元の回答');
+      expect(onSave).toHaveBeenCalledWith('新しい質問', '元の回答', []);
     });
   });
 
@@ -450,6 +450,68 @@ describe('CardForm', () => {
       await waitFor(() => {
         expect(screen.queryByTestId('refine-error')).not.toBeInTheDocument();
       });
+    });
+  });
+
+  describe('参考情報（ReferenceEditor 統合）', () => {
+    it('ReferenceEditor が表示される', () => {
+      renderCardForm();
+
+      expect(screen.getByTestId('reference-editor')).toBeInTheDocument();
+    });
+
+    it('initialReferences が設定されると ReferenceEditor に反映される', () => {
+      const refs = [
+        { type: 'url' as const, value: 'https://example.com' },
+        { type: 'book' as const, value: '参考書籍' },
+      ];
+      renderCardForm({ initialReferences: refs });
+
+      expect(screen.getByTestId('reference-list')).toBeInTheDocument();
+      expect(screen.getByTestId('reference-item-0')).toHaveTextContent('https://example.com');
+      expect(screen.getByTestId('reference-item-1')).toHaveTextContent('参考書籍');
+    });
+
+    it('initialReferences なしの場合は空の状態で表示される', () => {
+      renderCardForm();
+
+      expect(screen.getByTestId('reference-editor')).toBeInTheDocument();
+      expect(screen.queryByTestId('reference-list')).not.toBeInTheDocument();
+    });
+
+    it('参考情報を追加してフォーム送信すると onSave に references が含まれる', async () => {
+      const user = userEvent.setup();
+      const onSave = vi.fn().mockResolvedValue(undefined);
+      renderCardForm({ onSave });
+
+      // 参考情報を追加
+      const addInput = screen.getByTestId('reference-add-value');
+      await user.type(addInput, 'https://example.com');
+      await user.click(screen.getByTestId('reference-add-button'));
+
+      // テキストも変更（hasChanges 条件のため）
+      const frontInput = screen.getByTestId('input-front');
+      await user.clear(frontInput);
+      await user.type(frontInput, '新しい質問');
+
+      await user.click(screen.getByTestId('save-button'));
+
+      expect(onSave).toHaveBeenCalledWith('新しい質問', '元の回答', [
+        { type: 'url', value: 'https://example.com' },
+      ]);
+    });
+
+    it('参考情報の変更のみでも保存ボタンが有効になる', async () => {
+      const user = userEvent.setup();
+      renderCardForm();
+
+      // 参考情報を追加（front/back は変更しない）
+      const addInput = screen.getByTestId('reference-add-value');
+      await user.type(addInput, 'https://example.com');
+      await user.click(screen.getByTestId('reference-add-button'));
+
+      const saveButton = screen.getByTestId('save-button');
+      expect(saveButton).toBeEnabled();
     });
   });
 });

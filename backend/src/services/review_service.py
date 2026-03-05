@@ -470,6 +470,7 @@ class ReviewService:
                     deck_id=card.deck_id,
                     due_date=card.next_review_at.date().isoformat() if card.next_review_at else None,
                     overdue_days=overdue_days,
+                    references=card.references,
                 )
             )
 
