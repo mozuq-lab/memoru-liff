@@ -627,10 +627,15 @@ Resources:
               Resource:
                 - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
                 - !Sub arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0
+            - Effect: Allow
+              Action:
+                - bedrock-agentcore:*
+              Resource: '*'
       Environment:
         Variables:
           OIDC_ISSUER: !Ref OidcIssuer
           BEDROCK_MODEL_ID: !Ref BedrockModelId
+          AGENTCORE_BROWSER_REGION: !Ref AWS::Region
       Events:
         UrlGenerate:
           Type: HttpApi

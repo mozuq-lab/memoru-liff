@@ -139,3 +139,177 @@ class TestUrlContentService:
         """Private IP URLs are rejected."""
         with pytest.raises(ContentFetchError):
             self.service.fetch_content("https://192.168.1.1/admin")
+
+
+class TestSpaDetection:
+    """Tests for SPA detection logic (T021)."""
+
+    def setup_method(self) -> None:
+        self.service = UrlContentService()
+
+    def test_static_page_not_detected_as_spa(self) -> None:
+        """Normal static HTML page is not detected as SPA."""
+        html = """
+        <html>
+        <head><title>Static Page</title></head>
+        <body>
+            <h1>Hello World</h1>
+            <p>This is a static page with plenty of content for reading.</p>
+            <p>Another paragraph with more meaningful text content here.</p>
+        </body>
+        </html>
+        """
+        assert self.service._detect_spa(html) is False
+
+    def test_noscript_with_enable_js_detected(self) -> None:
+        """Page with noscript tag telling user to enable JS is detected as SPA."""
+        html = """
+        <html>
+        <head><title>SPA App</title></head>
+        <body>
+            <noscript>You need to enable JavaScript to run this app.</noscript>
+            <div id="root"></div>
+        </body>
+        </html>
+        """
+        assert self.service._detect_spa(html) is True
+
+    def test_empty_root_container_detected(self) -> None:
+        """Page with empty #root or #app container is detected as SPA."""
+        html = """
+        <html>
+        <head><title>React App</title></head>
+        <body>
+            <div id="root"></div>
+            <script src="/static/js/bundle.js"></script>
+        </body>
+        </html>
+        """
+        assert self.service._detect_spa(html) is True
+
+    def test_empty_app_container_detected(self) -> None:
+        """Page with empty #app container is detected as SPA."""
+        html = """
+        <html>
+        <head><title>Vue App</title></head>
+        <body>
+            <div id="app"></div>
+            <script src="/js/app.js"></script>
+        </body>
+        </html>
+        """
+        assert self.service._detect_spa(html) is True
+
+    def test_bundle_js_pattern_detected(self) -> None:
+        """Page with bundle.js or chunk.js script tags is detected as SPA."""
+        html = """
+        <html>
+        <head><title>App</title></head>
+        <body>
+            <div id="root"></div>
+            <script src="/static/js/main.chunk.js"></script>
+            <script src="/static/js/bundle.js"></script>
+        </body>
+        </html>
+        """
+        assert self.service._detect_spa(html) is True
+
+    def test_low_text_with_scripts_detected(self) -> None:
+        """Page with very little text but many scripts is detected as SPA."""
+        html = """
+        <html>
+        <head><title>App</title></head>
+        <body>
+            <div id="__next"></div>
+            <script src="/_next/static/chunks/main.js"></script>
+            <script src="/_next/static/chunks/pages/_app.js"></script>
+        </body>
+        </html>
+        """
+        assert self.service._detect_spa(html) is True
+
+    def test_populated_root_not_detected(self) -> None:
+        """Page with populated #root container is not detected as SPA."""
+        html = """
+        <html>
+        <head><title>SSR App</title></head>
+        <body>
+            <div id="root">
+                <h1>Server-rendered content</h1>
+                <p>This page has been server-side rendered with actual content visible.</p>
+                <p>Multiple paragraphs with meaningful text for the user to read and study.</p>
+            </div>
+        </body>
+        </html>
+        """
+        assert self.service._detect_spa(html) is False
+
+    @patch("services.url_content_service.httpx.Client")
+    def test_fetch_content_retries_with_browser_on_spa(self, mock_client_cls: MagicMock) -> None:
+        """When SPA is detected, fetch_content falls back to browser fetch."""
+        spa_html = """
+        <html>
+        <head><title>SPA</title></head>
+        <body>
+            <noscript>You need to enable JavaScript to run this app.</noscript>
+            <div id="root"></div>
+            <script src="/static/js/bundle.js"></script>
+        </body>
+        </html>
+        """
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "text/html; charset=utf-8"}
+        mock_response.text = spa_html
+        mock_response.url = "https://spa-example.com"
+        mock_client = MagicMock()
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client.get.return_value = mock_response
+        mock_client_cls.return_value = mock_client
+
+        service = UrlContentService()
+        # Without browser service, SPA detection should raise ContentFetchError
+        with pytest.raises(ContentFetchError, match="JavaScript"):
+            service.fetch_content("https://spa-example.com")
+
+    @patch("services.url_content_service.httpx.Client")
+    def test_fetch_with_browser_fallback_success(self, mock_client_cls: MagicMock) -> None:
+        """When SPA detected and browser service available, falls back to browser."""
+        spa_html = """
+        <html>
+        <head><title>SPA</title></head>
+        <body>
+            <noscript>You need to enable JavaScript to run this app.</noscript>
+            <div id="root"></div>
+        </body>
+        </html>
+        """
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "text/html; charset=utf-8"}
+        mock_response.text = spa_html
+        mock_response.url = "https://spa-example.com"
+        mock_client = MagicMock()
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client.get.return_value = mock_response
+        mock_client_cls.return_value = mock_client
+
+        # Create mock browser service
+        mock_browser = MagicMock()
+        mock_browser.fetch_content.return_value = PageContent(
+            url="https://spa-example.com",
+            title="SPA Rendered",
+            text_content="This is the rendered SPA content with plenty of text to process.",
+            content_type="text/html",
+            fetch_method="browser",
+            fetched_at="2026-03-06T10:00:00Z",
+        )
+
+        service = UrlContentService(browser_service=mock_browser)
+        result = service.fetch_content("https://spa-example.com")
+
+        assert result.fetch_method == "browser"
+        assert "rendered SPA content" in result.text_content
+        mock_browser.fetch_content.assert_called_once_with("https://spa-example.com")
