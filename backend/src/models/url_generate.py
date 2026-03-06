@@ -35,6 +35,10 @@ class GenerateFromUrlRequest(BaseModel):
         default=None,
         description="Deck ID to save cards to",
     )
+    profile_id: Optional[str] = Field(
+        default=None,
+        description="Browser profile ID for authenticated page access",
+    )
 
     @field_validator("url")
     @classmethod
@@ -72,6 +76,7 @@ class GenerateFromUrlResponse(BaseModel):
     generated_cards: List["GeneratedCardResponse"]
     generation_info: UrlGenerationInfoResponse
     page_info: PageInfoResponse
+    warning: Optional[str] = None
 
 
 # Import here to avoid circular dependency

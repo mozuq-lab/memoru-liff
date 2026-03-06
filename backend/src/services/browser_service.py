@@ -33,7 +33,11 @@ class BrowserService:
             region_name=self.region,
         )
 
-    def fetch_content(self, url: str) -> PageContent:
+    def fetch_content(
+        self,
+        url: str,
+        profile_id: str | None = None,
+    ) -> PageContent:
         """Fetch content from URL using AgentCore Browser.
 
         Creates a browser session, navigates to the URL, waits for
@@ -41,6 +45,7 @@ class BrowserService:
 
         Args:
             url: The URL to fetch.
+            profile_id: Optional browser profile ID for authenticated access.
 
         Returns:
             PageContent with extracted text and metadata.
@@ -50,8 +55,11 @@ class BrowserService:
         """
         session_id = None
         try:
-            # Create browser session
-            session_response = self.client.create_browser_session()
+            # Create browser session (with optional profile)
+            session_kwargs: dict = {}
+            if profile_id:
+                session_kwargs["profileId"] = profile_id
+            session_response = self.client.create_browser_session(**session_kwargs)
             session_id = session_response["sessionId"]
 
             # Navigate and get rendered content

@@ -77,6 +77,18 @@ export interface GenerateFromUrlRequest {
   difficulty?: 'easy' | 'medium' | 'hard';
   language?: 'ja' | 'en';
   deck_id?: string;
+  profile_id?: string;
+}
+
+// Browser profile types
+export interface BrowserProfile {
+  profile_id: string;
+  name: string;
+  created_at: string;
+}
+
+export interface BrowserProfileListResponse {
+  profiles: BrowserProfile[];
 }
 
 export interface UrlGenerationInfo {

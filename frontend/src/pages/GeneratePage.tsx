@@ -11,6 +11,7 @@ import { Error } from '@/components/common/Error';
 import { UrlInput } from '@/components/UrlInput';
 import { GenerateProgress } from '@/components/GenerateProgress';
 import { GenerateOptions } from '@/components/GenerateOptions';
+import { BrowserProfileSettings } from '@/components/BrowserProfileSettings';
 import { cardsApi } from '@/services/api';
 import { useDecksContext } from '@/contexts/DecksContext';
 import type {
@@ -56,6 +57,7 @@ export const GeneratePage = () => {
   const [cardType, setCardType] = useState<CardType>('qa');
   const [targetCount, setTargetCount] = useState(10);
   const [difficulty, setDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchDecks();
@@ -147,6 +149,7 @@ export const GeneratePage = () => {
         target_count: targetCount,
         difficulty: difficulty,
         language: 'ja',
+        ...(selectedProfileId ? { profile_id: selectedProfileId } : {}),
       };
       const response = await cardsApi.generateFromUrl(request, { signal: controller.signal });
       clearTimeout(timeoutId);
@@ -334,7 +337,7 @@ export const GeneratePage = () => {
               />
             </section>
 
-            <section className="mb-6" aria-label="生成オプション">
+            <section className="mb-4" aria-label="生成オプション">
               <GenerateOptions
                 cardType={cardType}
                 targetCount={targetCount}
@@ -342,6 +345,14 @@ export const GeneratePage = () => {
                 onCardTypeChange={setCardType}
                 onTargetCountChange={setTargetCount}
                 onDifficultyChange={setDifficulty}
+                disabled={isGenerating}
+              />
+            </section>
+
+            <section className="mb-6" aria-label="認証プロファイル">
+              <BrowserProfileSettings
+                selectedProfileId={selectedProfileId}
+                onProfileSelect={setSelectedProfileId}
                 disabled={isGenerating}
               />
             </section>

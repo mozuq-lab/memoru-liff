@@ -221,6 +221,35 @@ Resources:
         - Key: Application
           Value: memoru
 
+  BrowserProfilesTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub memoru-browser-profiles-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: profile_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_id
+          KeyType: HASH
+        - AttributeName: profile_id
+          KeyType: RANGE
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+      DeletionProtectionEnabled: !If [IsProd, true, false]
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: memoru
+
   #============================================================
   # API Gateway (HTTP API)
   #============================================================
@@ -290,6 +319,8 @@ Resources:
             TableName: !Ref ReviewsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref DecksTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BrowserProfilesTable
         - Version: '2012-10-17'
           Statement:
             - Effect: Allow
@@ -303,6 +334,7 @@ Resources:
           OIDC_ISSUER: !Ref OidcIssuer
           BEDROCK_MODEL_ID: !Ref BedrockModelId
           LINE_CHANNEL_ID: !Ref LineChannelId
+          BROWSER_PROFILES_TABLE: !Ref BrowserProfilesTable
       Events:
         # User endpoints
         GetUser:
@@ -436,6 +468,25 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /stats/forecast
             Method: GET
+        # Browser profile endpoints
+        ListBrowserProfiles:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /browser-profiles
+            Method: GET
+        CreateBrowserProfile:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /browser-profiles
+            Method: POST
+        DeleteBrowserProfile:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /browser-profiles/{profileId}
+            Method: DELETE
       Tags:
         Environment: !Ref Environment
         Application: memoru

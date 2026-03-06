@@ -21,6 +21,8 @@ import type {
   StatsResponse,
   WeakCardsResponse,
   ForecastResponse,
+  BrowserProfile,
+  BrowserProfileListResponse,
 } from '@/types';
 import { authService } from './auth';
 
@@ -259,6 +261,25 @@ class ApiClient {
     const qs = searchParams.toString();
     return this.request<ForecastResponse>(`/stats/forecast${qs ? `?${qs}` : ''}`);
   }
+
+  // Browser Profile API
+  async getBrowserProfiles(): Promise<BrowserProfile[]> {
+    const response = await this.request<BrowserProfileListResponse>('/browser-profiles');
+    return response.profiles;
+  }
+
+  async createBrowserProfile(name: string): Promise<BrowserProfile> {
+    return this.request<BrowserProfile>('/browser-profiles', {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    });
+  }
+
+  async deleteBrowserProfile(profileId: string): Promise<void> {
+    await this.request<void>(`/browser-profiles/${profileId}`, {
+      method: 'DELETE',
+    });
+  }
 }
 
 export const apiClient = new ApiClient();
@@ -300,4 +321,10 @@ export const statsApi = {
   getStats: () => apiClient.getStats(),
   getWeakCards: (limit?: number) => apiClient.getWeakCards(limit),
   getForecast: (days?: number) => apiClient.getForecast(days),
+};
+
+export const browserProfilesApi = {
+  getProfiles: () => apiClient.getBrowserProfiles(),
+  createProfile: (name: string) => apiClient.createBrowserProfile(name),
+  deleteProfile: (profileId: string) => apiClient.deleteBrowserProfile(profileId),
 };
