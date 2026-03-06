@@ -153,16 +153,16 @@
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T039 [P] [US5] Write unit tests for browser profile management in backend/tests/unit/test_browser_profile_service.py
-- [ ] T040 [P] [US5] Write integration tests for authenticated page access in backend/tests/integration/test_authenticated_url_generate.py
+- [x] T039 [P] [US5] Write unit tests for browser profile management in backend/tests/unit/test_browser_profile_service.py
+- [x] T040 [P] [US5] Write integration tests for authenticated page access in backend/tests/integration/test_authenticated_url_generate.py
 
 ### Implementation for User Story 5
 
-- [ ] T041 [US5] Create browser profile management service (create, list, validate profiles) in backend/src/services/browser_profile_service.py
-- [ ] T042 [US5] Add profile_id parameter to URL generation request and pass to AgentCore Browser session in backend/src/services/url_content_service.py (extend) and backend/src/models/url_generate.py (extend)
-- [ ] T043 [US5] Add browser profile API endpoints (GET /browser-profiles, POST /browser-profiles) in backend/src/api/handlers/browser_profile_handler.py
-- [ ] T044 [US5] Create BrowserProfileSettings component (profile list, add/remove) in frontend/src/components/BrowserProfileSettings.tsx
-- [ ] T045 [US5] Add profile selection to GeneratePage URL tab in frontend/src/pages/GeneratePage.tsx (extend)
+- [x] T041 [US5] Create browser profile management service (create, list, validate profiles) in backend/src/services/browser_profile_service.py
+- [x] T042 [US5] Add profile_id parameter to URL generation request and pass to AgentCore Browser session in backend/src/services/url_content_service.py (extend) and backend/src/models/url_generate.py (extend)
+- [x] T043 [US5] Add browser profile API endpoints (GET /browser-profiles, POST /browser-profiles) in backend/src/api/handlers/browser_profile_handler.py
+- [x] T044 [US5] Create BrowserProfileSettings component (profile list, add/remove) in frontend/src/components/BrowserProfileSettings.tsx
+- [x] T045 [US5] Add profile selection to GeneratePage URL tab in frontend/src/pages/GeneratePage.tsx (extend)
 
 **Checkpoint**: 認証が必要なページからもカード生成でき、Browser Profile の管理が可能
 
@@ -172,13 +172,13 @@
 
 **Purpose**: 品質向上、セキュリティ強化、ドキュメント整備
 
-- [ ] T046 [P] Add error handling for edge cases (PDF links, image-heavy pages, multilingual pages, redirects) in backend/src/services/url_content_service.py (extend)
-- [ ] T047 [P] Add duplicate detection warning (same URL re-generation) in backend/src/api/handlers/ai_handler.py (extend)
-- [ ] T048 Add domain allow/block list configuration (FR-014) in backend/src/utils/url_validator.py (extend)
-- [ ] T049 [P] Add Lambda Powertools structured logging for URL generation flow in backend/src/services/url_content_service.py (extend)
-- [ ] T050 Run backend tests and verify coverage ≥ 80% via `cd backend && make test`
-- [ ] T051 Run frontend tests and type-check via `cd frontend && npm run test && npm run type-check`
-- [ ] T052 Run quickstart.md validation (manual smoke test with local API)
+- [x] T046 [P] Add error handling for edge cases (PDF links, image-heavy pages, multilingual pages, redirects) in backend/src/services/url_content_service.py (extend)
+- [x] T047 [P] Add duplicate detection warning (same URL re-generation) in backend/src/api/handlers/ai_handler.py (extend)
+- [x] T048 Add domain allow/block list configuration (FR-014) in backend/src/utils/url_validator.py (extend)
+- [x] T049 [P] Add Lambda Powertools structured logging for URL generation flow in backend/src/services/url_content_service.py (extend)
+- [x] T050 Run backend tests and verify coverage ≥ 80% via `cd backend && make test`
+- [x] T051 Run frontend tests and type-check via `cd frontend && npm run test && npm run type-check`
+- [x] T052 Run quickstart.md validation (manual smoke test with local API)
 
 ---
 

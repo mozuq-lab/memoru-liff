@@ -8,6 +8,7 @@ from aws_lambda_powertools.event_handler.api_gateway import Router
 from pydantic import ValidationError
 
 from api.shared import get_user_id_from_context, map_ai_error_to_http
+from services.card_service import CardService
 from models.generate import (
     GenerateCardsRequest,
     GenerateCardsResponse,
@@ -132,10 +133,30 @@ def generate_from_url():
             body=json.dumps({"error": "Invalid JSON body"}),
         )
 
+    # Duplicate URL detection warning
+    duplicate_warning = None
+    try:
+        card_service = CardService()
+        existing_cards = card_service.list_cards(user_id)
+        for card in existing_cards:
+            refs = getattr(card, "references", None) or []
+            for ref in refs:
+                ref_val = ref.get("value", "") if isinstance(ref, dict) else getattr(ref, "value", "")
+                if ref_val == request.url:
+                    duplicate_warning = "この URL からは既にカードが生成されています。"
+                    break
+            if duplicate_warning:
+                break
+    except Exception:
+        pass  # Non-critical: don't block generation on duplicate check failure
+
     # Fetch page content
     try:
         content_service = UrlContentService()
-        page = content_service.fetch_content(request.url)
+        page = content_service.fetch_content(
+            request.url,
+            profile_id=getattr(request, "profile_id", None),
+        )
     except ContentFetchError as e:
         logger.warning(f"Content fetch error for user_id {user_id}: {e}")
         error_msg = str(e)
@@ -202,8 +223,9 @@ def generate_from_url():
                 title=page.title,
                 fetched_at=page.fetched_at,
             ),
+            warning=duplicate_warning,
         )
-        return response.model_dump(mode="json")
+        return response.model_dump(mode="json", exclude_none=True)
 
     except AIServiceError as e:
         logger.warning(f"AI service error for user_id {user_id}: {type(e).__name__}: {e}")

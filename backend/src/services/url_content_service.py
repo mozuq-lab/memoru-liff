@@ -8,9 +8,12 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional, Tuple
 
 import httpx
+from aws_lambda_powertools import Logger
 from bs4 import BeautifulSoup
 
 from utils.url_validator import UrlValidationError, validate_url
+
+logger = Logger(child=True)
 
 if TYPE_CHECKING:
     from services.browser_service import BrowserService
@@ -53,11 +56,16 @@ class UrlContentService:
     def __init__(self, browser_service: Optional["BrowserService"] = None) -> None:
         self._browser_service = browser_service
 
-    def fetch_content(self, url: str) -> PageContent:
+    def fetch_content(
+        self,
+        url: str,
+        profile_id: str | None = None,
+    ) -> PageContent:
         """Fetch and extract text content from a URL.
 
         Args:
             url: The URL to fetch content from. Must be https.
+            profile_id: Optional browser profile ID for authenticated access.
 
         Returns:
             PageContent with extracted text and metadata.
@@ -69,13 +77,32 @@ class UrlContentService:
         try:
             url = validate_url(url)
         except UrlValidationError as e:
+            logger.warning("URL validation failed", extra={"url": url, "error": str(e)})
             raise ContentFetchError(str(e)) from e
 
+        logger.info("Fetching URL content", extra={"url": url, "has_profile": bool(profile_id)})
+
+        # If profile_id specified, go directly to browser fetch
+        if profile_id and self._browser_service:
+            from services.browser_service import BrowserFetchError
+
+            try:
+                return self._browser_service.fetch_content(url, profile_id=profile_id)
+            except BrowserFetchError as e:
+                raise ContentFetchError(
+                    f"Browser rendering with profile failed: {e}"
+                ) from e
+
         # Stage 1: HTTP fetch
-        page = self._fetch_via_http(url, allow_spa_fallback=True)
+        page = self._fetch_via_http(url, allow_spa_fallback=True, profile_id=profile_id)
         return page
 
-    def _fetch_via_http(self, url: str, allow_spa_fallback: bool = False) -> PageContent:
+    def _fetch_via_http(
+        self,
+        url: str,
+        allow_spa_fallback: bool = False,
+        profile_id: str | None = None,
+    ) -> PageContent:
         """Fetch content using HTTP GET with optional SPA fallback."""
         try:
             with httpx.Client(
@@ -89,7 +116,21 @@ class UrlContentService:
                     response.raise_for_status()
 
                 content_type = response.headers.get("content-type", "")
-                if "text/html" not in content_type.lower():
+                ct_lower = content_type.lower()
+
+                # Reject PDF files
+                if "application/pdf" in ct_lower:
+                    raise ContentFetchError(
+                        "PDF files are not supported. Please paste the text content directly."
+                    )
+
+                # Reject image responses
+                if ct_lower.startswith("image/"):
+                    raise ContentFetchError(
+                        "Image URLs are not supported. Please provide a web page URL."
+                    )
+
+                if "text/html" not in ct_lower:
                     raise ContentFetchError(
                         f"Only HTML pages are supported. Got content-type: {content_type}"
                     )
@@ -99,6 +140,10 @@ class UrlContentService:
 
         except httpx.TimeoutException as e:
             raise ContentFetchError(f"Request timeout: {e}") from e
+        except httpx.TooManyRedirects as e:
+            raise ContentFetchError(
+                "Too many redirects. The URL may be invalid or require authentication."
+            ) from e
         except ContentFetchError:
             raise
         except Exception as e:
@@ -106,11 +151,12 @@ class UrlContentService:
 
         # Stage 2: SPA detection → browser fallback
         if allow_spa_fallback and self._detect_spa(html):
+            logger.info("SPA detected, falling back to browser", extra={"url": url})
             if self._browser_service:
                 from services.browser_service import BrowserFetchError
 
                 try:
-                    return self._browser_service.fetch_content(url)
+                    return self._browser_service.fetch_content(url, profile_id=profile_id)
                 except BrowserFetchError as e:
                     raise ContentFetchError(
                         f"Browser rendering failed: {e}"
@@ -129,6 +175,15 @@ class UrlContentService:
                 "Could not extract meaningful text content from the page. "
                 "The page may be image-heavy or require JavaScript rendering."
             )
+
+        logger.info(
+            "Content extracted via HTTP",
+            extra={
+                "url": final_url,
+                "title": title,
+                "content_length": len(text_content),
+            },
+        )
 
         return PageContent(
             url=final_url,

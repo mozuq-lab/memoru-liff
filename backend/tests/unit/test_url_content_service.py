@@ -312,4 +312,4 @@ class TestSpaDetection:
 
         assert result.fetch_method == "browser"
         assert "rendered SPA content" in result.text_content
-        mock_browser.fetch_content.assert_called_once_with("https://spa-example.com")
+        mock_browser.fetch_content.assert_called_once_with("https://spa-example.com", profile_id=None)

@@ -1,6 +1,7 @@
 """URL validation and SSRF prevention for URL card generation."""
 
 import ipaddress
+import os
 import re
 from urllib.parse import urlparse
 
@@ -17,6 +18,35 @@ _BLOCKED_HOSTNAMES = frozenset({
     "localhost.localdomain",
     "0.0.0.0",
 })
+
+# Domain allow/block lists from environment variables
+# Format: comma-separated domains, e.g. "example.com,docs.example.com"
+_ALLOWED_DOMAINS: frozenset[str] | None = None
+_BLOCKED_DOMAINS: frozenset[str] = frozenset()
+
+
+def _load_domain_lists() -> None:
+    """Load domain allow/block lists from environment variables."""
+    global _ALLOWED_DOMAINS, _BLOCKED_DOMAINS
+
+    allow_env = os.getenv("URL_ALLOWED_DOMAINS", "").strip()
+    if allow_env:
+        _ALLOWED_DOMAINS = frozenset(
+            d.strip().lower() for d in allow_env.split(",") if d.strip()
+        )
+    else:
+        _ALLOWED_DOMAINS = None
+
+    block_env = os.getenv("URL_BLOCKED_DOMAINS", "").strip()
+    if block_env:
+        _BLOCKED_DOMAINS = frozenset(
+            d.strip().lower() for d in block_env.split(",") if d.strip()
+        )
+    else:
+        _BLOCKED_DOMAINS = frozenset()
+
+
+_load_domain_lists()
 
 # Regex for IPv6 in brackets
 _IPV6_BRACKET_RE = re.compile(r"^\[(.+)\]$")
@@ -73,5 +103,21 @@ def validate_url(url: str) -> str:
     # Check for private/loopback IPs
     if _is_private_ip(hostname):
         raise UrlValidationError(f"Access to private/internal IP addresses is blocked: {hostname}")
+
+    # Check domain allow list (if configured, only these domains are allowed)
+    hostname_lower = hostname.lower()
+    if _ALLOWED_DOMAINS is not None:
+        if not any(
+            hostname_lower == d or hostname_lower.endswith(f".{d}")
+            for d in _ALLOWED_DOMAINS
+        ):
+            raise UrlValidationError(f"Domain not in allow list: {hostname}")
+
+    # Check domain block list
+    if any(
+        hostname_lower == d or hostname_lower.endswith(f".{d}")
+        for d in _BLOCKED_DOMAINS
+    ):
+        raise UrlValidationError(f"Domain is blocked: {hostname}")
 
     return url
