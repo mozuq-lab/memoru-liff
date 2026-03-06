@@ -53,6 +53,7 @@ class LineEvent:
     reply_token: Optional[str]
     postback_data: Optional[str]
     timestamp: int
+    message_text: Optional[str] = None
 
 
 def verify_signature(body: str, signature: str | None, channel_secret: str) -> bool:
@@ -169,6 +170,12 @@ class LineService:
                     postback = event_data.get("postback", {})
                     postback_data = postback.get("data", "")
 
+                message_text = None
+                if event_type == "message":
+                    message = event_data.get("message", {})
+                    if message.get("type") == "text":
+                        message_text = message.get("text", "")
+
                 events.append(
                     LineEvent(
                         event_type=event_type,
@@ -176,6 +183,7 @@ class LineService:
                         reply_token=event_data.get("replyToken"),
                         postback_data=postback_data,
                         timestamp=event_data.get("timestamp", 0),
+                        message_text=message_text,
                     )
                 )
 

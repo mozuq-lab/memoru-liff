@@ -2,8 +2,9 @@
 
 import json
 import os
+import re
 from typing import Any, Dict, Optional
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, unquote
 
 from aws_lambda_powertools import Logger, Tracer
 from aws_lambda_powertools.utilities.typing import LambdaContext
@@ -21,9 +22,16 @@ from services.flex_messages import (
     create_completion_message,
     create_link_required_message,
     create_error_message,
+    create_url_generation_progress_message,
+    create_card_preview_carousel,
+    create_url_generation_error_message,
 )
+from models.card import Reference
 from services.card_service import CardService, CardNotFoundError
 from services.review_service import ReviewService
+from services.url_content_service import UrlContentService, ContentFetchError
+from services.content_chunker import chunk_content
+from services.ai_service import create_ai_service, AIServiceError
 
 logger = Logger()
 tracer = Tracer()
@@ -35,6 +43,33 @@ review_service = ReviewService()
 
 # LIFF URL for account linking
 LIFF_URL = os.environ.get("LIFF_URL", "https://liff.line.me/your-liff-id")
+
+# URL detection pattern
+_URL_PATTERN = re.compile(
+    r"https?://[^\s<>\"']+",
+    re.IGNORECASE,
+)
+
+
+def detect_url_in_message(text: str) -> Optional[str]:
+    """Detect and extract URL from message text.
+
+    Args:
+        text: Message text.
+
+    Returns:
+        Normalized URL (https) if found, None otherwise.
+    """
+    if not text:
+        return None
+    match = _URL_PATTERN.search(text)
+    if not match:
+        return None
+    url = match.group(0)
+    # Normalize http to https
+    if url.startswith("http://"):
+        url = "https://" + url[7:]
+    return url
 
 
 def parse_postback_data(data: str) -> Dict[str, str]:
@@ -147,6 +182,228 @@ def handle_grade_action(
 
 
 @tracer.capture_method
+def handle_url_card_generation(
+    user_id: str,
+    line_user_id: str,
+    url: str,
+    reply_token: str,
+) -> None:
+    """Handle URL card generation from LINE chat.
+
+    Fetches content → generates cards → sends carousel preview.
+
+    Args:
+        user_id: System user ID.
+        line_user_id: LINE user ID.
+        url: URL to generate cards from.
+        reply_token: Reply token for response.
+    """
+    logger.info(f"Generating cards from URL for user: {user_id}, url: {url}")
+
+    # Send progress message first
+    try:
+        line_service.reply_message(
+            reply_token,
+            [create_url_generation_progress_message(url)],
+        )
+    except LineApiError:
+        logger.warning("Failed to send progress message")
+
+    try:
+        # Fetch content
+        content_service = UrlContentService()
+        page = content_service.fetch_content(url)
+
+        # Chunk content
+        chunks = chunk_content(page.text_content, page_title=page.title)
+        chunk_texts = [c.text for c in chunks]
+
+        if not chunk_texts:
+            line_service.push_message(
+                line_user_id,
+                [create_url_generation_error_message(
+                    "ページからテキストを抽出できませんでした。"
+                )],
+            )
+            return
+
+        # Generate cards
+        ai_service = create_ai_service()
+        result = ai_service.generate_cards_from_chunks(
+            chunks=chunk_texts,
+            card_type="qa",
+            target_count=10,
+            difficulty="medium",
+            language="ja",
+            page_title=page.title,
+        )
+
+        if not result.cards:
+            line_service.push_message(
+                line_user_id,
+                [create_url_generation_error_message(
+                    "カードを生成できませんでした。"
+                )],
+            )
+            return
+
+        # Build card data for carousel
+        cards_data = [
+            {
+                "front": card.front,
+                "back": card.back,
+                "tags": card.suggested_tags,
+            }
+            for card in result.cards
+        ]
+
+        # Send carousel with card previews
+        carousel = create_card_preview_carousel(
+            cards=cards_data,
+            page_title=page.title,
+            page_url=page.url,
+            user_id=user_id,
+        )
+        line_service.push_message(line_user_id, [carousel])
+
+        logger.info(
+            f"URL card generation complete: {len(result.cards)} cards, "
+            f"url={url}"
+        )
+
+    except ContentFetchError as e:
+        logger.warning(f"Content fetch error: {e}")
+        line_service.push_message(
+            line_user_id,
+            [create_url_generation_error_message(str(e))],
+        )
+    except AIServiceError as e:
+        logger.error(f"AI service error: {e}")
+        line_service.push_message(
+            line_user_id,
+            [create_url_generation_error_message(
+                "AI処理中にエラーが発生しました。"
+            )],
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error in URL card generation: {e}")
+        line_service.push_message(
+            line_user_id,
+            [create_error_message()],
+        )
+
+
+@tracer.capture_method
+def handle_save_url_cards(
+    user_id: str,
+    line_user_id: str,
+    url: str,
+    count: int,
+    reply_token: str,
+) -> None:
+    """Handle save URL cards postback action.
+
+    Re-generates and saves cards from the URL.
+
+    Args:
+        user_id: System user ID.
+        line_user_id: LINE user ID.
+        url: Source URL.
+        count: Number of cards to save.
+        reply_token: Reply token for response.
+    """
+    logger.info(f"Saving URL cards for user: {user_id}, url: {url}")
+
+    try:
+        # Re-fetch and generate
+        content_service = UrlContentService()
+        page = content_service.fetch_content(url)
+
+        chunks = chunk_content(page.text_content, page_title=page.title)
+        chunk_texts = [c.text for c in chunks]
+
+        if not chunk_texts:
+            line_service.reply_message(
+                reply_token,
+                [create_url_generation_error_message("テキストを抽出できませんでした。")],
+            )
+            return
+
+        ai_service = create_ai_service()
+        result = ai_service.generate_cards_from_chunks(
+            chunks=chunk_texts,
+            card_type="qa",
+            target_count=count,
+            difficulty="medium",
+            language="ja",
+            page_title=page.title,
+        )
+
+        # Save each card
+        saved_count = 0
+        for card in result.cards[:count]:
+            try:
+                card_service.create_card(
+                    user_id=user_id,
+                    front=card.front,
+                    back=card.back,
+                    tags=card.suggested_tags,
+                    references=[Reference(type="url", value=page.url)],
+                )
+                saved_count += 1
+            except Exception as e:
+                logger.warning(f"Failed to save card: {e}")
+
+        line_service.reply_message(
+            reply_token,
+            [{"type": "text", "text": f"✅ {saved_count}枚のカードを保存しました！"}],
+        )
+
+    except Exception as e:
+        logger.error(f"Error saving URL cards: {e}")
+        line_service.reply_message(
+            reply_token,
+            [create_error_message()],
+        )
+
+
+@tracer.capture_method
+def handle_message(event: LineEvent) -> None:
+    """Handle message event from LINE.
+
+    Detects URLs in messages and triggers card generation.
+
+    Args:
+        event: Parsed LINE event with message_text attribute.
+    """
+    message_text = getattr(event, "message_text", None) or ""
+    if not message_text or not event.reply_token:
+        return
+
+    # Check for URL
+    url = detect_url_in_message(message_text)
+    if not url:
+        return
+
+    # Get user ID from LINE user ID
+    user_id = line_service.get_user_id_from_line(event.source_user_id)
+
+    if not user_id:
+        logger.info(f"User not linked: {event.source_user_id}")
+        message = create_link_required_message(LIFF_URL)
+        line_service.reply_message(event.reply_token, [message])
+        return
+
+    # Trigger URL card generation
+    handle_url_card_generation(
+        user_id=user_id,
+        line_user_id=event.source_user_id,
+        url=url,
+        reply_token=event.reply_token,
+    )
+
+
+@tracer.capture_method
 def handle_postback(event: LineEvent) -> None:
     """Handle postback event from LINE.
 
@@ -196,6 +453,17 @@ def handle_postback(event: LineEvent) -> None:
                     line_service.reply_message(event.reply_token, [create_error_message()])
             else:
                 logger.warning(f"Invalid grade action data: {data}")
+                line_service.reply_message(event.reply_token, [create_error_message()])
+        elif action == "save_url_cards":
+            url = unquote(data.get("url", ""))
+            count_str = data.get("count", "10")
+            count = int(count_str) if count_str.isdigit() else 10
+            if url:
+                handle_save_url_cards(
+                    user_id, event.source_user_id, url, count, event.reply_token
+                )
+            else:
+                logger.warning("Missing url in save_url_cards action")
                 line_service.reply_message(event.reply_token, [create_error_message()])
         else:
             logger.warning(f"Unknown action: {action}")
@@ -261,6 +529,11 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
                 handle_postback(line_event)
             except Exception as e:
                 logger.error(f"Error handling postback: {e}")
+        elif line_event.event_type == "message":
+            try:
+                handle_message(line_event)
+            except Exception as e:
+                logger.error(f"Error handling message: {e}")
         else:
             logger.info(f"Ignoring event type: {line_event.event_type}")
 
