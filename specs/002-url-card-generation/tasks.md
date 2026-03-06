@@ -81,15 +81,15 @@
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T021 [P] [US2] Write unit tests for SPA detection logic in backend/tests/unit/test_url_content_service.py (extend)
-- [ ] T022 [P] [US2] Write unit tests for AgentCore Browser integration (mock) in backend/tests/unit/test_browser_service.py
+- [x] T021 [P] [US2] Write unit tests for SPA detection logic in backend/tests/unit/test_url_content_service.py (extend)
+- [x] T022 [P] [US2] Write unit tests for AgentCore Browser integration (mock) in backend/tests/unit/test_browser_service.py
 
 ### Implementation for User Story 2
 
-- [ ] T023 [US2] Implement SPA detection logic (noscript tag, empty container, bundle.js pattern, text threshold) in backend/src/services/url_content_service.py (extend)
-- [ ] T024 [US2] Implement AgentCore Browser content fetcher (create session, navigate, wait for render, extract DOM) in backend/src/services/url_content_service.py (extend)
-- [ ] T025 [US2] Add AgentCore Browser IAM permissions (bedrock-agentcore:*) and environment variables to backend/template.yaml
-- [ ] T026 [US2] Add fallback logic: HTTP fetch first → SPA detected → AgentCore Browser retry in backend/src/services/url_content_service.py (extend)
+- [x] T023 [US2] Implement SPA detection logic (noscript tag, empty container, bundle.js pattern, text threshold) in backend/src/services/url_content_service.py (extend)
+- [x] T024 [US2] Implement AgentCore Browser content fetcher (create session, navigate, wait for render, extract DOM) in backend/src/services/browser_service.py
+- [x] T025 [US2] Add AgentCore Browser IAM permissions (bedrock-agentcore:*) and environment variables to backend/template.yaml
+- [x] T026 [US2] Add fallback logic: HTTP fetch first → SPA detected → AgentCore Browser retry in backend/src/services/url_content_service.py (extend)
 
 **Checkpoint**: SPA サイトの URL でも正常にカード生成ができ、静的ページでは Browser を使わない
 
@@ -105,15 +105,15 @@
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T027 [P] [US3] Write unit tests for card type prompt variants in backend/tests/unit/test_url_generate_prompts.py
-- [ ] T028 [P] [US3] Write component tests for GenerateOptions in frontend/tests/components/GenerateOptions.test.tsx
+- [x] T027 [P] [US3] Write unit tests for card type prompt variants in backend/tests/unit/test_url_generate_prompts.py
+- [x] T028 [P] [US3] Write component tests for GenerateOptions in frontend/src/components/__tests__/GenerateOptions.test.tsx
 
 ### Implementation for User Story 3
 
-- [ ] T029 [US3] Implement card type-specific prompt logic (definition, cloze variants) in backend/src/services/prompts/url_generate.py (extend)
-- [ ] T030 [US3] Wire target_count parameter through to chunk-level generation and merge logic in backend/src/services/strands_service.py (extend) and backend/src/services/bedrock.py (extend)
-- [ ] T031 [US3] Create GenerateOptions component (card type selector, target count slider) in frontend/src/components/GenerateOptions.tsx
-- [ ] T032 [US3] Integrate GenerateOptions into GeneratePage URL tab in frontend/src/pages/GeneratePage.tsx (extend)
+- [x] T029 [US3] Implement card type-specific prompt logic (definition, cloze variants) in backend/src/services/prompts/url_generate.py (verified by tests)
+- [x] T030 [US3] Wire target_count parameter through to chunk-level generation and merge logic in backend/src/services/strands_service.py and backend/src/services/bedrock.py (verified by tests)
+- [x] T031 [US3] Create GenerateOptions component (card type selector, target count slider) in frontend/src/components/GenerateOptions.tsx
+- [x] T032 [US3] Integrate GenerateOptions into GeneratePage URL tab in frontend/src/pages/GeneratePage.tsx (extend)
 
 **Checkpoint**: ユーザーがオプションを変えると、生成結果のカードタイプと枚数が変わる
 
@@ -129,15 +129,15 @@
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T033 [P] [US4] Write unit tests for URL detection in LINE message handler in backend/tests/unit/test_webhook_url_handler.py
-- [ ] T034 [P] [US4] Write unit tests for card preview Flex Message builder in backend/tests/unit/test_flex_message_builder.py
+- [x] T033 [P] [US4] Write unit tests for URL detection in LINE message handler in backend/tests/unit/test_webhook_url_handler.py
+- [x] T034 [P] [US4] Write unit tests for card preview Flex Message builder in backend/tests/unit/test_flex_message_builder.py
 
 ### Implementation for User Story 4
 
-- [ ] T035 [US4] Add URL detection to LINE Webhook message handler in backend/src/webhook/handler.py (extend)
-- [ ] T036 [US4] Create Flex Message builder for card preview (carousel format) in backend/src/webhook/flex_messages.py
-- [ ] T037 [US4] Implement async card generation flow (progress reply → generate → result reply) in backend/src/webhook/handler.py (extend)
-- [ ] T038 [US4] Add save callback handler (user taps save button in Flex Message) in backend/src/webhook/handler.py (extend)
+- [x] T035 [US4] Add URL detection to LINE Webhook message handler in backend/src/webhook/line_handler.py (extend)
+- [x] T036 [US4] Create Flex Message builder for card preview (carousel format) in backend/src/services/flex_messages.py (extend)
+- [x] T037 [US4] Implement async card generation flow (progress reply → generate → result reply) in backend/src/webhook/line_handler.py (extend)
+- [x] T038 [US4] Add save callback handler (user taps save button in Flex Message) in backend/src/webhook/line_handler.py (extend)
 
 **Checkpoint**: LINE チャットに URL を送信→生成→Flex Message プレビュー→保存 が動作する
 
