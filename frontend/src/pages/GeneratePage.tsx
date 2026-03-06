@@ -10,6 +10,7 @@ import { Loading } from '@/components/common/Loading';
 import { Error } from '@/components/common/Error';
 import { UrlInput } from '@/components/UrlInput';
 import { GenerateProgress } from '@/components/GenerateProgress';
+import { GenerateOptions } from '@/components/GenerateOptions';
 import { cardsApi } from '@/services/api';
 import { useDecksContext } from '@/contexts/DecksContext';
 import type {
@@ -18,6 +19,7 @@ import type {
   GenerateFromUrlRequest,
   CreateCardRequest,
   PageInfo,
+  CardType,
 } from '@/types';
 
 type InputMode = 'text' | 'url';
@@ -49,6 +51,11 @@ export const GeneratePage = () => {
   const [urlProgressStage, setUrlProgressStage] = useState<UrlProgressStage>('fetching');
   const [pageInfo, setPageInfo] = useState<PageInfo | null>(null);
   const progressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 生成オプション state
+  const [cardType, setCardType] = useState<CardType>('qa');
+  const [targetCount, setTargetCount] = useState(10);
+  const [difficulty, setDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
 
   useEffect(() => {
     fetchDecks();
@@ -136,6 +143,9 @@ export const GeneratePage = () => {
     try {
       const request: GenerateFromUrlRequest = {
         url: inputUrl,
+        card_type: cardType,
+        target_count: targetCount,
+        difficulty: difficulty,
         language: 'ja',
       };
       const response = await cardsApi.generateFromUrl(request, { signal: controller.signal });
@@ -316,10 +326,22 @@ export const GeneratePage = () => {
         {/* URL入力モード */}
         {inputMode === 'url' && (
           <>
-            <section className="mb-6" aria-label="URL入力">
+            <section className="mb-4" aria-label="URL入力">
               <UrlInput
                 value={inputUrl}
                 onChange={setInputUrl}
+                disabled={isGenerating}
+              />
+            </section>
+
+            <section className="mb-6" aria-label="生成オプション">
+              <GenerateOptions
+                cardType={cardType}
+                targetCount={targetCount}
+                difficulty={difficulty}
+                onCardTypeChange={setCardType}
+                onTargetCountChange={setTargetCount}
+                onDifficultyChange={setDifficulty}
                 disabled={isGenerating}
               />
             </section>
