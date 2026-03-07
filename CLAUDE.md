@@ -12,6 +12,7 @@ LINE ベースの暗記カードアプリケーション。SRS (Spaced Repetitio
 - Python 3.12 / AWS SAM (Lambda, API Gateway, DynamoDB)
 - AWS Lambda Powertools / Pydantic v2
 - Strands Agents SDK / Amazon Bedrock (Claude)
+- Bedrock AgentCore Memory SDK (SessionManager)
 
 ### フロントエンド
 - React 19 + TypeScript 5.x / Vite 7 / Tailwind CSS 4

@@ -32,6 +32,7 @@
 - **aws-lambda-powertools**: ロギング、トレーシング、イベントハンドリング
 - **pydantic**: リクエスト/レスポンスバリデーション、モデル定義
 - **strands-agents**: AI エージェント SDK（Bedrock 直接呼び出しとの切り替え可能）
+- **bedrock-agentcore**: AgentCore Memory SDK（SessionManager による会話履歴管理）
 - **boto3**: AWS サービス SDK (DynamoDB, Secrets Manager, Bedrock)
 
 ### Frontend
@@ -84,6 +85,7 @@ cd frontend && npm run build       # TypeScript チェック + Vite ビルド
 - **サーバーレス**: Lambda + DynamoDB によるスケーラブルでコスト効率の高い構成
 - **SM-2 アルゴリズム**: 科学的根拠に基づく間隔反復。カード単位で ease_factor, interval, repetitions を管理
 - **AI サービスファクトリー**: `USE_STRANDS` 環境変数で Bedrock 直接呼び出し / Strands Agent を切り替え
+- **SessionManager パターン**: `TUTOR_SESSION_BACKEND` 環境変数で会話履歴の保存先を切り替え（DynamoDB / AgentCore Memory）
 - **JWT フォールバック**: SAM Local では JWT Authorizer が適用されないため、dev 環境で Authorization ヘッダーから直接デコード
 - **Vite プロキシ**: 開発時に `/api` リクエストを SAM Local (port 8080) にプロキシ
 
