@@ -31,6 +31,9 @@ class TutorAIService:
     MAX_TOKENS = 1024
     TEMPERATURE = 0.7
     TIMEOUT = 60
+    # Approximate character limit for system prompt to stay within model input limits.
+    # Claude allows ~200k tokens; using conservative char limit for safety.
+    MAX_SYSTEM_PROMPT_CHARS = 150_000
 
     def __init__(
         self,
@@ -79,7 +82,7 @@ class TutorAIService:
             "anthropic_version": "bedrock-2023-05-31",
             "max_tokens": self.MAX_TOKENS,
             "temperature": self.TEMPERATURE,
-            "system": system_prompt,
+            "system": system_prompt[:self.MAX_SYSTEM_PROMPT_CHARS],
             "messages": messages,
         }
 
