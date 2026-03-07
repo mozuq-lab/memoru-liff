@@ -513,9 +513,18 @@ Resources:
               Action:
                 - secretsmanager:GetSecretValue
               Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:memoru-${Environment}-line-credentials-*
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource:
+                - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
+                - !Sub arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0
       Environment:
         Variables:
           LINE_CHANNEL_SECRET_ARN: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:memoru-${Environment}-line-credentials
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
       Events:
         LineWebhook:
           Type: HttpApi

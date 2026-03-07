@@ -53,12 +53,12 @@ class TestGenerateFromUrlRequest:
 class TestGenerateFromUrlApiFlow:
     """Integration tests for the full generate-from-url flow with mocked AI."""
 
-    @patch("services.url_content_service.httpx")
+    @patch("services.url_content_service.httpx.Client")
     @patch("services.ai_service.create_ai_service")
     def test_full_flow_returns_cards(
         self,
         mock_create_ai: MagicMock,
-        mock_httpx: MagicMock,
+        mock_client_cls: MagicMock,
     ) -> None:
         """Full flow: URL → fetch → chunk → generate → response."""
         from services.ai_service import GeneratedCard, GenerationResult
@@ -67,6 +67,7 @@ class TestGenerateFromUrlApiFlow:
         # Mock HTTP response
         mock_response = MagicMock()
         mock_response.status_code = 200
+        mock_response.is_redirect = False
         mock_response.headers = {"content-type": "text/html"}
         mock_response.text = """
         <html><head><title>Test Article</title></head>
@@ -78,7 +79,7 @@ class TestGenerateFromUrlApiFlow:
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
         mock_client.get.return_value = mock_response
-        mock_httpx.Client.return_value = mock_client
+        mock_client_cls.return_value = mock_client
 
         # Mock AI service
         mock_ai = MagicMock()

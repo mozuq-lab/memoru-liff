@@ -58,6 +58,9 @@ class TestAIServiceProtocol:
             def refine_card(self, front, back, language="ja"):
                 pass
 
+            def generate_cards_from_chunks(self, chunks, card_type="qa", target_count=10, difficulty="medium", language="ja", page_title=""):
+                pass
+
         assert isinstance(_ConformingService(), AIService)
 
     def test_non_conforming_class_fails_isinstance(self):

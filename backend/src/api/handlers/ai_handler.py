@@ -27,6 +27,7 @@ from services.ai_service import (
     create_ai_service,
     AIServiceError,
 )
+from services.browser_service import BrowserService
 from services.content_chunker import chunk_content
 from services.url_content_service import ContentFetchError, UrlContentService
 
@@ -137,7 +138,7 @@ def generate_from_url():
     duplicate_warning = None
     try:
         card_service = CardService()
-        existing_cards = card_service.list_cards(user_id)
+        existing_cards, _ = card_service.list_cards(user_id)
         for card in existing_cards:
             refs = getattr(card, "references", None) or []
             for ref in refs:
@@ -152,7 +153,7 @@ def generate_from_url():
 
     # Fetch page content
     try:
-        content_service = UrlContentService()
+        content_service = UrlContentService(browser_service=BrowserService())
         page = content_service.fetch_content(
             request.url,
             profile_id=getattr(request, "profile_id", None),
@@ -196,6 +197,13 @@ def generate_from_url():
             language=request.language,
             page_title=page.title,
         )
+        if not result.cards:
+            return Response(
+                status_code=422,
+                content_type=content_types.APPLICATION_JSON,
+                body=json.dumps({"error": "Failed to generate cards from the page content"}),
+            )
+
         logger.info(
             f"URL card generation succeeded: model={result.model_used}, "
             f"cards={len(result.cards)}, chunks={len(chunk_texts)}, "

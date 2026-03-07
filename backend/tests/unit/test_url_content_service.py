@@ -33,6 +33,7 @@ class TestUrlContentService:
         """Successful HTTP fetch returns PageContent with text extracted."""
         mock_response = MagicMock()
         mock_response.status_code = 200
+        mock_response.is_redirect = False
         mock_response.headers = {"content-type": "text/html; charset=utf-8"}
         mock_response.text = """
         <html>
@@ -62,6 +63,7 @@ class TestUrlContentService:
         """Non-HTML content type raises ContentFetchError."""
         mock_response = MagicMock()
         mock_response.status_code = 200
+        mock_response.is_redirect = False
         mock_response.headers = {"content-type": "application/pdf"}
         mock_client = MagicMock()
         mock_client.__enter__ = MagicMock(return_value=mock_client)
@@ -77,6 +79,7 @@ class TestUrlContentService:
         """HTTP 404 raises ContentFetchError."""
         mock_response = MagicMock()
         mock_response.status_code = 404
+        mock_response.is_redirect = False
         mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
             "404", request=MagicMock(), response=mock_response
         )
@@ -259,6 +262,7 @@ class TestSpaDetection:
         """
         mock_response = MagicMock()
         mock_response.status_code = 200
+        mock_response.is_redirect = False
         mock_response.headers = {"content-type": "text/html; charset=utf-8"}
         mock_response.text = spa_html
         mock_response.url = "https://spa-example.com"
@@ -287,6 +291,7 @@ class TestSpaDetection:
         """
         mock_response = MagicMock()
         mock_response.status_code = 200
+        mock_response.is_redirect = False
         mock_response.headers = {"content-type": "text/html; charset=utf-8"}
         mock_response.text = spa_html
         mock_response.url = "https://spa-example.com"

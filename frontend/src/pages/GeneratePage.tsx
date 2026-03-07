@@ -180,7 +180,7 @@ export const GeneratePage = () => {
       setIsGenerating(false);
       progressTimerRef.current = null;
     }
-  }, [canGenerateUrl, inputUrl]);
+  }, [canGenerateUrl, inputUrl, cardType, targetCount, difficulty, selectedProfileId]);
 
   useEffect(() => {
     return () => {

@@ -11,7 +11,7 @@ import httpx
 from aws_lambda_powertools import Logger
 from bs4 import BeautifulSoup
 
-from utils.url_validator import UrlValidationError, validate_url
+from utils.url_validator import UrlValidationError, validate_url, _is_private_ip
 
 logger = Logger(child=True)
 
@@ -20,6 +20,9 @@ if TYPE_CHECKING:
 
 # Timeout for HTTP requests (seconds)
 _HTTP_TIMEOUT = 30
+
+# Maximum number of redirects to follow manually
+_MAX_REDIRECTS = 10
 
 # Minimum text length to consider page has meaningful content
 _MIN_TEXT_LENGTH = 50
@@ -103,47 +106,68 @@ class UrlContentService:
         allow_spa_fallback: bool = False,
         profile_id: str | None = None,
     ) -> PageContent:
-        """Fetch content using HTTP GET with optional SPA fallback."""
+        """Fetch content using HTTP GET with optional SPA fallback.
+
+        Manually follows redirects to validate each hop against SSRF.
+        """
         try:
             with httpx.Client(
                 timeout=_HTTP_TIMEOUT,
-                follow_redirects=True,
+                follow_redirects=False,
                 headers={"User-Agent": _USER_AGENT},
             ) as client:
-                response = client.get(url)
+                current_url = url
+                for _ in range(_MAX_REDIRECTS):
+                    response = client.get(current_url)
 
-                if response.status_code >= 400:
-                    response.raise_for_status()
+                    if response.is_redirect:
+                        redirect_url = str(response.next_request.url) if response.next_request else None
+                        if not redirect_url:
+                            raise ContentFetchError("Redirect without Location header")
+                        # Validate redirect target against SSRF
+                        try:
+                            redirect_url = validate_url(redirect_url)
+                        except UrlValidationError as e:
+                            raise ContentFetchError(
+                                f"Redirect target blocked by SSRF protection: {e}"
+                            ) from e
+                        current_url = redirect_url
+                        continue
 
-                content_type = response.headers.get("content-type", "")
-                ct_lower = content_type.lower()
+                    # Non-redirect response
+                    if response.status_code >= 400:
+                        response.raise_for_status()
 
-                # Reject PDF files
-                if "application/pdf" in ct_lower:
+                    content_type = response.headers.get("content-type", "")
+                    ct_lower = content_type.lower()
+
+                    # Reject PDF files
+                    if "application/pdf" in ct_lower:
+                        raise ContentFetchError(
+                            "PDF files are not supported. Please paste the text content directly."
+                        )
+
+                    # Reject image responses
+                    if ct_lower.startswith("image/"):
+                        raise ContentFetchError(
+                            "Image URLs are not supported. Please provide a web page URL."
+                        )
+
+                    if "text/html" not in ct_lower:
+                        raise ContentFetchError(
+                            f"Only HTML pages are supported. Got content-type: {content_type}"
+                        )
+
+                    html = response.text
+                    final_url = str(response.url)
+                    break
+                else:
                     raise ContentFetchError(
-                        "PDF files are not supported. Please paste the text content directly."
+                        "Too many redirects. The URL may be invalid or require authentication."
                     )
-
-                # Reject image responses
-                if ct_lower.startswith("image/"):
-                    raise ContentFetchError(
-                        "Image URLs are not supported. Please provide a web page URL."
-                    )
-
-                if "text/html" not in ct_lower:
-                    raise ContentFetchError(
-                        f"Only HTML pages are supported. Got content-type: {content_type}"
-                    )
-
-                html = response.text
-                final_url = str(response.url)
 
         except httpx.TimeoutException as e:
             raise ContentFetchError(f"Request timeout: {e}") from e
-        except httpx.TooManyRedirects as e:
-            raise ContentFetchError(
-                "Too many redirects. The URL may be invalid or require authentication."
-            ) from e
         except ContentFetchError:
             raise
         except Exception as e:

@@ -3,6 +3,7 @@
 import ipaddress
 import os
 import re
+import socket
 from urllib.parse import urlparse
 
 
@@ -52,19 +53,45 @@ _load_domain_lists()
 _IPV6_BRACKET_RE = re.compile(r"^\[(.+)\]$")
 
 
+def _is_private_ip_address(addr_str: str) -> bool:
+    """Check if an IP address string is private/loopback/reserved."""
+    try:
+        addr = ipaddress.ip_address(addr_str)
+        return addr.is_private or addr.is_loopback or addr.is_reserved or addr.is_link_local
+    except ValueError:
+        return False
+
+
 def _is_private_ip(hostname: str) -> bool:
-    """Check if a hostname resolves to a private/loopback IP address."""
+    """Check if a hostname resolves to a private/loopback IP address.
+
+    Checks both raw IP literals and DNS-resolved addresses.
+    """
     # Strip brackets from IPv6
     match = _IPV6_BRACKET_RE.match(hostname)
     if match:
         hostname = match.group(1)
 
+    # Check raw IP literal
     try:
         addr = ipaddress.ip_address(hostname)
         return addr.is_private or addr.is_loopback or addr.is_reserved or addr.is_link_local
     except ValueError:
-        # Not a raw IP address (it's a hostname) — allow it
+        pass
+
+    # DNS resolution check — resolve hostname and verify all addresses
+    try:
+        addrinfos = socket.getaddrinfo(hostname, None, proto=socket.IPPROTO_TCP)
+        for family, _, _, _, sockaddr in addrinfos:
+            ip_str = sockaddr[0]
+            if _is_private_ip_address(ip_str):
+                return True
+    except socket.gaierror:
+        # DNS resolution failed — allow it here; the HTTP client will
+        # raise a connection error if the host truly doesn't exist.
         return False
+
+    return False
 
 
 def validate_url(url: str) -> str:
