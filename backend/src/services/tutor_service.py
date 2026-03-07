@@ -21,7 +21,7 @@ from models.tutor import (
     TutorSessionResponse,
 )
 from services.prompts.tutor import format_cards_context, get_system_prompt
-from services.tutor_ai_service import TutorAIService
+from services.tutor_ai_service import create_tutor_ai_service
 
 logger = Logger()
 
@@ -65,7 +65,7 @@ class TutorService:
         self,
         table_name: str | None = None,
         dynamodb_resource: Any | None = None,
-        ai_service: TutorAIService | None = None,
+        ai_service: Any | None = None,
     ):
         self.table_name = table_name or os.environ.get(
             "TUTOR_SESSIONS_TABLE", "memoru-tutor-sessions-dev"
@@ -89,7 +89,7 @@ class TutorService:
         self.cards_table = self.dynamodb.Table(self.cards_table_name)
         self.decks_table = self.dynamodb.Table(self.decks_table_name)
 
-        self.ai_service = ai_service or TutorAIService()
+        self.ai_service = ai_service if ai_service is not None else create_tutor_ai_service()
 
     def start_session(
         self,
