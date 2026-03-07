@@ -141,8 +141,8 @@
 
 ### Implementation for User Story 5
 
-- [ ] T032 [P] [US5] Create RelatedCardChip component (tappable chip displaying card front text, navigate to `/cards/:id`) in `frontend/src/components/tutor/RelatedCardChip.tsx`
-- [ ] T033 [US5] Integrate RelatedCardChip into ChatMessage component (render chips below AI messages when related_cards is non-empty) in `frontend/src/components/tutor/ChatMessage.tsx`
+- [x] T032 [P] [US5] Create RelatedCardChip component (tappable chip displaying card front text, navigate to `/cards/:id`) in `frontend/src/components/tutor/RelatedCardChip.tsx`
+- [x] T033 [US5] Integrate RelatedCardChip into ChatMessage component (render chips below AI messages when related_cards is non-empty) in `frontend/src/components/tutor/ChatMessage.tsx`
 
 **Checkpoint**: 関連カード chip の表示と遷移が正しく動作
 
@@ -152,11 +152,11 @@
 
 **Purpose**: エッジケース対応、エラーハンドリング強化、UX 改善
 
-- [ ] T034 Add empty deck validation (prevent session start, show appropriate message) to `backend/src/services/tutor_service.py` and `frontend/src/pages/TutorPage.tsx`
-- [ ] T035 Add AI service error handling (504 timeout, retry capability) to `backend/src/api/handlers/tutor_handler.py` and `frontend/src/contexts/TutorContext.tsx`
-- [ ] T036 Add large deck handling (100+ cards: summarize or truncate card context for Bedrock token limit) to `backend/src/services/tutor_ai_service.py`
-- [ ] T037 [P] Add loading indicator for AI response (typing animation or spinner) to `frontend/src/components/tutor/ChatMessage.tsx`
-- [ ] T039 Run backend tests (`cd backend && make test`) and frontend tests (`cd frontend && npm run test`) to verify no regressions
+- [x] T034 Add empty deck validation (prevent session start, show appropriate message) to `backend/src/services/tutor_service.py` and `frontend/src/pages/TutorPage.tsx`
+- [x] T035 Add AI service error handling (504 timeout, retry capability) to `backend/src/api/handlers/tutor_handler.py` and `frontend/src/contexts/TutorContext.tsx`
+- [x] T036 Add large deck handling (100+ cards: summarize or truncate card context for Bedrock token limit) to `backend/src/services/tutor_ai_service.py`
+- [x] T037 [P] Add loading indicator for AI response (typing animation or spinner) to `frontend/src/components/tutor/ChatMessage.tsx`
+- [x] T039 Run backend tests (`cd backend && make test`) and frontend tests (`cd frontend && npm run test`) to verify no regressions
 
 ---
 
