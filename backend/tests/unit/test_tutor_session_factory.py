@@ -27,9 +27,9 @@ def _reset_singleton():
     """Reset the module-level singleton before and after each test."""
     import services.tutor_session_factory as mod
 
-    mod._agentcore_client = None
+    mod._agentcore_boto_session = None
     yield
-    mod._agentcore_client = None
+    mod._agentcore_boto_session = None
 
 
 # ===================================================================
@@ -49,14 +49,13 @@ class TestCreateTutorSessionManagerAgentcore:
         create=True,
     )
     @patch(
-        "services.tutor_session_factory.MemoryClient",
-        create=True,
+        "services.tutor_session_factory.boto3",
     )
     def test_agentcore_backend_returns_agentcore_session_manager(
-        self, mock_memory_client_cls, mock_config_cls, mock_sm_cls
+        self, mock_boto3, mock_config_cls, mock_sm_cls
     ):
-        mock_client_instance = MagicMock()
-        mock_memory_client_cls.return_value = mock_client_instance
+        mock_boto_session = MagicMock()
+        mock_boto3.Session.return_value = mock_boto_session
         mock_config_instance = MagicMock()
         mock_config_cls.return_value = mock_config_instance
         mock_sm_instance = MagicMock()
@@ -76,10 +75,9 @@ class TestCreateTutorSessionManagerAgentcore:
             session_id=SESSION_ID,
             actor_id=USER_ID,
         )
-        mock_sm_cls.assert_called_once()
-        call_kwargs = mock_sm_cls.call_args
-        # Verify config and memory_client were passed
-        assert call_kwargs is not None
+        mock_sm_cls.assert_called_once_with(
+            mock_config_instance, boto_session=mock_boto_session
+        )
         assert result is mock_sm_instance
 
 
@@ -142,11 +140,10 @@ class TestEnvironmentAutoSelection:
         create=True,
     )
     @patch(
-        "services.tutor_session_factory.MemoryClient",
-        create=True,
+        "services.tutor_session_factory.boto3",
     )
     def test_prod_environment_defaults_to_agentcore(
-        self, mock_memory_client_cls, mock_config_cls, mock_sm_cls
+        self, mock_boto3, mock_config_cls, mock_sm_cls
     ):
         """TC-103-02: ENVIRONMENT=prod without TUTOR_SESSION_BACKEND -> agentcore."""
         mock_sm_instance = MagicMock()
@@ -173,11 +170,10 @@ class TestEnvironmentAutoSelection:
         create=True,
     )
     @patch(
-        "services.tutor_session_factory.MemoryClient",
-        create=True,
+        "services.tutor_session_factory.boto3",
     )
     def test_explicit_backend_overrides_environment(
-        self, mock_memory_client_cls, mock_config_cls, mock_sm_cls
+        self, mock_boto3, mock_config_cls, mock_sm_cls
     ):
         """TC-103-03: TUTOR_SESSION_BACKEND=agentcore overrides ENVIRONMENT=dev."""
         mock_sm_instance = MagicMock()
@@ -234,22 +230,21 @@ class TestCreateTutorSessionManagerErrors:
 # ===================================================================
 
 
-class TestGetAgentcoreClientSingleton:
-    """TC-SINGLETON-01: _get_agentcore_client() returns same instance."""
+class TestGetAgentcoreBotoSessionSingleton:
+    """TC-SINGLETON-01: _get_agentcore_boto_session() returns same instance."""
 
     @patch(
-        "services.tutor_session_factory.MemoryClient",
-        create=True,
+        "services.tutor_session_factory.boto3",
     )
-    def test_returns_same_instance_on_multiple_calls(self, mock_memory_client_cls):
-        """MemoryClient() constructor is called only once; same instance returned."""
-        mock_client_instance = MagicMock()
-        mock_memory_client_cls.return_value = mock_client_instance
+    def test_returns_same_instance_on_multiple_calls(self, mock_boto3):
+        """boto3.Session() constructor is called only once; same instance returned."""
+        mock_session_instance = MagicMock()
+        mock_boto3.Session.return_value = mock_session_instance
 
-        from services.tutor_session_factory import _get_agentcore_client
+        from services.tutor_session_factory import _get_agentcore_boto_session
 
-        first = _get_agentcore_client()
-        second = _get_agentcore_client()
+        first = _get_agentcore_boto_session()
+        second = _get_agentcore_boto_session()
 
         assert first is second
-        mock_memory_client_cls.assert_called_once()
+        mock_boto3.Session.assert_called_once()

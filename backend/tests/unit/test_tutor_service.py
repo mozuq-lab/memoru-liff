@@ -562,6 +562,44 @@ class TestStartSessionWithSessionManager:
         assert session.created_at is not None
         assert session.updated_at is not None
 
+    def test_ai_failure_rolls_back_session(
+        self, dynamodb_tables, mock_ai_service
+    ):
+        """HIGH-1: AI failure during start_session deletes the incomplete session."""
+        _seed_deck(dynamodb_tables)
+        mock_sm_factory = MagicMock()
+        mock_sm_factory.return_value = MagicMock()
+
+        # Make AI service fail
+        mock_ai_service.generate_response.side_effect = RuntimeError("AI unavailable")
+
+        with patch.dict(os.environ, {
+            "TUTOR_SESSIONS_TABLE": "memoru-tutor-sessions-test",
+            "DECKS_TABLE": "memoru-decks-test",
+            "CARDS_TABLE": "memoru-cards-test",
+        }):
+            from services.tutor_service import TutorService
+
+            service = TutorService(
+                table_name="memoru-tutor-sessions-test",
+                dynamodb_resource=dynamodb_tables,
+                ai_service=mock_ai_service,
+                session_manager_factory=mock_sm_factory,
+            )
+
+            with pytest.raises(RuntimeError, match="AI unavailable"):
+                service.start_session(
+                    user_id="test-user", deck_id="deck_001", mode="free_talk"
+                )
+
+        # No orphaned sessions should remain
+        table = dynamodb_tables.Table("memoru-tutor-sessions-test")
+        response = table.query(
+            KeyConditionExpression="user_id = :uid",
+            ExpressionAttributeValues={":uid": "test-user"},
+        )
+        assert len(response.get("Items", [])) == 0
+
     def test_session_manager_close_called(
         self, dynamodb_tables, mock_ai_service
     ):
@@ -854,10 +892,9 @@ class TestGetSessionWithSessionManager:
     def test_get_session_messages_via_session_manager(
         self, dynamodb_tables, mock_ai_service
     ):
-        """TC-get-dynamodb: get_session retrieves messages via SessionManager.initialize()."""
+        """TC-get-dynamodb: get_session retrieves messages via SessionManager.read_messages()."""
         _seed_deck(dynamodb_tables)
 
-        # Build a SessionManager mock that populates holder.messages on initialize()
         mock_sm_factory = MagicMock()
         mock_sm_start = MagicMock()  # for start_session
         mock_sm_get = MagicMock()    # for get_session
@@ -872,14 +909,21 @@ class TestGetSessionWithSessionManager:
 
         mock_sm_factory.side_effect = factory_side_effect
 
-        # When initialize() is called on the get_session SM, populate agent.messages
-        def init_side_effect(agent, session_id=None):
-            agent.messages = [
-                {"role": "user", "content": [{"text": "appleについて教えて"}]},
-                {"role": "assistant", "content": [{"text": "appleはりんごです。"}]},
-            ]
-
-        mock_sm_get.initialize.side_effect = init_side_effect
+        # read_messages returns DynamoDB-format messages with metadata
+        mock_sm_get.read_messages.return_value = [
+            {
+                "role": "user",
+                "content": "appleについて教えて",
+                "timestamp": "2026-01-01T00:00:00+00:00",
+                "related_cards": [],
+            },
+            {
+                "role": "assistant",
+                "content": "appleはりんごです。",
+                "timestamp": "2026-01-01T00:00:01+00:00",
+                "related_cards": ["card_001"],
+            },
+        ]
 
         with patch.dict(os.environ, {
             "TUTOR_SESSIONS_TABLE": "memoru-tutor-sessions-test",
@@ -901,12 +945,16 @@ class TestGetSessionWithSessionManager:
 
             result = service.get_session("test-user", session.session_id)
 
-        # Messages should come from SessionManager
+        # Messages should come from SessionManager with metadata preserved
         assert len(result.messages) == 2
         assert result.messages[0].role == "user"
         assert result.messages[0].content == "appleについて教えて"
+        assert result.messages[0].timestamp == "2026-01-01T00:00:00+00:00"
+        assert result.messages[0].related_cards == []
         assert result.messages[1].role == "assistant"
         assert result.messages[1].content == "appleはりんごです。"
+        assert result.messages[1].timestamp == "2026-01-01T00:00:01+00:00"
+        assert result.messages[1].related_cards == ["card_001"]
         # SessionManager.close() should be called
         mock_sm_get.close.assert_called_once()
 
@@ -920,13 +968,15 @@ class TestGetSessionWithSessionManager:
         mock_sm = MagicMock()
         mock_sm_factory.return_value = mock_sm
 
-        # initialize() sets empty messages
-        def init_side_effect(agent, session_id=None):
-            agent.messages = [
-                {"role": "assistant", "content": [{"text": "こんにちは！"}]},
-            ]
-
-        mock_sm.initialize.side_effect = init_side_effect
+        # read_messages returns DynamoDB-format messages
+        mock_sm.read_messages.return_value = [
+            {
+                "role": "assistant",
+                "content": "こんにちは！",
+                "timestamp": "2026-01-01T00:00:00+00:00",
+                "related_cards": [],
+            },
+        ]
 
         with patch.dict(os.environ, {
             "TUTOR_SESSIONS_TABLE": "memoru-tutor-sessions-test",
@@ -973,11 +1023,8 @@ class TestGetSessionWithSessionManager:
         mock_sm = MagicMock()
         mock_sm_factory.return_value = mock_sm
 
-        # initialize() sets empty messages
-        def init_side_effect(agent, session_id=None):
-            agent.messages = []
-
-        mock_sm.initialize.side_effect = init_side_effect
+        # read_messages returns empty list
+        mock_sm.read_messages.return_value = []
 
         with patch.dict(os.environ, {
             "TUTOR_SESSIONS_TABLE": "memoru-tutor-sessions-test",
@@ -1016,8 +1063,10 @@ class TestGetSessionWithSessionManager:
             call_count["n"] += 1
             if call_count["n"] == 1:
                 return mock_sm_start
-            # For get_session, raise an error
-            raise RuntimeError("SessionManager init failed")
+            # For get_session, return a SM that fails on read_messages
+            mock_sm_fail = MagicMock()
+            mock_sm_fail.read_messages.side_effect = RuntimeError("SessionManager read failed")
+            return mock_sm_fail
 
         mock_sm_factory.side_effect = factory_side_effect
 
@@ -1065,25 +1114,22 @@ class TestGetSessionWithSessionManager:
     def test_get_session_multiline_content(
         self, dynamodb_tables, mock_ai_service
     ):
-        """Messages with multi-block content are joined correctly."""
+        """Messages with multiline content are preserved correctly."""
         _seed_deck(dynamodb_tables)
 
         mock_sm_factory = MagicMock()
         mock_sm = MagicMock()
         mock_sm_factory.return_value = mock_sm
 
-        def init_side_effect(agent, session_id=None):
-            agent.messages = [
-                {
-                    "role": "assistant",
-                    "content": [
-                        {"text": "最初の段落。"},
-                        {"text": "2番目の段落。"},
-                    ],
-                },
-            ]
-
-        mock_sm.initialize.side_effect = init_side_effect
+        # DynamoDB format stores content as a single string
+        mock_sm.read_messages.return_value = [
+            {
+                "role": "assistant",
+                "content": "最初の段落。\n2番目の段落。",
+                "timestamp": "2026-01-01T00:00:00+00:00",
+                "related_cards": [],
+            },
+        ]
 
         with patch.dict(os.environ, {
             "TUTOR_SESSIONS_TABLE": "memoru-tutor-sessions-test",
@@ -1107,3 +1153,46 @@ class TestGetSessionWithSessionManager:
 
         assert len(result.messages) == 1
         assert result.messages[0].content == "最初の段落。\n2番目の段落。"
+
+    def test_get_session_cleans_related_cards_tag(
+        self, dynamodb_tables, mock_ai_service
+    ):
+        """[RELATED_CARDS] tags in stored messages are cleaned on retrieval (HIGH-2)."""
+        _seed_deck(dynamodb_tables)
+
+        mock_sm_factory = MagicMock()
+        mock_sm = MagicMock()
+        mock_sm_factory.return_value = mock_sm
+
+        # SM stores messages with [RELATED_CARDS] tag (not cleaned at storage time)
+        mock_sm.read_messages.return_value = [
+            {
+                "role": "assistant",
+                "content": "appleはりんごです。 [RELATED_CARDS: card_001, card_002]",
+                "timestamp": "2026-01-01T00:00:00+00:00",
+                "related_cards": ["card_001"],
+            },
+        ]
+
+        with patch.dict(os.environ, {
+            "TUTOR_SESSIONS_TABLE": "memoru-tutor-sessions-test",
+            "DECKS_TABLE": "memoru-decks-test",
+            "CARDS_TABLE": "memoru-cards-test",
+        }):
+            from services.tutor_service import TutorService
+
+            service = TutorService(
+                table_name="memoru-tutor-sessions-test",
+                dynamodb_resource=dynamodb_tables,
+                ai_service=mock_ai_service,
+                session_manager_factory=mock_sm_factory,
+            )
+
+            session = service.start_session(
+                user_id="test-user", deck_id="deck_001", mode="free_talk"
+            )
+
+            result = service.get_session("test-user", session.session_id)
+
+        assert "[RELATED_CARDS" not in result.messages[0].content
+        assert result.messages[0].content == "appleはりんごです。"

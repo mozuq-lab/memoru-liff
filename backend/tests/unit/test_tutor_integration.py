@@ -853,7 +853,7 @@ class TestEndToEndFlow:
     def test_get_session_via_session_manager(
         self, integration_dynamodb_tables, mock_ai_service
     ):
-        """get_session retrieves messages via SessionManager."""
+        """get_session retrieves messages via SessionManager.read_messages()."""
         _seed_deck(integration_dynamodb_tables)
 
         call_count = {"n": 0}
@@ -862,24 +862,27 @@ class TestEndToEndFlow:
             call_count["n"] += 1
             sm = MagicMock()
             if call_count["n"] > 1:
-                # For get_session, populate messages via initialize
-                def init_side_effect(agent, session_id=None):
-                    agent.messages = [
-                        {
-                            "role": "assistant",
-                            "content": [{"text": "挨拶メッセージ"}],
-                        },
-                        {
-                            "role": "user",
-                            "content": [{"text": "質問です"}],
-                        },
-                        {
-                            "role": "assistant",
-                            "content": [{"text": "回答です"}],
-                        },
-                    ]
-
-                sm.initialize.side_effect = init_side_effect
+                # For get_session, return DynamoDB-format messages via read_messages
+                sm.read_messages.return_value = [
+                    {
+                        "role": "assistant",
+                        "content": "挨拶メッセージ",
+                        "timestamp": "2026-01-01T00:00:00+00:00",
+                        "related_cards": [],
+                    },
+                    {
+                        "role": "user",
+                        "content": "質問です",
+                        "timestamp": "2026-01-01T00:00:01+00:00",
+                        "related_cards": [],
+                    },
+                    {
+                        "role": "assistant",
+                        "content": "回答です",
+                        "timestamp": "2026-01-01T00:00:02+00:00",
+                        "related_cards": ["card_int_001"],
+                    },
+                ]
             return sm
 
         with patch.dict(os.environ, {
@@ -908,5 +911,7 @@ class TestEndToEndFlow:
         assert len(result.messages) == 3
         assert result.messages[0].role == "assistant"
         assert result.messages[0].content == "挨拶メッセージ"
+        assert result.messages[0].timestamp == "2026-01-01T00:00:00+00:00"
         assert result.messages[1].role == "user"
         assert result.messages[2].role == "assistant"
+        assert result.messages[2].related_cards == ["card_int_001"]

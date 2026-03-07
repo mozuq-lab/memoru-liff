@@ -141,6 +141,23 @@ class DynamoDBSessionManager:
         """Context Manager: exit."""
         self.close()
 
+    def read_messages(self) -> list[dict]:
+        """Read raw DynamoDB-format messages for this session.
+
+        Returns messages directly from DynamoDB without Strands format conversion.
+        Each message dict contains: role, content, timestamp, related_cards.
+
+        Returns:
+            List of DynamoDB-format message dicts.
+        """
+        response = self.table.get_item(
+            Key={"user_id": self.user_id, "session_id": self.session_id}
+        )
+        item = response.get("Item")
+        if not item:
+            return []
+        return item.get("messages", [])
+
     # ---- Format conversion helpers ----
 
     @staticmethod

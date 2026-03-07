@@ -20,7 +20,7 @@ from models.tutor import (
     TutorSessionResponse,
 )
 from services.prompts.tutor import format_cards_context, get_system_prompt
-from services.tutor_ai_service import create_tutor_ai_service
+from services.tutor_ai_service import clean_response_text, create_tutor_ai_service
 from services.tutor_session_factory import create_tutor_session_manager
 
 logger = Logger()
@@ -174,6 +174,18 @@ class TutorService:
                 messages="セッションを開始してください。デッキの内容を要約して挨拶してください。",
                 session_manager=sm,
             )
+        except Exception:
+            # Rollback: remove the incomplete session to avoid orphaned records
+            try:
+                self.table.delete_item(
+                    Key={"user_id": user_id, "session_id": session_id}
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to cleanup session after AI error",
+                    extra={"session_id": session_id},
+                )
+            raise
         finally:
             sm.close()
         greeting_content = self.ai_service.clean_response_text(greeting_content)
@@ -458,8 +470,9 @@ class TutorService:
     ) -> list[TutorMessage]:
         """Get conversation messages via SessionManager.
 
-        Uses SessionManager.initialize() to restore messages from the backing
-        store, then converts from Strands format to TutorMessage format.
+        Uses SessionManager.read_messages() (DynamoDB backend) or
+        initialize() (other backends) to restore messages, then converts
+        to TutorMessage format with clean_response_text applied.
         Falls back to DynamoDB item's messages field on any error.
 
         Args:
@@ -472,36 +485,57 @@ class TutorService:
         """
         try:
             sm = self.session_manager_factory(session_id=session_id, user_id=user_id)
+            try:
+                if hasattr(sm, "read_messages") and callable(sm.read_messages):
+                    # DynamoDB backend: read raw messages preserving metadata
+                    raw_messages = sm.read_messages()
+                    messages: list[TutorMessage] = []
+                    for msg in raw_messages:
+                        content_str = clean_response_text(
+                            msg.get("content", "")
+                        )
+                        messages.append(
+                            TutorMessage(
+                                role=msg["role"],
+                                content=content_str,
+                                related_cards=msg.get("related_cards", []),
+                                timestamp=msg.get("timestamp", ""),
+                            )
+                        )
+                    return messages
 
-            # Use a lightweight holder to receive messages from initialize()
-            class _MessageHolder:
-                def __init__(self):
-                    self.messages: list[dict] = []
+                # Other backends: use initialize() with lightweight holder
+                class _Holder:
+                    def __init__(self):
+                        self.messages: list[dict] = []
 
-            holder = _MessageHolder()
-            sm.initialize(holder)
-            sm.close()
+                holder = _Holder()
+                sm.initialize(holder)
 
-            # Convert Strands format to TutorMessage format
-            messages: list[TutorMessage] = []
-            for msg in holder.messages:
-                content = msg.get("content", [])
-                if isinstance(content, list):
-                    text_parts = [
-                        block["text"] for block in content if "text" in block
-                    ]
-                    content_str = "\n".join(text_parts)
-                else:
-                    content_str = str(content)
-                messages.append(
-                    TutorMessage(
-                        role=msg["role"],
-                        content=content_str,
-                        related_cards=[],
-                        timestamp="",
+                messages = []
+                for msg in holder.messages:
+                    content = msg.get("content", [])
+                    if isinstance(content, list):
+                        text_parts = [
+                            block["text"]
+                            for block in content
+                            if "text" in block
+                        ]
+                        content_str = "\n".join(text_parts)
+                    else:
+                        content_str = str(content)
+                    content_str = clean_response_text(content_str)
+                    messages.append(
+                        TutorMessage(
+                            role=msg["role"],
+                            content=content_str,
+                            related_cards=[],
+                            timestamp="",
+                        )
                     )
-                )
-            return messages
+                return messages
+            finally:
+                sm.close()
         except Exception:
             # SessionManager failure: fall back to DynamoDB messages field
             logger.warning(

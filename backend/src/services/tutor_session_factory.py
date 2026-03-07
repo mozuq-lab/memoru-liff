@@ -9,12 +9,13 @@ from __future__ import annotations
 import os
 import sys
 
+import boto3
 from aws_lambda_powertools import Logger
 
 logger = Logger()
 
-# Singleton for AgentCore MemoryClient
-_agentcore_client = None
+# Singleton for AgentCore boto3 Session
+_agentcore_boto_session = None
 
 # These will be populated by lazy imports or overridden by test patches (create=True).
 # Using module-level names so unittest.mock.patch can intercept them.
@@ -54,13 +55,12 @@ def _ensure_dynamodb_imports():
         _mod.DynamoDBSessionManager = _DSM
 
 
-def _get_agentcore_client():
-    """Return a singleton MemoryClient instance (lazy initialization)."""
-    global _agentcore_client
-    if _agentcore_client is None:
-        _ensure_agentcore_imports()
-        _agentcore_client = MemoryClient()
-    return _agentcore_client
+def _get_agentcore_boto_session():
+    """Return a singleton boto3.Session for AgentCore (lazy initialization)."""
+    global _agentcore_boto_session
+    if _agentcore_boto_session is None:
+        _agentcore_boto_session = boto3.Session()
+    return _agentcore_boto_session
 
 
 def create_tutor_session_manager(
@@ -104,14 +104,14 @@ def create_tutor_session_manager(
                 "AGENTCORE_MEMORY_ID is required for agentcore backend"
             )
 
-        client = _get_agentcore_client()
+        boto_session = _get_agentcore_boto_session()
 
         config = AgentCoreMemoryConfig(
             memory_id=memory_id,
             session_id=session_id,
             actor_id=user_id,
         )
-        return AgentCoreMemorySessionManager(config, memory_client=client)
+        return AgentCoreMemorySessionManager(config, boto_session=boto_session)
 
     elif backend == "dynamodb":
         _ensure_dynamodb_imports()

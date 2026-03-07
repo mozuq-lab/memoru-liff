@@ -416,6 +416,10 @@ Resources:
                 Action:
                   - bedrock-agentcore:InvokeMemory
                   - bedrock-agentcore:RetrieveMemory
+                  - bedrock-agentcore:CreateEvent
+                  - bedrock-agentcore:GetEvent
+                  - bedrock-agentcore:ListEvents
+                  - bedrock-agentcore:RetrieveMemoryRecords
                 Resource: "*"
           - !Ref AWS::NoValue
       Environment:

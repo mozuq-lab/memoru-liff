@@ -573,6 +573,85 @@ class TestConstructor:
 class TestRoundTripConversion:
     """Test message round-trip: Strands -> DynamoDB -> Strands."""
 
+class TestReadMessages:
+    """Tests for DynamoDBSessionManager.read_messages."""
+
+    def test_read_messages_returns_dynamo_format(self):
+        """read_messages should return raw DynamoDB-format messages."""
+        from services.tutor_session_manager import DynamoDBSessionManager
+
+        dynamo_messages = [
+            _make_dynamo_message("user", "hello", timestamp="2026-01-01T00:00:00+00:00"),
+            _make_dynamo_message("assistant", "hi there", related_cards=["card_001"]),
+        ]
+        table = _make_mock_table(item={
+            "user_id": "user1",
+            "session_id": "sess1",
+            "messages": dynamo_messages,
+        })
+        dynamodb = _make_mock_dynamodb(table)
+
+        sm = DynamoDBSessionManager(
+            table_name="test-table",
+            session_id="sess1",
+            user_id="user1",
+            dynamodb_resource=dynamodb,
+        )
+        result = sm.read_messages()
+
+        assert len(result) == 2
+        assert result[0]["role"] == "user"
+        assert result[0]["content"] == "hello"
+        assert result[0]["timestamp"] == "2026-01-01T00:00:00+00:00"
+        assert result[1]["role"] == "assistant"
+        assert result[1]["related_cards"] == ["card_001"]
+
+    def test_read_messages_no_item(self):
+        """read_messages should return empty list if item does not exist."""
+        from services.tutor_session_manager import DynamoDBSessionManager
+
+        table = _make_mock_table(item=None)
+        dynamodb = _make_mock_dynamodb(table)
+
+        sm = DynamoDBSessionManager(
+            table_name="test-table",
+            session_id="nonexistent",
+            user_id="user1",
+            dynamodb_resource=dynamodb,
+        )
+        result = sm.read_messages()
+
+        assert result == []
+
+    def test_read_messages_no_messages_key(self):
+        """read_messages should return empty list if item has no messages key."""
+        from services.tutor_session_manager import DynamoDBSessionManager
+
+        table = _make_mock_table(item={
+            "user_id": "user1",
+            "session_id": "sess1",
+        })
+        dynamodb = _make_mock_dynamodb(table)
+
+        sm = DynamoDBSessionManager(
+            table_name="test-table",
+            session_id="sess1",
+            user_id="user1",
+            dynamodb_resource=dynamodb,
+        )
+        result = sm.read_messages()
+
+        assert result == []
+
+
+# ===================================================================
+# Round-trip conversion test
+# ===================================================================
+
+
+class TestRoundTripConversion:
+    """Test message round-trip: Strands -> DynamoDB -> Strands."""
+
     def test_roundtrip_preserves_content(self):
         """Converting Strands->DynamoDB->Strands should preserve role and text content."""
         from services.tutor_session_manager import DynamoDBSessionManager
