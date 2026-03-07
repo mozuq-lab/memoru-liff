@@ -23,10 +23,15 @@ import type {
   ForecastResponse,
   BrowserProfile,
   BrowserProfileListResponse,
-} from '@/types';
-import { authService } from './auth';
+  TutorSession,
+  StartSessionRequest,
+  SendMessageRequest,
+  SendMessageResponse,
+  SessionListResponse,
+} from "@/types";
+import { authService } from "./auth";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
 
 class ApiClient {
   private accessToken: string | null = null;
@@ -40,15 +45,16 @@ class ApiClient {
   private async request<T>(
     endpoint: string,
     options: RequestInit = {},
-    _isRetry = false
+    _isRetry = false,
   ): Promise<T> {
     const headers: HeadersInit = {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
       ...options.headers,
     };
 
     if (this.accessToken) {
-      (headers as Record<string, string>)['Authorization'] = `Bearer ${this.accessToken}`;
+      (headers as Record<string, string>)["Authorization"] =
+        `Bearer ${this.accessToken}`;
     }
 
     const response = await fetch(`${API_BASE_URL}${endpoint}`, {
@@ -61,7 +67,7 @@ class ApiClient {
       if (_isRetry) {
         // リトライ後も 401 - ログイン画面にリダイレクト
         authService.login();
-        throw new Error('Session expired');
+        throw new Error("Session expired");
       }
 
       if (!this.isRefreshing) {
@@ -75,7 +81,7 @@ class ApiClient {
       } catch {
         // リフレッシュ失敗 - ログイン画面にリダイレクト
         authService.login();
-        throw new Error('Session expired');
+        throw new Error("Session expired");
       } finally {
         this.isRefreshing = false;
         this.refreshPromise = null;
@@ -83,8 +89,12 @@ class ApiClient {
     }
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ message: 'Unknown error' }));
-      throw new Error(error.message || `HTTP ${response.status}`);
+      const error = await response
+        .json()
+        .catch(() => ({ message: "Unknown error" }));
+      throw new Error(
+        error.error || error.message || `HTTP ${response.status}`,
+      );
     }
 
     if (response.status === 204) {
@@ -111,9 +121,11 @@ class ApiClient {
   async getCards(deckId?: string): Promise<Card[]> {
     // 【クエリ文字列構築】: deckId が指定された場合のみ deck_id パラメータを追加
     const searchParams = new URLSearchParams();
-    if (deckId) searchParams.set('deck_id', deckId);
+    if (deckId) searchParams.set("deck_id", deckId);
     const qs = searchParams.toString();
-    const response = await this.request<{ cards: Card[] }>(`/cards${qs ? `?${qs}` : ''}`);
+    const response = await this.request<{ cards: Card[] }>(
+      `/cards${qs ? `?${qs}` : ""}`,
+    );
     return response.cards;
   }
 
@@ -122,28 +134,31 @@ class ApiClient {
   }
 
   async createCard(data: CreateCardRequest): Promise<Card> {
-    return this.request<Card>('/cards', {
-      method: 'POST',
+    return this.request<Card>("/cards", {
+      method: "POST",
       body: JSON.stringify(data),
     });
   }
 
   async updateCard(id: string, data: UpdateCardRequest): Promise<Card> {
     return this.request<Card>(`/cards/${id}`, {
-      method: 'PUT',
+      method: "PUT",
       body: JSON.stringify(data),
     });
   }
 
   async deleteCard(id: string): Promise<void> {
     await this.request<void>(`/cards/${id}`, {
-      method: 'DELETE',
+      method: "DELETE",
     });
   }
 
-  async generateCards(data: GenerateCardsRequest, options?: { signal?: AbortSignal }): Promise<GenerateCardsResponse> {
-    return this.request<GenerateCardsResponse>('/cards/generate', {
-      method: 'POST',
+  async generateCards(
+    data: GenerateCardsRequest,
+    options?: { signal?: AbortSignal },
+  ): Promise<GenerateCardsResponse> {
+    return this.request<GenerateCardsResponse>("/cards/generate", {
+      method: "POST",
       body: JSON.stringify(data),
       signal: options?.signal,
     });
@@ -157,20 +172,26 @@ class ApiClient {
     });
   }
 
-  async refineCard(data: RefineCardRequest, options?: { signal?: AbortSignal }): Promise<RefineCardResponse> {
-    return this.request<RefineCardResponse>('/cards/refine', {
-      method: 'POST',
+  async refineCard(
+    data: RefineCardRequest,
+    options?: { signal?: AbortSignal },
+  ): Promise<RefineCardResponse> {
+    return this.request<RefineCardResponse>("/cards/refine", {
+      method: "POST",
       body: JSON.stringify(data),
       signal: options?.signal,
     });
   }
 
-  async getDueCards(limit?: number, deckId?: string): Promise<DueCardsResponse> {
+  async getDueCards(
+    limit?: number,
+    deckId?: string,
+  ): Promise<DueCardsResponse> {
     const searchParams = new URLSearchParams();
-    if (limit) searchParams.set('limit', String(limit));
-    if (deckId) searchParams.set('deck_id', deckId);
+    if (limit) searchParams.set("limit", String(limit));
+    if (deckId) searchParams.set("deck_id", deckId);
     const qs = searchParams.toString();
-    return this.request<DueCardsResponse>(`/cards/due${qs ? `?${qs}` : ''}`);
+    return this.request<DueCardsResponse>(`/cards/due${qs ? `?${qs}` : ""}`);
   }
 
   async getDueCount(): Promise<number> {
@@ -181,85 +202,138 @@ class ApiClient {
   // レビュー API
   async submitReview(cardId: string, grade: number): Promise<ReviewResponse> {
     return this.request<ReviewResponse>(`/reviews/${cardId}`, {
-      method: 'POST',
+      method: "POST",
       body: JSON.stringify({ grade }),
     });
   }
 
   async undoReview(cardId: string): Promise<UndoReviewResponse> {
     return this.request<UndoReviewResponse>(`/reviews/${cardId}/undo`, {
-      method: 'POST',
+      method: "POST",
     });
   }
 
   // ユーザー API
   async getCurrentUser(): Promise<User> {
-    return this.request<User>('/users/me');
+    return this.request<User>("/users/me");
   }
 
   async updateUser(data: UpdateUserRequest): Promise<User> {
-    return this.request<User>('/users/me/settings', {
-      method: 'PUT',
+    return this.request<User>("/users/me/settings", {
+      method: "PUT",
       body: JSON.stringify(data),
     });
   }
 
   async linkLine(data: LinkLineRequest): Promise<User> {
-    return this.request<User>('/users/link-line', {
-      method: 'POST',
+    return this.request<User>("/users/link-line", {
+      method: "POST",
       body: JSON.stringify(data),
     });
   }
 
   async unlinkLine(): Promise<User> {
-    return this.request<User>('/users/me/unlink-line', {
-      method: 'POST',
+    return this.request<User>("/users/me/unlink-line", {
+      method: "POST",
     });
   }
 
   // デッキ API
   async getDecks(): Promise<Deck[]> {
-    const response = await this.request<DeckListResponse>('/decks');
+    const response = await this.request<DeckListResponse>("/decks");
     return response.decks;
   }
 
   async createDeck(data: CreateDeckRequest): Promise<Deck> {
-    return this.request<Deck>('/decks', {
-      method: 'POST',
+    return this.request<Deck>("/decks", {
+      method: "POST",
       body: JSON.stringify(data),
     });
   }
 
   async updateDeck(id: string, data: UpdateDeckRequest): Promise<Deck> {
     return this.request<Deck>(`/decks/${id}`, {
-      method: 'PUT',
+      method: "PUT",
       body: JSON.stringify(data),
     });
   }
 
   async deleteDeck(id: string): Promise<void> {
     await this.request<void>(`/decks/${id}`, {
-      method: 'DELETE',
+      method: "DELETE",
     });
   }
 
   // 統計 API
   async getStats(): Promise<StatsResponse> {
-    return this.request<StatsResponse>('/stats');
+    return this.request<StatsResponse>("/stats");
   }
 
   async getWeakCards(limit?: number): Promise<WeakCardsResponse> {
     const searchParams = new URLSearchParams();
-    if (limit) searchParams.set('limit', String(limit));
+    if (limit) searchParams.set("limit", String(limit));
     const qs = searchParams.toString();
-    return this.request<WeakCardsResponse>(`/stats/weak-cards${qs ? `?${qs}` : ''}`);
+    return this.request<WeakCardsResponse>(
+      `/stats/weak-cards${qs ? `?${qs}` : ""}`,
+    );
   }
 
   async getForecast(days?: number): Promise<ForecastResponse> {
     const searchParams = new URLSearchParams();
-    if (days) searchParams.set('days', String(days));
+    if (days) searchParams.set("days", String(days));
     const qs = searchParams.toString();
-    return this.request<ForecastResponse>(`/stats/forecast${qs ? `?${qs}` : ''}`);
+    return this.request<ForecastResponse>(
+      `/stats/forecast${qs ? `?${qs}` : ""}`,
+    );
+  }
+
+  // Tutor API
+  async startTutorSession(data: StartSessionRequest): Promise<TutorSession> {
+    return this.request<TutorSession>("/tutor/sessions", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async sendTutorMessage(
+    sessionId: string,
+    data: SendMessageRequest,
+  ): Promise<SendMessageResponse> {
+    return this.request<SendMessageResponse>(
+      `/tutor/sessions/${encodeURIComponent(sessionId)}/messages`,
+      {
+        method: "POST",
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async endTutorSession(sessionId: string): Promise<TutorSession> {
+    return this.request<TutorSession>(
+      `/tutor/sessions/${encodeURIComponent(sessionId)}`,
+      {
+        method: "DELETE",
+      },
+    );
+  }
+
+  async listTutorSessions(
+    status?: string,
+    deckId?: string,
+  ): Promise<SessionListResponse> {
+    const params = new URLSearchParams();
+    if (status) params.set("status", status);
+    if (deckId) params.set("deck_id", deckId);
+    const qs = params.toString();
+    return this.request<SessionListResponse>(
+      `/tutor/sessions${qs ? `?${qs}` : ""}`,
+    );
+  }
+
+  async getTutorSession(sessionId: string): Promise<TutorSession> {
+    return this.request<TutorSession>(
+      `/tutor/sessions/${encodeURIComponent(sessionId)}`,
+    );
   }
 
   // Browser Profile API
@@ -283,13 +357,15 @@ class ApiClient {
 }
 
 export const apiClient = new ApiClient();
+export * from "./tutor-api";
 
 export const cardsApi = {
   // 【deckId 対応】: deckId パラメータを API クライアントに転送 🔵
   getCards: (deckId?: string) => apiClient.getCards(deckId),
   getCard: (id: string) => apiClient.getCard(id),
   createCard: (data: CreateCardRequest) => apiClient.createCard(data),
-  updateCard: (id: string, data: UpdateCardRequest) => apiClient.updateCard(id, data),
+  updateCard: (id: string, data: UpdateCardRequest) =>
+    apiClient.updateCard(id, data),
   deleteCard: (id: string) => apiClient.deleteCard(id),
   generateCards: (data: GenerateCardsRequest, options?: { signal?: AbortSignal }) => apiClient.generateCards(data, options),
   generateFromUrl: (data: GenerateFromUrlRequest, options?: { signal?: AbortSignal }) => apiClient.generateFromUrl(data, options),
@@ -301,12 +377,14 @@ export const cardsApi = {
 export const decksApi = {
   getDecks: () => apiClient.getDecks(),
   createDeck: (data: CreateDeckRequest) => apiClient.createDeck(data),
-  updateDeck: (id: string, data: UpdateDeckRequest) => apiClient.updateDeck(id, data),
+  updateDeck: (id: string, data: UpdateDeckRequest) =>
+    apiClient.updateDeck(id, data),
   deleteDeck: (id: string) => apiClient.deleteDeck(id),
 };
 
 export const reviewsApi = {
-  submitReview: (cardId: string, grade: number) => apiClient.submitReview(cardId, grade),
+  submitReview: (cardId: string, grade: number) =>
+    apiClient.submitReview(cardId, grade),
   undoReview: (cardId: string) => apiClient.undoReview(cardId),
 };
 

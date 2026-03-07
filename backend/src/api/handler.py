@@ -21,6 +21,7 @@ from api.handlers.review_handler import router as review_router
 from api.handlers.ai_handler import router as ai_router
 from api.handlers.stats_handler import router as stats_router
 from api.handlers.browser_profile_handler import router as browser_profile_router
+from api.handlers.tutor_handler import router as tutor_router
 
 # Standalone handler dependencies
 from models.grading import GradeAnswerRequest, GradeAnswerResponse
@@ -42,6 +43,7 @@ app.include_router(review_router)
 app.include_router(ai_router)
 app.include_router(stats_router)
 app.include_router(browser_profile_router)
+app.include_router(tutor_router)
 
 # Services for standalone Lambda handlers
 card_service = CardService()
