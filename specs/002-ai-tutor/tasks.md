@@ -63,19 +63,19 @@
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T012a [P] [US1] Component tests for TutorContext (session state, API integration, error handling) in `frontend/src/contexts/__tests__/TutorContext.test.tsx`
-- [ ] T012b [P] [US1] Component tests for ModeSelector, ChatMessage, ChatInput in `frontend/src/components/tutor/__tests__/`
+- [x] T012a [P] [US1] Component tests for TutorContext (session state, API integration, error handling) in `frontend/src/contexts/__tests__/TutorContext.test.tsx`
+- [x] T012b [P] [US1] Component tests for ModeSelector, ChatMessage, ChatInput in `frontend/src/components/tutor/__tests__/`
 
 ### Implementation for User Story 1
 
-- [ ] T012 [US1] Create TutorContext (session state, messages, loading, error, startSession, sendMessage, endSession actions) in `frontend/src/contexts/TutorContext.tsx`
-- [ ] T013 [US1] Create ModeSelector component (Free Talk / Quiz / Weak Point Focus mode selection UI with icons and descriptions) in `frontend/src/components/tutor/ModeSelector.tsx`
-- [ ] T014 [P] [US1] Create ChatMessage component (user/assistant message styling, timestamp display, Tailwind chat bubble UI) in `frontend/src/components/tutor/ChatMessage.tsx`
-- [ ] T015 [P] [US1] Create ChatInput component (text input with send button, empty message prevention, disabled state during loading, max 2000 chars) in `frontend/src/components/tutor/ChatInput.tsx`
-- [ ] T016 [US1] Create TutorPage with mode selection → chat UI flow (ModeSelector → ChatMessage list → ChatInput, loading indicator, error handling with retry) in `frontend/src/pages/TutorPage.tsx`
-- [ ] T017 [US1] Add `/tutor/:deckId` route (ProtectedRoute) to `frontend/src/App.tsx`
-- [ ] T018 [US1] Add "AI Tutor" navigation button to deck view in `frontend/src/pages/HomePage.tsx` (2 taps to start session per SC-005)
-- [ ] T019 [US1] Wire TutorProvider into App component tree in `frontend/src/App.tsx`
+- [x] T012 [US1] Create TutorContext (session state, messages, loading, error, startSession, sendMessage, endSession actions) in `frontend/src/contexts/TutorContext.tsx`
+- [x] T013 [US1] Create ModeSelector component (Free Talk / Quiz / Weak Point Focus mode selection UI with icons and descriptions) in `frontend/src/components/tutor/ModeSelector.tsx`
+- [x] T014 [P] [US1] Create ChatMessage component (user/assistant message styling, timestamp display, Tailwind chat bubble UI) in `frontend/src/components/tutor/ChatMessage.tsx`
+- [x] T015 [P] [US1] Create ChatInput component (text input with send button, empty message prevention, disabled state during loading, max 2000 chars) in `frontend/src/components/tutor/ChatInput.tsx`
+- [x] T016 [US1] Create TutorPage with mode selection → chat UI flow (ModeSelector → ChatMessage list → ChatInput, loading indicator, error handling with retry) in `frontend/src/pages/TutorPage.tsx`
+- [x] T017 [US1] Add `/tutor/:deckId` route (ProtectedRoute) to `frontend/src/App.tsx`
+- [x] T018 [US1] Add "AI Tutor" navigation button to deck view in `frontend/src/pages/HomePage.tsx` (2 taps to start session per SC-005)
+- [x] T019 [US1] Wire TutorProvider into App component tree in `frontend/src/App.tsx`
 
 **Checkpoint**: Free Talk セッションが完全に動作し、独立してテスト可能
 
@@ -89,13 +89,13 @@
 
 ### Implementation for User Story 4
 
-- [ ] T020 [US4] Add session continuation logic (fetch active session on TutorPage mount, resume if exists) to `frontend/src/contexts/TutorContext.tsx`
-- [ ] T021 [US4] Create SessionList component (recent ended sessions list, read-only, tap to view conversation history) in `frontend/src/components/tutor/SessionList.tsx`
-- [ ] T022 [US4] Add session list view and session history viewer to `frontend/src/pages/TutorPage.tsx`
-- [ ] T023 [US4] Add message limit reached UI (display limit message, suggest starting new session) to `frontend/src/pages/TutorPage.tsx`
-- [ ] T024 [US4] Add client-side timeout detection (30 min inactivity → show timeout message) to `frontend/src/contexts/TutorContext.tsx`
-- [ ] T025 [US4] Add session end button and confirmation to TutorPage chat header in `frontend/src/pages/TutorPage.tsx`
-- [ ] T025a [US4] Add mode switch handling (start new session when switching modes mid-session, per FR-012) to `frontend/src/pages/TutorPage.tsx`
+- [x] T020 [US4] Add session continuation logic (fetch active session on TutorPage mount, resume if exists) to `frontend/src/contexts/TutorContext.tsx`
+- [x] T021 [US4] Create SessionList component (recent ended sessions list, read-only, tap to view conversation history) in `frontend/src/components/tutor/SessionList.tsx`
+- [x] T022 [US4] Add session list view and session history viewer to `frontend/src/pages/TutorPage.tsx`
+- [x] T023 [US4] Add message limit reached UI (display limit message, suggest starting new session) to `frontend/src/pages/TutorPage.tsx`
+- [x] T024 [US4] Add client-side timeout detection (30 min inactivity → show timeout message) to `frontend/src/contexts/TutorContext.tsx`
+- [x] T025 [US4] Add session end button and confirmation to TutorPage chat header in `frontend/src/pages/TutorPage.tsx`
+- [x] T025a [US4] Add mode switch handling (start new session when switching modes mid-session, per FR-012) to `frontend/src/pages/TutorPage.tsx`
 
 **Checkpoint**: セッション管理（継続・終了・履歴・上限・タイムアウト・モード切替）が完全に動作
 
