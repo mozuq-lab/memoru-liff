@@ -71,7 +71,7 @@ TASK-0161 → TASK-0162 → TASK-0163
 
 ### タスク一覧
 
-- [ ] [TASK-0164: DynamoDBSessionManager 実装](TASK-0164.md) - 8h (TDD) 🔵
+- [x] [TASK-0164: DynamoDBSessionManager 実装](TASK-0164.md) - 8h (TDD) 🔵
 - [x] [TASK-0165: StrandsTutorAIService SessionManager 対応](TASK-0165.md) - 6h (TDD) 🔵
 
 ### 依存関係
