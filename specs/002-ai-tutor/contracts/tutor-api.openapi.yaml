@@ -1,0 +1,290 @@
+openapi: "3.0.3"
+info:
+  title: Memoru AI Tutor API
+  version: "1.0.0"
+  description: >
+    AI Tutor endpoints for interactive learning sessions.
+    Supports free talk, quiz, and weak point focus modes.
+
+paths:
+  /tutor/sessions:
+    post:
+      operationId: createTutorSession
+      summary: Start a new tutor session
+      description: >
+        Creates a new AI tutor session for the specified deck and learning mode.
+        Any existing active session for the user is automatically ended.
+      tags: [tutor]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartSessionRequest"
+      responses:
+        "201":
+          description: Session created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TutorSessionResponse"
+        "422":
+          description: Validation error (invalid mode, missing deck_id)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    get:
+      operationId: listTutorSessions
+      summary: List tutor sessions
+      description: >
+        Returns tutor sessions for the authenticated user within the retention period.
+        Messages are omitted in list view; use GET /sessions/{sessionId} for full history.
+      tags: [tutor]
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [active, ended, timed_out]
+        - name: deck_id
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionListResponse"
+
+  /tutor/sessions/{sessionId}:
+    get:
+      operationId: getTutorSession
+      summary: Get session details
+      description: Returns full session details including conversation history.
+      tags: [tutor]
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TutorSessionResponse"
+        "404":
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    delete:
+      operationId: endTutorSession
+      summary: End a tutor session
+      description: Explicitly ends an active tutor session.
+      tags: [tutor]
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session ended
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TutorSessionResponse"
+        "404":
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Session already ended
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /tutor/sessions/{sessionId}/messages:
+    post:
+      operationId: sendTutorMessage
+      summary: Send a message to the tutor
+      description: >
+        Sends a user message and receives an AI response.
+        Returns 409 if the session is ended or timed out.
+      tags: [tutor]
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendMessageRequest"
+      responses:
+        "200":
+          description: AI response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SendMessageResponse"
+        "404":
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Session ended or timed out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Validation error (empty content)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    LearningMode:
+      type: string
+      enum: [free_talk, quiz, weak_point]
+
+    StartSessionRequest:
+      type: object
+      required: [deck_id, mode]
+      properties:
+        deck_id:
+          type: string
+        mode:
+          $ref: "#/components/schemas/LearningMode"
+
+    SendMessageRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+          minLength: 1
+          maxLength: 2000
+
+    TutorMessage:
+      type: object
+      required: [role, content, related_cards, timestamp]
+      properties:
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+        related_cards:
+          type: array
+          items:
+            type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    TutorSessionResponse:
+      type: object
+      required:
+        [
+          session_id,
+          deck_id,
+          mode,
+          status,
+          messages,
+          message_count,
+          created_at,
+          updated_at,
+        ]
+      properties:
+        session_id:
+          type: string
+        deck_id:
+          type: string
+        mode:
+          $ref: "#/components/schemas/LearningMode"
+        status:
+          type: string
+          enum: [active, ended, timed_out]
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/TutorMessage"
+        message_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    SendMessageResponse:
+      type: object
+      required: [message, session_id, message_count, is_limit_reached]
+      properties:
+        message:
+          $ref: "#/components/schemas/TutorMessage"
+        session_id:
+          type: string
+        message_count:
+          type: integer
+        is_limit_reached:
+          type: boolean
+
+    SessionListResponse:
+      type: object
+      required: [sessions, total]
+      properties:
+        sessions:
+          type: array
+          items:
+            $ref: "#/components/schemas/TutorSessionResponse"
+        total:
+          type: integer
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        details:
+          type: array
+          items:
+            type: object
+
+security:
+  - bearerAuth: []

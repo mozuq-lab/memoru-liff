@@ -191,9 +191,14 @@ def test_total_http_api_event_count(api_events):
     22. ListBrowserProfiles  - GET /browser-profiles
     23. CreateBrowserProfile - POST /browser-profiles
     24. DeleteBrowserProfile - DELETE /browser-profiles/{profileId}
+    25. CreateTutorSession  - POST /tutor/sessions
+    26. SendTutorMessage    - POST /tutor/sessions/{sessionId}/messages
+    27. EndTutorSession     - DELETE /tutor/sessions/{sessionId}
+    28. ListTutorSessions   - GET /tutor/sessions
+    29. GetTutorSession     - GET /tutor/sessions/{sessionId}
     """
-    assert len(api_events) == 24, (
-        f"期待: 24 イベント、実際: {len(api_events)} イベント\n"
+    assert len(api_events) == 29, (
+        f"期待: 29 イベント、実際: {len(api_events)} イベント\n"
         f"現在のイベント: {list(api_events.keys())}"
     )
 
@@ -309,7 +314,7 @@ def test_event_path_and_method(api_events, event_name, expected_path, expected_m
 def test_no_duplicate_event_names(sam_template):
     """TC-042-09: 品質 - イベント名の重複がないこと
 
-    YAML で重複キーは後勝ちになるため、イベント数が期待通りの 24 個かで検証する。
+    YAML で重複キーは後勝ちになるため、イベント数が期待通りの 29 個かで検証する。
     """
     events = sam_template["Resources"]["ApiFunction"]["Properties"]["Events"]
     http_api_events = {
@@ -317,8 +322,8 @@ def test_no_duplicate_event_names(sam_template):
         if ev.get("Type") == "HttpApi"
     }
     # YAML で重複キーは後勝ちになるため、パース後にイベント数が期待通りかで検証
-    assert len(http_api_events) == 24, (
-        f"期待: 24 イベント, 実際: {len(http_api_events)} イベント\n"
+    assert len(http_api_events) == 29, (
+        f"期待: 29 イベント, 実際: {len(http_api_events)} イベント\n"
         f"イベント: {list(http_api_events.keys())}"
     )
 

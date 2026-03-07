@@ -17,10 +17,10 @@
 
 **Purpose**: DynamoDB テーブル定義、Pydantic モデル、API ルーティング、フロントエンド型定義など共通基盤の構築
 
-- [ ] T001 Add TutorSessionsTable (PK: user_id, SK: session_id, GSI: user_id-status-index) and IAM policies to `backend/template.yaml`
-- [ ] T002 [P] Create Pydantic models (TutorMessage, TutorSessionResponse, StartSessionRequest, SendMessageRequest, SendMessageResponse, SessionListResponse) in `backend/src/models/tutor.py`
-- [ ] T003 [P] Create TypeScript type definitions (TutorSession, TutorMessage, StartSessionRequest, SendMessageRequest, SendMessageResponse, SessionListResponse, LearningMode) in `frontend/src/types/tutor.ts`
-- [ ] T004 [P] Export tutor types from `frontend/src/types/index.ts`
+- [x] T001 Add TutorSessionsTable (PK: user_id, SK: session_id, GSI: user_id-status-index) and IAM policies to `backend/template.yaml`
+- [x] T002 [P] Create Pydantic models (TutorMessage, TutorSessionResponse, StartSessionRequest, SendMessageRequest, SendMessageResponse, SessionListResponse) in `backend/src/models/tutor.py`
+- [x] T003 [P] Create TypeScript type definitions (TutorSession, TutorMessage, StartSessionRequest, SendMessageRequest, SendMessageResponse, SessionListResponse, LearningMode) in `frontend/src/types/tutor.ts`
+- [x] T004 [P] Export tutor types from `frontend/src/types/index.ts`
 
 ---
 
@@ -34,20 +34,20 @@
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T005a [P] Unit tests for tutor prompts (mode-specific prompt generation, card context injection, language-matching instruction) in `backend/tests/unit/test_tutor_prompts.py`
-- [ ] T006a [P] Unit tests for TutorAIService (Bedrock API call, multi-turn conversation, related card extraction) in `backend/tests/unit/test_tutor_ai_service.py`
-- [ ] T007a [P] Unit tests for TutorService (start_session, send_message, end_session, timeout check, message limit, auto-end active session, TTL) in `backend/tests/unit/test_tutor_service.py`
-- [ ] T008a [P] Unit tests for tutor handler (all endpoints, error responses including 409 for ended sessions, auth) in `backend/tests/unit/test_tutor_handler.py`
+- [x] T005a [P] Unit tests for tutor prompts (mode-specific prompt generation, card context injection, language-matching instruction) in `backend/tests/unit/test_tutor_prompts.py`
+- [x] T006a [P] Unit tests for TutorAIService (Bedrock API call, multi-turn conversation, related card extraction) in `backend/tests/unit/test_tutor_ai_service.py`
+- [x] T007a [P] Unit tests for TutorService (start_session, send_message, end_session, timeout check, message limit, auto-end active session, TTL) in `backend/tests/unit/test_tutor_service.py`
+- [x] T008a [P] Unit tests for tutor handler (all endpoints, error responses including 409 for ended sessions, auth) in `backend/tests/unit/test_tutor_handler.py`
 
 ### Implementation for Foundational Phase
 
-- [ ] T005 Create mode-specific system prompt templates (free_talk, quiz, weak_point) with card context injection and language-matching instruction (respond in the same language as card content per FR-017) in `backend/src/services/prompts/tutor.py`
-- [ ] T006 Create TutorAIService (Bedrock Messages API multi-turn conversation, TUTOR_MODEL_ID env var, related card extraction from AI response) in `backend/src/services/tutor_ai_service.py`
-- [ ] T007 Create TutorService (start_session, send_message, end_session, list_sessions, get_session, auto-end existing active session, request-time timeout check: mark session as timed_out if last message > 30 min ago on any API call, message limit check, TTL calculation) in `backend/src/services/tutor_service.py`
-- [ ] T008 Create tutor API handler with Router (POST /sessions, POST /sessions/{sessionId}/messages with 409 Conflict for ended/timed_out sessions, DELETE /sessions/{sessionId}, GET /sessions, GET /sessions/{sessionId}) in `backend/src/api/handlers/tutor_handler.py`
-- [ ] T009 Register tutor router with prefix `/tutor` in `backend/src/api/handler.py` and add API Gateway routes to `backend/template.yaml`
-- [ ] T009a [P] Generate OpenAPI 3.0 specification from contracts/tutor-api.md in `specs/002-ai-tutor/contracts/tutor-api.openapi.yaml`
-- [ ] T010 [P] Create tutor API client (startSession, sendMessage, endSession, listSessions, getSession) in `frontend/src/services/tutor-api.ts` and export from `frontend/src/services/api.ts`
+- [x] T005 Create mode-specific system prompt templates (free_talk, quiz, weak_point) with card context injection and language-matching instruction (respond in the same language as card content per FR-017) in `backend/src/services/prompts/tutor.py`
+- [x] T006 Create TutorAIService (Bedrock Messages API multi-turn conversation, TUTOR_MODEL_ID env var, related card extraction from AI response) in `backend/src/services/tutor_ai_service.py`
+- [x] T007 Create TutorService (start_session, send_message, end_session, list_sessions, get_session, auto-end existing active session, request-time timeout check: mark session as timed_out if last message > 30 min ago on any API call, message limit check, TTL calculation) in `backend/src/services/tutor_service.py`
+- [x] T008 Create tutor API handler with Router (POST /sessions, POST /sessions/{sessionId}/messages with 409 Conflict for ended/timed_out sessions, DELETE /sessions/{sessionId}, GET /sessions, GET /sessions/{sessionId}) in `backend/src/api/handlers/tutor_handler.py`
+- [x] T009 Register tutor router with prefix `/tutor` in `backend/src/api/handler.py` and add API Gateway routes to `backend/template.yaml`
+- [x] T009a [P] Generate OpenAPI 3.0 specification from contracts/tutor-api.md in `specs/002-ai-tutor/contracts/tutor-api.openapi.yaml`
+- [x] T010 [P] Create tutor API client (startSession, sendMessage, endSession, listSessions, getSession) in `frontend/src/services/tutor-api.ts` and export from `frontend/src/services/api.ts`
 
 **Checkpoint**: Foundation ready — user story implementation can now begin
 
@@ -240,17 +240,17 @@ Task: T015 "Create ChatInput component in frontend/src/components/tutor/ChatInpu
 
 ### Task Summary
 
-| Phase | Story | Task Count | Key Deliverables |
-|-------|-------|------------|-----------------|
-| Phase 1 | Setup | 4 | DynamoDB table, models, types |
-| Phase 2 | Foundational | 12 | Tests (TDD), prompts, services, handler, API client, OpenAPI spec |
-| Phase 3 | US1 Free Talk | 10 | Tests (TDD), TutorPage, ChatMessage, ChatInput, ModeSelector |
-| Phase 4 | US4 Session Mgmt | 7 | SessionList, timeout, limit, history, mode switch |
-| Phase 5 | US2 Quiz | 2 | Quiz prompt, quiz UI styling |
-| Phase 6 | US3 Weak Point | 4 | Weak card data, prompt, 422 handling |
-| Phase 7 | US5 Related Cards | 2 | RelatedCardChip, ChatMessage integration |
-| Phase 8 | Polish | 5 | Edge cases, error handling, final validation |
-| **Total** | | **46** | |
+| Phase     | Story             | Task Count | Key Deliverables                                                  |
+| --------- | ----------------- | ---------- | ----------------------------------------------------------------- |
+| Phase 1   | Setup             | 4          | DynamoDB table, models, types                                     |
+| Phase 2   | Foundational      | 12         | Tests (TDD), prompts, services, handler, API client, OpenAPI spec |
+| Phase 3   | US1 Free Talk     | 10         | Tests (TDD), TutorPage, ChatMessage, ChatInput, ModeSelector      |
+| Phase 4   | US4 Session Mgmt  | 7          | SessionList, timeout, limit, history, mode switch                 |
+| Phase 5   | US2 Quiz          | 2          | Quiz prompt, quiz UI styling                                      |
+| Phase 6   | US3 Weak Point    | 4          | Weak card data, prompt, 422 handling                              |
+| Phase 7   | US5 Related Cards | 2          | RelatedCardChip, ChatMessage integration                          |
+| Phase 8   | Polish            | 5          | Edge cases, error handling, final validation                      |
+| **Total** |                   | **46**     |                                                                   |
 
 ---
 
