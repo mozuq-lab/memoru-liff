@@ -242,28 +242,17 @@ class TutorService:
 
         now = datetime.now(timezone.utc)
 
-        # Add user message
-        user_msg = TutorMessage(
-            role="user",
-            content=content,
-            related_cards=[],
-            timestamp=now.isoformat(),
-        )
-
-        # Build conversation history for AI
-        messages = item.get("messages", [])
-        conversation = [
-            {"role": m["role"], "content": m["content"]}
-            for m in messages
-        ]
-        conversation.append({"role": "user", "content": content})
-
-        # Get AI response
+        # Get AI response via SessionManager
         system_prompt = item.get("system_prompt", "")
-        ai_content, related_cards = self.ai_service.generate_response(
-            system_prompt=system_prompt,
-            messages=conversation,
-        )
+        sm = self.session_manager_factory(session_id=session_id, user_id=user_id)
+        try:
+            ai_content, related_cards = self.ai_service.generate_response(
+                system_prompt=system_prompt,
+                messages=content,
+                session_manager=sm,
+            )
+        finally:
+            sm.close()
         ai_content = self.ai_service.clean_response_text(ai_content)
 
         # Validate related_cards against deck's card IDs
@@ -281,15 +270,9 @@ class TutorService:
         new_count = current_count + 1
         is_limit_reached = new_count >= self.MAX_ROUNDS
 
-        # Update DynamoDB
-        updated_messages = messages + [
-            user_msg.model_dump(),
-            ai_msg.model_dump(),
-        ]
-
-        update_expr = "SET messages = :msgs, message_count = :cnt, updated_at = :upd"
+        # Update DynamoDB metadata (messages managed by SessionManager)
+        update_expr = "SET message_count = :cnt, updated_at = :upd"
         expr_values: dict[str, Any] = {
-            ":msgs": updated_messages,
             ":cnt": new_count,
             ":upd": datetime.now(timezone.utc).isoformat(),
         }

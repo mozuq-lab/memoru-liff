@@ -592,6 +592,241 @@ class TestStartSessionWithSessionManager:
         mock_sm.close.assert_called_once()
 
 
+class TestSendMessageWithSessionManager:
+    """Tests for TutorService.send_message with SessionManager integration (TASK-0167)."""
+
+    def test_send_sm_session_manager_used_for_response(
+        self, dynamodb_tables, mock_ai_service
+    ):
+        """TC-send-SM: SessionManager is created and passed to AI service for response generation."""
+        _seed_deck(dynamodb_tables)
+        mock_sm_factory = MagicMock()
+        mock_sm = MagicMock()
+        mock_sm_factory.return_value = mock_sm
+
+        with patch.dict(os.environ, {
+            "TUTOR_SESSIONS_TABLE": "memoru-tutor-sessions-test",
+            "DECKS_TABLE": "memoru-decks-test",
+            "CARDS_TABLE": "memoru-cards-test",
+        }):
+            from services.tutor_service import TutorService
+
+            service = TutorService(
+                table_name="memoru-tutor-sessions-test",
+                dynamodb_resource=dynamodb_tables,
+                ai_service=mock_ai_service,
+                session_manager_factory=mock_sm_factory,
+            )
+
+            session = service.start_session(
+                user_id="test-user", deck_id="deck_001", mode="free_talk"
+            )
+
+            # Reset mocks after start_session
+            mock_ai_service.generate_response.reset_mock()
+            mock_sm_factory.reset_mock()
+            mock_sm2 = MagicMock()
+            mock_sm_factory.return_value = mock_sm2
+            mock_ai_service.generate_response.return_value = (
+                "SessionManager経由の応答です。",
+                [],
+            )
+
+            response = service.send_message(
+                user_id="test-user",
+                session_id=session.session_id,
+                content="質問です",
+            )
+
+        # SessionManager factory called with correct args
+        mock_sm_factory.assert_called_once_with(
+            session_id=session.session_id, user_id="test-user"
+        )
+
+        # AI service called with session_manager and string message
+        call_kwargs = mock_ai_service.generate_response.call_args
+        assert call_kwargs[1]["session_manager"] is mock_sm2
+        assert call_kwargs[1]["messages"] == "質問です"
+        assert isinstance(call_kwargs[1]["messages"], str)
+
+        # SessionManager closed
+        mock_sm2.close.assert_called_once()
+
+        # Response is correct
+        assert response.message.content == "SessionManager経由の応答です。"
+
+    def test_send_sm_metadata_updated_correctly(
+        self, dynamodb_tables, mock_ai_service
+    ):
+        """TC-send-metadata: message_count and updated_at are updated, messages field not written."""
+        _seed_deck(dynamodb_tables)
+        mock_sm_factory = MagicMock()
+        mock_sm_factory.return_value = MagicMock()
+
+        with patch.dict(os.environ, {
+            "TUTOR_SESSIONS_TABLE": "memoru-tutor-sessions-test",
+            "DECKS_TABLE": "memoru-decks-test",
+            "CARDS_TABLE": "memoru-cards-test",
+        }):
+            from services.tutor_service import TutorService
+
+            service = TutorService(
+                table_name="memoru-tutor-sessions-test",
+                dynamodb_resource=dynamodb_tables,
+                ai_service=mock_ai_service,
+                session_manager_factory=mock_sm_factory,
+            )
+
+            session = service.start_session(
+                user_id="test-user", deck_id="deck_001", mode="free_talk"
+            )
+
+            mock_ai_service.generate_response.return_value = ("応答", [])
+
+            service.send_message("test-user", session.session_id, "q1")
+
+        # Check DynamoDB item
+        table = dynamodb_tables.Table("memoru-tutor-sessions-test")
+        item = table.get_item(
+            Key={"user_id": "test-user", "session_id": session.session_id}
+        )["Item"]
+
+        assert int(item["message_count"]) == 1
+        assert "updated_at" in item
+        # messages field should NOT be written by send_message (SessionManager manages them)
+        assert "messages" not in item
+
+    def test_send_sm_limit_auto_ends_session(
+        self, dynamodb_tables, mock_ai_service
+    ):
+        """TC-send-limit: Session auto-ends when message limit is reached."""
+        _seed_deck(dynamodb_tables)
+        mock_sm_factory = MagicMock()
+        mock_sm_factory.return_value = MagicMock()
+
+        with patch.dict(os.environ, {
+            "TUTOR_SESSIONS_TABLE": "memoru-tutor-sessions-test",
+            "DECKS_TABLE": "memoru-decks-test",
+            "CARDS_TABLE": "memoru-cards-test",
+        }):
+            from services.tutor_service import TutorService
+
+            service = TutorService(
+                table_name="memoru-tutor-sessions-test",
+                dynamodb_resource=dynamodb_tables,
+                ai_service=mock_ai_service,
+                session_manager_factory=mock_sm_factory,
+            )
+
+            session = service.start_session(
+                user_id="test-user", deck_id="deck_001", mode="free_talk"
+            )
+
+            mock_ai_service.generate_response.return_value = ("Response", [])
+
+            # Send MAX_ROUNDS messages
+            for i in range(TutorService.MAX_ROUNDS):
+                resp = service.send_message("test-user", session.session_id, f"q{i}")
+
+        assert resp.is_limit_reached is True
+        assert resp.message_count == TutorService.MAX_ROUNDS
+
+        # Check DynamoDB: session should be auto-ended
+        table = dynamodb_tables.Table("memoru-tutor-sessions-test")
+        item = table.get_item(
+            Key={"user_id": "test-user", "session_id": session.session_id}
+        )["Item"]
+        assert item["status"] == "ended"
+        assert "ended_at" in item
+        assert "ttl" in item
+
+    def test_send_sm_response_format(
+        self, dynamodb_tables, mock_ai_service
+    ):
+        """TC-send-response: API response format matches SendMessageResponse contract."""
+        _seed_deck(dynamodb_tables)
+        mock_sm_factory = MagicMock()
+        mock_sm_factory.return_value = MagicMock()
+
+        with patch.dict(os.environ, {
+            "TUTOR_SESSIONS_TABLE": "memoru-tutor-sessions-test",
+            "DECKS_TABLE": "memoru-decks-test",
+            "CARDS_TABLE": "memoru-cards-test",
+        }):
+            from services.tutor_service import TutorService
+            from models.tutor import SendMessageResponse, TutorMessage
+
+            service = TutorService(
+                table_name="memoru-tutor-sessions-test",
+                dynamodb_resource=dynamodb_tables,
+                ai_service=mock_ai_service,
+                session_manager_factory=mock_sm_factory,
+            )
+
+            session = service.start_session(
+                user_id="test-user", deck_id="deck_001", mode="free_talk"
+            )
+
+            mock_ai_service.generate_response.return_value = (
+                "詳しく説明します。",
+                ["card_001"],
+            )
+
+            response = service.send_message(
+                "test-user", session.session_id, "appleについて教えて"
+            )
+
+        # Verify response type and structure
+        assert isinstance(response, SendMessageResponse)
+        assert isinstance(response.message, TutorMessage)
+        assert response.message.role == "assistant"
+        assert response.message.content == "詳しく説明します。"
+        assert response.message.related_cards == ["card_001"]
+        assert response.message.timestamp is not None
+        assert response.session_id == session.session_id
+        assert response.message_count == 1
+        assert response.is_limit_reached is False
+
+    def test_send_sm_close_called_on_error(
+        self, dynamodb_tables, mock_ai_service
+    ):
+        """SessionManager.close() is called even when AI service raises an error."""
+        _seed_deck(dynamodb_tables)
+        mock_sm_factory = MagicMock()
+        mock_sm = MagicMock()
+        mock_sm_factory.return_value = mock_sm
+
+        with patch.dict(os.environ, {
+            "TUTOR_SESSIONS_TABLE": "memoru-tutor-sessions-test",
+            "DECKS_TABLE": "memoru-decks-test",
+            "CARDS_TABLE": "memoru-cards-test",
+        }):
+            from services.tutor_service import TutorService
+
+            service = TutorService(
+                table_name="memoru-tutor-sessions-test",
+                dynamodb_resource=dynamodb_tables,
+                ai_service=mock_ai_service,
+                session_manager_factory=mock_sm_factory,
+            )
+
+            session = service.start_session(
+                user_id="test-user", deck_id="deck_001", mode="free_talk"
+            )
+
+            # Reset and set up AI error
+            mock_sm_factory.reset_mock()
+            mock_sm2 = MagicMock()
+            mock_sm_factory.return_value = mock_sm2
+            mock_ai_service.generate_response.side_effect = RuntimeError("AI error")
+
+            with pytest.raises(RuntimeError):
+                service.send_message("test-user", session.session_id, "test")
+
+        # close() must still be called
+        mock_sm2.close.assert_called_once()
+
+
 class TestGetSession:
     """Tests for TutorService.get_session."""
 
