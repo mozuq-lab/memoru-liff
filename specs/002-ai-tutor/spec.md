@@ -93,8 +93,18 @@ During a tutor session, the AI suggests related cards from the deck. The user ca
 - What happens when a deck has more than 100 cards? The system should handle large decks gracefully without degraded response quality.
 - What happens when the AI service is temporarily unavailable? The system should display a user-friendly error message and allow retry.
 - What happens when the user sends an empty message? The system should prevent submission of empty messages.
-- What happens when a session times out mid-conversation? The system should inform the user and allow them to start a new session.
+- What happens when a session times out mid-conversation (30 minutes of inactivity)? The system should inform the user and allow them to start a new session.
 - What happens when the user switches learning modes mid-session? A new session should be started with the new mode.
+
+## Clarifications
+
+### Session 2026-03-07
+
+- Q: セッションデータ（会話履歴）の保持期間はどうしますか？ → A: セッション終了後7日間保持（DynamoDB TTL で自動削除）
+- Q: 1ユーザーが同時に保持できるアクティブセッション数に制限はありますか？ → A: 1ユーザー1アクティブセッション（新規セッション開始時に既存アクティブセッションを自動終了）
+- Q: AIチューターの応答言語はどのように決定しますか？ → A: カードのコンテンツ言語に合わせる（日本語カード→日本語応答）
+- Q: セッションのタイムアウト時間はどのくらいですか？ → A: 最後のメッセージから30分でタイムアウト
+- Q: 過去セッションの一覧表示・閲覧UIは必要ですか？ → A: 直近セッションの一覧表示あり（読み取り専用、会話履歴の閲覧のみ）
 
 ## Requirements *(mandatory)*
 
@@ -115,10 +125,15 @@ During a tutor session, the AI suggests related cards from the deck. The user ca
 - **FR-013**: System MUST display a loading indicator while waiting for AI responses.
 - **FR-014**: System MUST handle AI service errors gracefully with user-friendly error messages and retry capability.
 - **FR-015**: Users MUST be able to access the AI tutor from the deck view in the home page.
+- **FR-016**: System MUST limit each user to 1 active session at a time. When a user starts a new session, any existing active session MUST be automatically ended.
+- **FR-017**: AI MUST respond in the same language as the deck's card content (e.g., Japanese cards → Japanese responses).
+- **FR-018**: System MUST automatically timeout sessions after 30 minutes of inactivity (no new messages). Timed-out sessions are marked as ended.
+- **FR-019**: System MUST provide a read-only list of recent ended sessions (within 7-day retention period), allowing users to view past conversation history.
+- **FR-020**: Users MUST NOT be able to resume or add messages to ended sessions; they can only view the conversation history.
 
 ### Key Entities
 
-- **Tutor Session**: Represents an active learning conversation between a user and the AI for a specific deck. Key attributes: associated user, associated deck, learning mode, conversation history, creation time, message count.
+- **Tutor Session**: Represents an active learning conversation between a user and the AI for a specific deck. Key attributes: associated user, associated deck, learning mode, conversation history, creation time, message count, session status (active/ended), TTL (session終了後7日間で DynamoDB TTL により自動削除).
 - **Tutor Message**: An individual message within a session. Key attributes: sender (user or AI), message content, related card references, timestamp.
 - **Learning Mode**: The type of interaction pattern for a session. Values: Free Talk, Quiz, Weak Point Focus.
 
