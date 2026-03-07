@@ -95,7 +95,7 @@ from services.card_service import CardService
 
 - **サービスパターン**: ビジネスロジックはサービスクラスに集約。ハンドラーはリクエスト解析・レスポンス構築のみ
 - **エラーハンドリング**: ドメイン固有の例外クラス（`CardNotFoundError`, `AIServiceError` 等）をサービス層で定義・送出し、ハンドラー層で HTTP レスポンスにマッピング
-- **ファクトリーパターン**: AI サービスは `create_ai_service()` ファクトリーで環境変数に基づき実装を切り替え
+- **ファクトリーパターン**: AI サービスは `create_ai_service()` ファクトリーで環境変数に基づき実装を切り替え。SessionManager も `create_tutor_session_manager()` ファクトリーで DynamoDB / AgentCore Memory バックエンドを切り替え
 - **Pydantic バリデーション**: 全リクエスト/レスポンスを Pydantic モデルで型安全に定義
 - **Context パターン**: フロントエンドのグローバル状態は React Context で管理。`AuthProvider` → `CardsProvider` の順でネスト
 - **仕様駆動開発**: `.kiro/specs/` に要件・設計・タスクを管理し、実装と仕様の整合性を維持
