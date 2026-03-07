@@ -19,7 +19,10 @@ export const ChatInput = ({ onSend, disabled }: ChatInputProps) => {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="flex items-center gap-2 p-3 bg-white border-t">
+    <form
+      onSubmit={handleSubmit}
+      className="flex items-center gap-2 p-3 bg-white border-t"
+    >
       <input
         type="text"
         value={text}

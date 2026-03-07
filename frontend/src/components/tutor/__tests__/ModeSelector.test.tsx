@@ -47,9 +47,7 @@ describe("ModeSelector", () => {
     expect(
       screen.getByText(/AIがカード内容からクイズを出題/),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText(/苦手なカードを重点的に学習/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/苦手なカードを重点的に学習/)).toBeInTheDocument();
   });
 
   it("disabled 時はクリックが無効になる", async () => {

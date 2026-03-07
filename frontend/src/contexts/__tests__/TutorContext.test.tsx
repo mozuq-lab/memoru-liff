@@ -2,11 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, act, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TutorProvider, useTutorContext } from "../TutorContext";
-import type {
-  TutorSession,
-  TutorMessage,
-  SendMessageResponse,
-} from "@/types";
+import type { TutorSession, TutorMessage, SendMessageResponse } from "@/types";
 
 // Mock tutor-api
 const mockStartSession = vi.fn();
@@ -68,17 +64,12 @@ function TestConsumer() {
       <span data-testid="is-loading">{String(ctx.isLoading)}</span>
       <span data-testid="error">{ctx.error ?? "none"}</span>
       <span data-testid="messages">{JSON.stringify(ctx.messages)}</span>
-      <span data-testid="is-limit-reached">
-        {String(ctx.isLimitReached)}
-      </span>
+      <span data-testid="is-limit-reached">{String(ctx.isLimitReached)}</span>
       <button
         data-testid="start"
         onClick={() => ctx.startSession("deck_123", "free_talk")}
       />
-      <button
-        data-testid="send"
-        onClick={() => ctx.sendMessage("テスト")}
-      />
+      <button data-testid="send" onClick={() => ctx.sendMessage("テスト")} />
       <button data-testid="end" onClick={() => ctx.endSession()} />
     </div>
   );
@@ -191,9 +182,7 @@ describe("TutorContext", () => {
       });
 
       await waitFor(() => {
-        expect(screen.getByTestId("is-limit-reached").textContent).toBe(
-          "true",
-        );
+        expect(screen.getByTestId("is-limit-reached").textContent).toBe("true");
       });
     });
 

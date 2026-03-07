@@ -2,8 +2,8 @@
  * デッキサマリーコンポーネント（ホーム画面用）
  * 最大5件のデッキを due 数付きで表示し、0件時は CTA メッセージを表示する。
  */
-import { Link, useNavigate } from 'react-router-dom';
-import { useDecksContext } from '@/contexts/DecksContext';
+import { Link, useNavigate } from "react-router-dom";
+import { useDecksContext } from "@/contexts/DecksContext";
 
 /** ホーム画面に表示するデッキの最大件数 */
 const MAX_DISPLAY_DECKS = 5;
@@ -19,7 +19,10 @@ export const DeckSummary = () => {
   // デッキ 0 件時の CTA メッセージ
   if (!decks || decks.length === 0) {
     return (
-      <section className="bg-white rounded-lg shadow p-6" aria-label="デッキサマリー">
+      <section
+        className="bg-white rounded-lg shadow p-6"
+        aria-label="デッキサマリー"
+      >
         <h2 className="text-lg font-semibold text-gray-700 mb-2">デッキ</h2>
         <p className="text-gray-500 text-sm mb-4">
           デッキを作成して学習を整理しましょう
@@ -38,7 +41,10 @@ export const DeckSummary = () => {
   const hasMore = decks.length > MAX_DISPLAY_DECKS;
 
   return (
-    <section className="bg-white rounded-lg shadow p-6" aria-label="デッキサマリー">
+    <section
+      className="bg-white rounded-lg shadow p-6"
+      aria-label="デッキサマリー"
+    >
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-lg font-semibold text-gray-700">デッキ</h2>
         {hasMore && (
@@ -61,7 +67,7 @@ export const DeckSummary = () => {
             <div className="flex items-center min-w-0">
               <div
                 className="w-3 h-3 rounded-full mr-3 flex-shrink-0"
-                style={{ backgroundColor: deck.color || '#6B7280' }}
+                style={{ backgroundColor: deck.color || "#6B7280" }}
               />
               <span className="text-sm font-medium text-gray-800 truncate">
                 {deck.name}

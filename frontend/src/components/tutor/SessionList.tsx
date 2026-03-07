@@ -84,7 +84,9 @@ export const SessionList = ({ deckId }: SessionListProps) => {
   };
 
   if (loading) {
-    return <p className="text-center text-gray-500 text-sm py-8">読み込み中...</p>;
+    return (
+      <p className="text-center text-gray-500 text-sm py-8">読み込み中...</p>
+    );
   }
 
   if (sessions.length === 0) {
@@ -125,7 +127,9 @@ export const SessionList = ({ deckId }: SessionListProps) => {
           {expandedId === s.session_id && (
             <div className="border-t p-4 bg-gray-50 max-h-[400px] overflow-y-auto">
               {loadingDetail ? (
-                <p className="text-xs text-gray-500 text-center">読み込み中...</p>
+                <p className="text-xs text-gray-500 text-center">
+                  読み込み中...
+                </p>
               ) : expandedSession ? (
                 expandedSession.messages.map((msg, i) => (
                   <ChatMessage key={i} message={msg} />

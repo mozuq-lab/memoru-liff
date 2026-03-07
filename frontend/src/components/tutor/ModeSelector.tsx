@@ -5,7 +5,12 @@ interface ModeSelectorProps {
   disabled?: boolean;
 }
 
-const modes: { key: LearningMode; label: string; description: string; icon: string }[] = [
+const modes: {
+  key: LearningMode;
+  label: string;
+  description: string;
+  icon: string;
+}[] = [
   {
     key: "free_talk",
     label: "Free Talk",
