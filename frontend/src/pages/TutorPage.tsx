@@ -22,10 +22,12 @@ export const TutorPage = () => {
     isLimitReached,
     isTimedOut,
     isInsufficientReviewData,
+    isEmptyDeck,
     startSession,
     sendMessage,
     endSession,
     resumeSession,
+    retryLastMessage,
     clearError,
   } = useTutorContext();
 
@@ -170,11 +172,20 @@ export const TutorPage = () => {
               <Error message={error} onRetry={clearError} />
             </div>
           )}
+          {/* T034: 空デッキメッセージ */}
+          {isEmptyDeck && (
+            <div className="mb-4 p-4 bg-gray-50 border border-gray-200 rounded-lg">
+              <p className="text-gray-800 text-sm">
+                このデッキにはカードがありません。カードを追加してからセッションを開始してください。
+              </p>
+            </div>
+          )}
           {/* T031: レビュー履歴不足メッセージ（422エラー時） */}
           {isInsufficientReviewData && (
             <div className="mb-4 p-4 bg-orange-50 border border-orange-200 rounded-lg">
               <p className="text-orange-800 text-sm mb-2">
-                このデッキにはまだレビュー履歴がないため、Weak Point Focus モードを利用できません。
+                このデッキにはまだレビュー履歴がないため、Weak Point Focus
+                モードを利用できません。
               </p>
               <button
                 type="button"
@@ -322,12 +333,22 @@ export const TutorPage = () => {
         {error && (
           <div className="p-3 bg-red-50 border border-red-200 rounded-lg mb-3">
             <p className="text-red-700 text-sm">{error}</p>
-            <button
-              onClick={clearError}
-              className="text-xs text-red-500 hover:text-red-700 mt-1"
-            >
-              閉じる
-            </button>
+            <div className="flex gap-3 mt-2">
+              <button
+                type="button"
+                onClick={retryLastMessage}
+                className="text-xs text-red-600 hover:text-red-800 font-medium"
+              >
+                再試行
+              </button>
+              <button
+                type="button"
+                onClick={clearError}
+                className="text-xs text-red-500 hover:text-red-700"
+              >
+                閉じる
+              </button>
+            </div>
           </div>
         )}
 

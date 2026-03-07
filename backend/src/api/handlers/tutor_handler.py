@@ -14,12 +14,14 @@ from models.tutor import (
     StartSessionRequest,
 )
 from services.tutor_service import (
+    EmptyDeckError,
     InsufficientReviewDataError,
     SessionEndedError,
     SessionNotFoundError,
     TutorService,
     TutorServiceError,
 )
+from services.tutor_ai_service import TutorAITimeoutError
 
 logger = Logger()
 tracer = Tracer()
@@ -66,6 +68,19 @@ def create_session():
             status_code=422,
             content_type=content_types.APPLICATION_JSON,
             body=json.dumps({"error": str(e)}),
+        )
+    except EmptyDeckError as e:
+        return Response(
+            status_code=422,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": str(e)}),
+        )
+    except TutorAITimeoutError:
+        logger.warning("AI greeting timed out during session creation")
+        return Response(
+            status_code=504,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": "AI応答がタイムアウトしました。もう一度お試しください。"}),
         )
     except TutorServiceError as e:
         logger.error("Failed to start tutor session", extra={"error": str(e)})
@@ -116,6 +131,20 @@ def send_message(session_id: str):
             status_code=409,
             content_type=content_types.APPLICATION_JSON,
             body=json.dumps({"error": f"Session is ended or timed out: {session_id}"}),
+        )
+    except TutorAITimeoutError:
+        logger.warning("AI response timed out", extra={"session_id": session_id})
+        return Response(
+            status_code=504,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": "AI応答がタイムアウトしました。もう一度お試しください。"}),
+        )
+    except TutorServiceError as e:
+        logger.error("Failed to send message", extra={"error": str(e), "session_id": session_id})
+        return Response(
+            status_code=500,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": str(e)}),
         )
 
 

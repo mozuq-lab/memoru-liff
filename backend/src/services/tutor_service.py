@@ -42,6 +42,10 @@ class MessageLimitError(TutorServiceError):
     """Raised when session message limit is reached."""
 
 
+class EmptyDeckError(TutorServiceError):
+    """Raised when a deck has no cards."""
+
+
 class InsufficientReviewDataError(TutorServiceError):
     """Raised when weak_point mode is requested but no review history exists."""
 
@@ -108,6 +112,12 @@ class TutorService:
         # Load deck and cards
         deck = self._get_deck(user_id, deck_id)
         cards = self._get_deck_cards(user_id, deck_id)
+
+        # Validate deck is not empty
+        if not cards:
+            raise EmptyDeckError(
+                "このデッキにはカードがありません。カードを追加してからセッションを開始してください。"
+            )
 
         # Build system prompt
         cards_context = format_cards_context(cards)

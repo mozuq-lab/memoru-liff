@@ -18,6 +18,8 @@ interface TutorContextType {
   isLimitReached: boolean;
   isTimedOut: boolean;
   isInsufficientReviewData: boolean;
+  isEmptyDeck: boolean;
+  retryLastMessage: () => Promise<void>;
   startSession: (deckId: string, mode: LearningMode) => Promise<void>;
   sendMessage: (content: string) => Promise<void>;
   endSession: () => Promise<void>;
@@ -43,11 +45,14 @@ export const TutorProvider = ({ children }: TutorProviderProps) => {
   const [isTimedOut, setIsTimedOut] = useState(false);
   const [isInsufficientReviewData, setIsInsufficientReviewData] =
     useState(false);
+  const [isEmptyDeck, setIsEmptyDeck] = useState(false);
+  const lastFailedContentRef = useRef<string | null>(null);
   const timeoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clearError = useCallback(() => {
     setError(null);
     setIsInsufficientReviewData(false);
+    setIsEmptyDeck(false);
   }, []);
 
   /** タイムアウトタイマーを(再)設定 */
@@ -74,6 +79,7 @@ export const TutorProvider = ({ children }: TutorProviderProps) => {
       setIsLimitReached(false);
       setIsTimedOut(false);
       setIsInsufficientReviewData(false);
+      setIsEmptyDeck(false);
       try {
         const newSession = await tutorApi.startSession({
           deck_id: deckId,
@@ -92,6 +98,13 @@ export const TutorProvider = ({ children }: TutorProviderProps) => {
         ) {
           setIsInsufficientReviewData(true);
         }
+        // Detect 422 empty deck
+        if (
+          message.includes("カードがありません") ||
+          message.includes("no cards")
+        ) {
+          setIsEmptyDeck(true);
+        }
         setError(message);
       } finally {
         setIsLoading(false);
@@ -105,6 +118,7 @@ export const TutorProvider = ({ children }: TutorProviderProps) => {
       if (!session) return;
       setIsLoading(true);
       setError(null);
+      lastFailedContentRef.current = null;
 
       // Optimistically add user message
       const userMsg: TutorMessage = {
@@ -130,6 +144,7 @@ export const TutorProvider = ({ children }: TutorProviderProps) => {
       } catch (err) {
         // Remove optimistic user message on error
         setMessages((prev) => prev.slice(0, -1));
+        lastFailedContentRef.current = content;
         const message =
           err instanceof Error ? err.message : "メッセージの送信に失敗しました";
         setError(message);
@@ -139,6 +154,12 @@ export const TutorProvider = ({ children }: TutorProviderProps) => {
     },
     [session, resetTimeoutTimer],
   );
+
+  const retryLastMessage = useCallback(async () => {
+    const content = lastFailedContentRef.current;
+    if (!content) return;
+    await sendMessage(content);
+  }, [sendMessage]);
 
   const endSession = useCallback(async () => {
     if (!session) return;
@@ -204,6 +225,8 @@ export const TutorProvider = ({ children }: TutorProviderProps) => {
       isLimitReached,
       isTimedOut,
       isInsufficientReviewData,
+      isEmptyDeck,
+      retryLastMessage,
       startSession,
       sendMessage,
       endSession,
@@ -218,6 +241,8 @@ export const TutorProvider = ({ children }: TutorProviderProps) => {
       isLimitReached,
       isTimedOut,
       isInsufficientReviewData,
+      isEmptyDeck,
+      retryLastMessage,
       startSession,
       sendMessage,
       endSession,
