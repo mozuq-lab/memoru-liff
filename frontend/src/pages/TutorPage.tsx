@@ -21,6 +21,7 @@ export const TutorPage = () => {
     error,
     isLimitReached,
     isTimedOut,
+    isInsufficientReviewData,
     startSession,
     sendMessage,
     endSession,
@@ -101,11 +102,23 @@ export const TutorPage = () => {
             className="p-2 text-gray-500 hover:text-gray-700 min-w-[44px] min-h-[44px] flex items-center justify-center"
             aria-label="戻る"
           >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            <svg
+              className="w-5 h-5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M15 19l-7-7 7-7"
+              />
             </svg>
           </button>
-          <h1 className="text-lg font-semibold text-gray-800">セッション履歴</h1>
+          <h1 className="text-lg font-semibold text-gray-800">
+            セッション履歴
+          </h1>
         </header>
         <div className="flex-1 overflow-y-auto p-4">
           <SessionList deckId={deckId} />
@@ -125,11 +138,23 @@ export const TutorPage = () => {
               className="p-2 text-gray-500 hover:text-gray-700 min-w-[44px] min-h-[44px] flex items-center justify-center"
               aria-label="戻る"
             >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M15 19l-7-7 7-7"
+                />
               </svg>
             </button>
-            <h1 className="text-lg font-semibold text-gray-800">AI チューター</h1>
+            <h1 className="text-lg font-semibold text-gray-800">
+              AI チューター
+            </h1>
           </div>
           <button
             onClick={handleViewHistory}
@@ -143,6 +168,24 @@ export const TutorPage = () => {
           {error && (
             <div className="mb-4">
               <Error message={error} onRetry={clearError} />
+            </div>
+          )}
+          {/* T031: レビュー履歴不足メッセージ（422エラー時） */}
+          {isInsufficientReviewData && (
+            <div className="mb-4 p-4 bg-orange-50 border border-orange-200 rounded-lg">
+              <p className="text-orange-800 text-sm mb-2">
+                このデッキにはまだレビュー履歴がないため、Weak Point Focus モードを利用できません。
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  clearError();
+                  handleModeSelect("free_talk");
+                }}
+                className="text-sm text-orange-700 hover:text-orange-900 font-medium underline"
+              >
+                Free Talk モードで始める
+              </button>
             </div>
           )}
           {/* T024: タイムアウト検出メッセージ */}
@@ -172,12 +215,24 @@ export const TutorPage = () => {
             className="p-2 text-gray-500 hover:text-gray-700 min-w-[44px] min-h-[44px] flex items-center justify-center"
             aria-label="モード選択に戻る"
           >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            <svg
+              className="w-5 h-5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M15 19l-7-7 7-7"
+              />
             </svg>
           </button>
           <div>
-            <h1 className="text-lg font-semibold text-gray-800">AI チューター</h1>
+            <h1 className="text-lg font-semibold text-gray-800">
+              AI チューター
+            </h1>
             {session && (
               <p className="text-xs text-gray-500">
                 {session.mode === "free_talk"
@@ -216,9 +271,18 @@ export const TutorPage = () => {
           <div className="flex justify-start mb-3">
             <div className="bg-gray-100 rounded-2xl rounded-bl-sm px-4 py-2">
               <div className="flex gap-1">
-                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                <span
+                  className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
+                  style={{ animationDelay: "0ms" }}
+                />
+                <span
+                  className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
+                  style={{ animationDelay: "150ms" }}
+                />
+                <span
+                  className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
+                  style={{ animationDelay: "300ms" }}
+                />
               </div>
             </div>
           </div>

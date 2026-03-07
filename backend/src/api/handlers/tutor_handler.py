@@ -14,6 +14,7 @@ from models.tutor import (
     StartSessionRequest,
 )
 from services.tutor_service import (
+    InsufficientReviewDataError,
     SessionEndedError,
     SessionNotFoundError,
     TutorService,
@@ -59,6 +60,12 @@ def create_session():
             status_code=201,
             content_type=content_types.APPLICATION_JSON,
             body=json.dumps(session.model_dump(mode="json")),
+        )
+    except InsufficientReviewDataError as e:
+        return Response(
+            status_code=422,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": str(e)}),
         )
     except TutorServiceError as e:
         logger.error("Failed to start tutor session", extra={"error": str(e)})

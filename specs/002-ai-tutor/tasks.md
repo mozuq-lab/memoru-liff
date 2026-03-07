@@ -109,8 +109,8 @@
 
 ### Implementation for User Story 2
 
-- [ ] T026 [US2] Enhance quiz system prompt in `backend/src/services/prompts/tutor.py` to instruct AI to generate questions from card content and evaluate answers with detailed feedback
-- [ ] T027 [US2] Add quiz-specific UI styling (question highlight, correct/incorrect visual feedback) to `frontend/src/components/tutor/ChatMessage.tsx`
+- [x] T026 [US2] Enhance quiz system prompt in `backend/src/services/prompts/tutor.py` to instruct AI to generate questions from card content and evaluate answers with detailed feedback
+- [x] T027 [US2] Add quiz-specific UI styling (question highlight, correct/incorrect visual feedback) to `frontend/src/components/tutor/ChatMessage.tsx`
 
 **Checkpoint**: Quiz モードが独立して動作し、問題生成・回答評価・フィードバックが正しく機能
 
@@ -124,10 +124,10 @@
 
 ### Implementation for User Story 3
 
-- [ ] T028 [US3] Add weak card data retrieval (review history, accuracy, ease factor) to `backend/src/services/tutor_service.py` for weak_point mode session initialization
-- [ ] T029 [US3] Enhance weak_point system prompt in `backend/src/services/prompts/tutor.py` to include user's weak card data and instruct AI to prioritize those topics
-- [ ] T030 [US3] Add review history insufficiency check (return 422 when no review data) to session start in `backend/src/services/tutor_service.py`
-- [ ] T031 [US3] Add frontend handling for 422 error (display message suggesting Free Talk mode) in `frontend/src/contexts/TutorContext.tsx`
+- [x] T028 [US3] Add weak card data retrieval (review history, accuracy, ease factor) to `backend/src/services/tutor_service.py` for weak_point mode session initialization
+- [x] T029 [US3] Enhance weak_point system prompt in `backend/src/services/prompts/tutor.py` to include user's weak card data and instruct AI to prioritize those topics
+- [x] T030 [US3] Add review history insufficiency check (return 422 when no review data) to session start in `backend/src/services/tutor_service.py`
+- [x] T031 [US3] Add frontend handling for 422 error (display message suggesting Free Talk mode) in `frontend/src/contexts/TutorContext.tsx`
 
 **Checkpoint**: Weak Point Focus モードが独立して動作。レビュー履歴なしの場合のフォールバックも機能
 

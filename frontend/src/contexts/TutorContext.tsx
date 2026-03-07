@@ -7,11 +7,7 @@ import {
   useRef,
   type ReactNode,
 } from "react";
-import type {
-  TutorSession,
-  TutorMessage,
-  LearningMode,
-} from "@/types";
+import type { TutorSession, TutorMessage, LearningMode } from "@/types";
 import * as tutorApi from "@/services/tutor-api";
 
 interface TutorContextType {
@@ -21,6 +17,7 @@ interface TutorContextType {
   error: string | null;
   isLimitReached: boolean;
   isTimedOut: boolean;
+  isInsufficientReviewData: boolean;
   startSession: (deckId: string, mode: LearningMode) => Promise<void>;
   sendMessage: (content: string) => Promise<void>;
   endSession: () => Promise<void>;
@@ -44,9 +41,14 @@ export const TutorProvider = ({ children }: TutorProviderProps) => {
   const [error, setError] = useState<string | null>(null);
   const [isLimitReached, setIsLimitReached] = useState(false);
   const [isTimedOut, setIsTimedOut] = useState(false);
+  const [isInsufficientReviewData, setIsInsufficientReviewData] =
+    useState(false);
   const timeoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const clearError = useCallback(() => setError(null), []);
+  const clearError = useCallback(() => {
+    setError(null);
+    setIsInsufficientReviewData(false);
+  }, []);
 
   /** タイムアウトタイマーを(再)設定 */
   const resetTimeoutTimer = useCallback(() => {
@@ -71,6 +73,7 @@ export const TutorProvider = ({ children }: TutorProviderProps) => {
       setError(null);
       setIsLimitReached(false);
       setIsTimedOut(false);
+      setIsInsufficientReviewData(false);
       try {
         const newSession = await tutorApi.startSession({
           deck_id: deckId,
@@ -82,6 +85,13 @@ export const TutorProvider = ({ children }: TutorProviderProps) => {
       } catch (err) {
         const message =
           err instanceof Error ? err.message : "セッションの開始に失敗しました";
+        // Detect 422 insufficient review data for weak_point mode
+        if (
+          message.includes("レビュー履歴が不足") ||
+          message.includes("insufficient review")
+        ) {
+          setIsInsufficientReviewData(true);
+        }
         setError(message);
       } finally {
         setIsLoading(false);
@@ -111,9 +121,7 @@ export const TutorProvider = ({ children }: TutorProviderProps) => {
         });
         setMessages((prev) => [...prev, response.message]);
         setSession((prev) =>
-          prev
-            ? { ...prev, message_count: response.message_count }
-            : null,
+          prev ? { ...prev, message_count: response.message_count } : null,
         );
         if (response.is_limit_reached) {
           setIsLimitReached(true);
@@ -123,9 +131,7 @@ export const TutorProvider = ({ children }: TutorProviderProps) => {
         // Remove optimistic user message on error
         setMessages((prev) => prev.slice(0, -1));
         const message =
-          err instanceof Error
-            ? err.message
-            : "メッセージの送信に失敗しました";
+          err instanceof Error ? err.message : "メッセージの送信に失敗しました";
         setError(message);
       } finally {
         setIsLoading(false);
@@ -147,9 +153,7 @@ export const TutorProvider = ({ children }: TutorProviderProps) => {
       clearTimeoutTimer();
     } catch (err) {
       const message =
-        err instanceof Error
-          ? err.message
-          : "セッションの終了に失敗しました";
+        err instanceof Error ? err.message : "セッションの終了に失敗しました";
       setError(message);
     } finally {
       setIsLoading(false);
@@ -199,6 +203,7 @@ export const TutorProvider = ({ children }: TutorProviderProps) => {
       error,
       isLimitReached,
       isTimedOut,
+      isInsufficientReviewData,
       startSession,
       sendMessage,
       endSession,
@@ -212,6 +217,7 @@ export const TutorProvider = ({ children }: TutorProviderProps) => {
       error,
       isLimitReached,
       isTimedOut,
+      isInsufficientReviewData,
       startSession,
       sendMessage,
       endSession,

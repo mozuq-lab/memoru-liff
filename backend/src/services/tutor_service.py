@@ -42,6 +42,10 @@ class MessageLimitError(TutorServiceError):
     """Raised when session message limit is reached."""
 
 
+class InsufficientReviewDataError(TutorServiceError):
+    """Raised when weak_point mode is requested but no review history exists."""
+
+
 class TutorService:
     """Manages tutor session lifecycle and DynamoDB persistence."""
 
@@ -107,10 +111,22 @@ class TutorService:
 
         # Build system prompt
         cards_context = format_cards_context(cards)
+
+        # For weak_point mode, retrieve weak card data
+        weak_cards_context = None
+        if mode == "weak_point":
+            weak_cards = self._get_weak_cards_for_deck(user_id, deck_id, cards)
+            if not weak_cards:
+                raise InsufficientReviewDataError(
+                    "レビュー履歴が不足しています。Free Talk モードをお試しください。"
+                )
+            weak_cards_context = self._format_weak_cards_context(weak_cards)
+
         system_prompt = get_system_prompt(
             mode=mode,  # type: ignore[arg-type]
             deck_name=deck.get("name", ""),
             cards_context=cards_context,
+            weak_cards_context=weak_cards_context,
         )
 
         # Generate AI greeting
@@ -485,9 +501,43 @@ class TutorService:
                     "card_id": item.get("card_id", ""),
                     "front": item.get("front", ""),
                     "back": item.get("back", ""),
+                    "ease_factor": float(item.get("ease_factor", 2.5)),
+                    "repetitions": int(item.get("repetitions", 0)),
                 })
             if not response.get("LastEvaluatedKey"):
                 break
             query_kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
 
         return cards
+
+    def _get_weak_cards_for_deck(
+        self, user_id: str, deck_id: str, cards: list[dict]
+    ) -> list[dict]:
+        """Identify weak cards from the deck based on review history.
+
+        Weak cards = reviewed at least once (repetitions >= 1), sorted by
+        ease_factor ascending (lowest = weakest). Returns top 10.
+
+        Returns empty list if no reviewed cards exist.
+        """
+        reviewed = [c for c in cards if c.get("repetitions", 0) >= 1]
+        if not reviewed:
+            return []
+        reviewed.sort(key=lambda c: c.get("ease_factor", 2.5))
+        return reviewed[:10]
+
+    @staticmethod
+    def _format_weak_cards_context(weak_cards: list[dict]) -> str:
+        """Format weak card data into a context string for the system prompt."""
+        lines = []
+        for i, card in enumerate(weak_cards, 1):
+            card_id = card.get("card_id", "")
+            front = card.get("front", "")
+            back = card.get("back", "")
+            ease = card.get("ease_factor", 2.5)
+            reps = card.get("repetitions", 0)
+            lines.append(
+                f"{i}. Front: {front} | Back: {back} "
+                f"(id: {card_id}, ease_factor: {ease:.2f}, repetitions: {reps})"
+            )
+        return "\n".join(lines)

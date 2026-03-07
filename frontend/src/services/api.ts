@@ -92,7 +92,9 @@ class ApiClient {
       const error = await response
         .json()
         .catch(() => ({ message: "Unknown error" }));
-      throw new Error(error.message || `HTTP ${response.status}`);
+      throw new Error(
+        error.error || error.message || `HTTP ${response.status}`,
+      );
     }
 
     if (response.status === 204) {
