@@ -30,13 +30,24 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T005 Create mode-specific system prompt templates (free_talk, quiz, weak_point) with card context injection in `backend/src/services/prompts/tutor.py`
+### Tests for Foundational Phase (TDD: Red Phase)
+
+> **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
+
+- [ ] T005a [P] Unit tests for tutor prompts (mode-specific prompt generation, card context injection, language-matching instruction) in `backend/tests/unit/test_tutor_prompts.py`
+- [ ] T006a [P] Unit tests for TutorAIService (Bedrock API call, multi-turn conversation, related card extraction) in `backend/tests/unit/test_tutor_ai_service.py`
+- [ ] T007a [P] Unit tests for TutorService (start_session, send_message, end_session, timeout check, message limit, auto-end active session, TTL) in `backend/tests/unit/test_tutor_service.py`
+- [ ] T008a [P] Unit tests for tutor handler (all endpoints, error responses including 409 for ended sessions, auth) in `backend/tests/unit/test_tutor_handler.py`
+
+### Implementation for Foundational Phase
+
+- [ ] T005 Create mode-specific system prompt templates (free_talk, quiz, weak_point) with card context injection and language-matching instruction (respond in the same language as card content per FR-017) in `backend/src/services/prompts/tutor.py`
 - [ ] T006 Create TutorAIService (Bedrock Messages API multi-turn conversation, TUTOR_MODEL_ID env var, related card extraction from AI response) in `backend/src/services/tutor_ai_service.py`
-- [ ] T007 Create TutorService (start_session, send_message, end_session, list_sessions, get_session, auto-end existing active session, timeout check, message limit check, TTL calculation) in `backend/src/services/tutor_service.py`
-- [ ] T008 Create tutor API handler with Router (POST /sessions, POST /sessions/{sessionId}/messages, DELETE /sessions/{sessionId}, GET /sessions, GET /sessions/{sessionId}) in `backend/src/api/handlers/tutor_handler.py`
+- [ ] T007 Create TutorService (start_session, send_message, end_session, list_sessions, get_session, auto-end existing active session, request-time timeout check: mark session as timed_out if last message > 30 min ago on any API call, message limit check, TTL calculation) in `backend/src/services/tutor_service.py`
+- [ ] T008 Create tutor API handler with Router (POST /sessions, POST /sessions/{sessionId}/messages with 409 Conflict for ended/timed_out sessions, DELETE /sessions/{sessionId}, GET /sessions, GET /sessions/{sessionId}) in `backend/src/api/handlers/tutor_handler.py`
 - [ ] T009 Register tutor router with prefix `/tutor` in `backend/src/api/handler.py` and add API Gateway routes to `backend/template.yaml`
-- [ ] T010 [P] Create tutor API client (startSession, sendMessage, endSession, listSessions, getSession) in `frontend/src/services/tutor-api.ts`
-- [ ] T011 [P] Add tutor API to exports in `frontend/src/services/api.ts` or integrate with existing ApiClient pattern
+- [ ] T009a [P] Generate OpenAPI 3.0 specification from contracts/tutor-api.md in `specs/002-ai-tutor/contracts/tutor-api.openapi.yaml`
+- [ ] T010 [P] Create tutor API client (startSession, sendMessage, endSession, listSessions, getSession) in `frontend/src/services/tutor-api.ts` and export from `frontend/src/services/api.ts`
 
 **Checkpoint**: Foundation ready — user story implementation can now begin
 
@@ -47,6 +58,13 @@
 **Goal**: ユーザーがデッキを選択して Free Talk モードで AI チューターセッションを開始し、デッキ内容について自由に質問できる
 
 **Independent Test**: デッキを選択 → Free Talk セッション開始 → デッキ内容について質問 → AI がカードを参照した回答を返す
+
+### Tests for User Story 1 (TDD: Red Phase)
+
+> **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
+
+- [ ] T012a [P] [US1] Component tests for TutorContext (session state, API integration, error handling) in `frontend/src/contexts/__tests__/TutorContext.test.tsx`
+- [ ] T012b [P] [US1] Component tests for ModeSelector, ChatMessage, ChatInput in `frontend/src/components/tutor/__tests__/`
 
 ### Implementation for User Story 1
 
@@ -77,8 +95,9 @@
 - [ ] T023 [US4] Add message limit reached UI (display limit message, suggest starting new session) to `frontend/src/pages/TutorPage.tsx`
 - [ ] T024 [US4] Add client-side timeout detection (30 min inactivity → show timeout message) to `frontend/src/contexts/TutorContext.tsx`
 - [ ] T025 [US4] Add session end button and confirmation to TutorPage chat header in `frontend/src/pages/TutorPage.tsx`
+- [ ] T025a [US4] Add mode switch handling (start new session when switching modes mid-session, per FR-012) to `frontend/src/pages/TutorPage.tsx`
 
-**Checkpoint**: セッション管理（継続・終了・履歴・上限・タイムアウト）が完全に動作
+**Checkpoint**: セッション管理（継続・終了・履歴・上限・タイムアウト・モード切替）が完全に動作
 
 ---
 
@@ -137,7 +156,6 @@
 - [ ] T035 Add AI service error handling (504 timeout, retry capability) to `backend/src/api/handlers/tutor_handler.py` and `frontend/src/contexts/TutorContext.tsx`
 - [ ] T036 Add large deck handling (100+ cards: summarize or truncate card context for Bedrock token limit) to `backend/src/services/tutor_ai_service.py`
 - [ ] T037 [P] Add loading indicator for AI response (typing animation or spinner) to `frontend/src/components/tutor/ChatMessage.tsx`
-- [ ] T038 Add mode switch handling (start new session when switching modes mid-session) to `frontend/src/pages/TutorPage.tsx`
 - [ ] T039 Run backend tests (`cd backend && make test`) and frontend tests (`cd frontend && npm run test`) to verify no regressions
 
 ---
@@ -173,7 +191,9 @@
 ### Parallel Opportunities
 
 - T002, T003, T004 can run in parallel (different files, no dependencies)
-- T010, T011 can run in parallel with backend tasks T005-T009
+- T005a, T006a, T007a, T008a can run in parallel (TDD test files, no dependencies)
+- T012a, T012b can run in parallel (frontend test files, no dependencies)
+- T010 can run in parallel with backend tasks T005-T009
 - T014, T015 can run in parallel (different component files)
 - T032 can run in parallel with other Phase 7 tasks
 - US2 (Phase 5) and US3 (Phase 6) can run in parallel with each other
@@ -223,14 +243,14 @@ Task: T015 "Create ChatInput component in frontend/src/components/tutor/ChatInpu
 | Phase | Story | Task Count | Key Deliverables |
 |-------|-------|------------|-----------------|
 | Phase 1 | Setup | 4 | DynamoDB table, models, types |
-| Phase 2 | Foundational | 7 | Prompts, services, handler, API client |
-| Phase 3 | US1 Free Talk | 8 | TutorPage, ChatMessage, ChatInput, ModeSelector |
-| Phase 4 | US4 Session Mgmt | 6 | SessionList, timeout, limit, history |
+| Phase 2 | Foundational | 12 | Tests (TDD), prompts, services, handler, API client, OpenAPI spec |
+| Phase 3 | US1 Free Talk | 10 | Tests (TDD), TutorPage, ChatMessage, ChatInput, ModeSelector |
+| Phase 4 | US4 Session Mgmt | 7 | SessionList, timeout, limit, history, mode switch |
 | Phase 5 | US2 Quiz | 2 | Quiz prompt, quiz UI styling |
 | Phase 6 | US3 Weak Point | 4 | Weak card data, prompt, 422 handling |
 | Phase 7 | US5 Related Cards | 2 | RelatedCardChip, ChatMessage integration |
-| Phase 8 | Polish | 6 | Edge cases, error handling, tests |
-| **Total** | | **39** | |
+| Phase 8 | Polish | 5 | Edge cases, error handling, final validation |
+| **Total** | | **46** | |
 
 ---
 
