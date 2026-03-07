@@ -1,8 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, act, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { TutorProvider, useTutorContext } from "../TutorContext";
-import type { TutorSession, TutorMessage, SendMessageResponse } from "@/types";
+import type { TutorSession, SendMessageResponse } from "@/types";
 
 // Mock tutor-api
 const mockStartSession = vi.fn();

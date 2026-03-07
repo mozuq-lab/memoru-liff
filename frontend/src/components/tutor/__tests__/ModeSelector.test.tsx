@@ -1,8 +1,7 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ModeSelector } from "../ModeSelector";
-import type { LearningMode } from "@/types";
 
 describe("ModeSelector", () => {
   const onSelect = vi.fn();

@@ -49,7 +49,6 @@ describe("ChatInput", () => {
   });
 
   it("2000文字を超える入力は制限される", async () => {
-    const user = userEvent.setup();
     render(<ChatInput onSend={onSend} />);
     const input = screen.getByPlaceholderText(/メッセージ/) as HTMLInputElement;
     expect(input).toHaveAttribute("maxLength", "2000");
