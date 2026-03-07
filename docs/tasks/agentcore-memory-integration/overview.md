@@ -31,10 +31,10 @@
 
 ## 全体進捗
 
-- [ ] Phase 1: 基盤構築
-- [ ] Phase 2: SessionManager 実装
-- [ ] Phase 3: TutorService リファクタリング
-- [ ] Phase 4: 統合テスト・ドキュメント
+- [x] Phase 1: 基盤構築
+- [x] Phase 2: SessionManager 実装
+- [x] Phase 3: TutorService リファクタリング
+- [x] Phase 4: 統合テスト・ドキュメント
 
 ## マイルストーン
 
@@ -52,9 +52,9 @@
 
 ### タスク一覧
 
-- [ ] [TASK-0161: 依存パッケージ追加](TASK-0161.md) - 2h (DIRECT) 🔵
-- [ ] [TASK-0162: SAM テンプレート更新](TASK-0162.md) - 4h (DIRECT) 🔵
-- [ ] [TASK-0163: SessionManager ファクトリ実装](TASK-0163.md) - 6h (TDD) 🔵
+- [x] [TASK-0161: 依存パッケージ追加](TASK-0161.md) - 2h (DIRECT) 🔵
+- [x] [TASK-0162: SAM テンプレート更新](TASK-0162.md) - 4h (DIRECT) 🔵
+- [x] [TASK-0163: SessionManager ファクトリ実装](TASK-0163.md) - 6h (TDD) 🔵
 
 ### 依存関係
 
@@ -112,7 +112,7 @@ TASK-0164 + TASK-0165 → TASK-0166 → TASK-0167 → TASK-0168
 ### タスク一覧
 
 - [x] [TASK-0169: 統合テスト・API 互換性確認](TASK-0169.md) - 6h (TDD) 🔵
-- [ ] [TASK-0170: ドキュメント整備・最終確認](TASK-0170.md) - 2h (DIRECT) 🔵
+- [x] [TASK-0170: ドキュメント整備・最終確認](TASK-0170.md) - 2h (DIRECT) 🔵
 
 ### 依存関係
 

@@ -297,12 +297,12 @@ class TestAPICompatibility:
             )
 
             # Create two sessions
-            s1 = service.start_session(
+            service.start_session(
                 user_id="integration-user",
                 deck_id="deck_int_001",
                 mode="free_talk",
             )
-            s2 = service.start_session(
+            service.start_session(
                 user_id="integration-user",
                 deck_id="deck_int_001",
                 mode="quiz",

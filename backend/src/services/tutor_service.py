@@ -8,7 +8,6 @@ message limit enforcement, and TTL calculation.
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
 from typing import Any
 
 import boto3
@@ -239,8 +238,6 @@ class TutorService:
         current_count = int(item.get("message_count", 0))
         if current_count >= self.MAX_ROUNDS:
             raise MessageLimitError(f"Session {session_id} has reached message limit")
-
-        now = datetime.now(timezone.utc)
 
         # Get AI response via SessionManager
         system_prompt = item.get("system_prompt", "")

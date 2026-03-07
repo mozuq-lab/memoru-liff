@@ -446,14 +446,11 @@ class TestStrandsSessionManagerIntegration:
         ):
             service = StrandsTutorAIService(environment="dev")
 
-        with patch("services.tutor_ai_service.Agent", mock_agent_cls, create=True):
-            # Call _create_agent directly to verify kwargs
-            from strands import Agent as _OrigAgent  # noqa: F811
-            with patch("strands.Agent", mock_agent_cls):
-                agent = service._create_agent(
-                    system_prompt="sys",
-                    session_manager=mock_session_manager,
-                )
+        with patch("strands.Agent", mock_agent_cls):
+            service._create_agent(
+                system_prompt="sys",
+                session_manager=mock_session_manager,
+            )
 
             # Verify Agent was instantiated with agent_id="tutor"
             call_kwargs = mock_agent_cls.call_args[1]

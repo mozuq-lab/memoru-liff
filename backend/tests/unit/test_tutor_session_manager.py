@@ -7,8 +7,6 @@ SessionManager interface for managing conversation history.
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 
 # ===================================================================
 # Helpers
@@ -515,7 +513,7 @@ class TestConstructor:
         mock_boto3.resource.return_value = mock_resource
 
         with patch.dict("os.environ", {"DYNAMODB_ENDPOINT_URL": "http://localhost:8000"}):
-            sm = DynamoDBSessionManager(
+            DynamoDBSessionManager(
                 table_name="my-table",
                 session_id="sess1",
                 user_id="user1",
@@ -541,7 +539,7 @@ class TestConstructor:
             env = {"AWS_ENDPOINT_URL": "http://localhost:4566"}
             with patch.dict("os.environ", env, clear=False):
                 with patch.dict("os.environ", {"DYNAMODB_ENDPOINT_URL": ""}, clear=False):
-                    sm = DynamoDBSessionManager(
+                    DynamoDBSessionManager(
                         table_name="my-table",
                         session_id="sess1",
                         user_id="user1",
@@ -559,7 +557,7 @@ class TestConstructor:
         mock_boto3.resource.return_value = mock_resource
 
         with patch.dict("os.environ", {"DYNAMODB_ENDPOINT_URL": "", "AWS_ENDPOINT_URL": ""}):
-            sm = DynamoDBSessionManager(
+            DynamoDBSessionManager(
                 table_name="my-table",
                 session_id="sess1",
                 user_id="user1",
