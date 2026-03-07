@@ -6,3 +6,6 @@ python-jose[cryptography]>=3.3.0
 # AI / Strands Agents SDK
 strands-agents>=0.1.0,<2.0.0
 strands-agents-tools>=0.1.0,<1.0.0
+# URL content extraction
+beautifulsoup4>=4.12.0
+markdownify>=0.13.0

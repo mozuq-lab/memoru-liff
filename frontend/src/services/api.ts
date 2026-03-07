@@ -4,6 +4,8 @@ import type {
   UpdateCardRequest,
   GenerateCardsRequest,
   GenerateCardsResponse,
+  GenerateFromUrlRequest,
+  GenerateFromUrlResponse,
   RefineCardRequest,
   RefineCardResponse,
   DueCardsResponse,
@@ -19,6 +21,8 @@ import type {
   StatsResponse,
   WeakCardsResponse,
   ForecastResponse,
+  BrowserProfile,
+  BrowserProfileListResponse,
 } from '@/types';
 import { authService } from './auth';
 
@@ -145,6 +149,14 @@ class ApiClient {
     });
   }
 
+  async generateFromUrl(data: GenerateFromUrlRequest, options?: { signal?: AbortSignal }): Promise<GenerateFromUrlResponse> {
+    return this.request<GenerateFromUrlResponse>('/cards/generate-from-url', {
+      method: 'POST',
+      body: JSON.stringify(data),
+      signal: options?.signal,
+    });
+  }
+
   async refineCard(data: RefineCardRequest, options?: { signal?: AbortSignal }): Promise<RefineCardResponse> {
     return this.request<RefineCardResponse>('/cards/refine', {
       method: 'POST',
@@ -249,6 +261,25 @@ class ApiClient {
     const qs = searchParams.toString();
     return this.request<ForecastResponse>(`/stats/forecast${qs ? `?${qs}` : ''}`);
   }
+
+  // Browser Profile API
+  async getBrowserProfiles(): Promise<BrowserProfile[]> {
+    const response = await this.request<BrowserProfileListResponse>('/browser-profiles');
+    return response.profiles;
+  }
+
+  async createBrowserProfile(name: string): Promise<BrowserProfile> {
+    return this.request<BrowserProfile>('/browser-profiles', {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    });
+  }
+
+  async deleteBrowserProfile(profileId: string): Promise<void> {
+    await this.request<void>(`/browser-profiles/${profileId}`, {
+      method: 'DELETE',
+    });
+  }
 }
 
 export const apiClient = new ApiClient();
@@ -261,6 +292,7 @@ export const cardsApi = {
   updateCard: (id: string, data: UpdateCardRequest) => apiClient.updateCard(id, data),
   deleteCard: (id: string) => apiClient.deleteCard(id),
   generateCards: (data: GenerateCardsRequest, options?: { signal?: AbortSignal }) => apiClient.generateCards(data, options),
+  generateFromUrl: (data: GenerateFromUrlRequest, options?: { signal?: AbortSignal }) => apiClient.generateFromUrl(data, options),
   refineCard: (data: RefineCardRequest, options?: { signal?: AbortSignal }) => apiClient.refineCard(data, options),
   getDueCards: (limit?: number, deckId?: string) => apiClient.getDueCards(limit, deckId),
   getDueCount: () => apiClient.getDueCount(),
@@ -289,4 +321,10 @@ export const statsApi = {
   getStats: () => apiClient.getStats(),
   getWeakCards: (limit?: number) => apiClient.getWeakCards(limit),
   getForecast: (days?: number) => apiClient.getForecast(days),
+};
+
+export const browserProfilesApi = {
+  getProfiles: () => apiClient.getBrowserProfiles(),
+  createProfile: (name: string) => apiClient.createBrowserProfile(name),
+  deleteProfile: (profileId: string) => apiClient.deleteBrowserProfile(profileId),
 };

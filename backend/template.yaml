@@ -221,6 +221,35 @@ Resources:
         - Key: Application
           Value: memoru
 
+  BrowserProfilesTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub memoru-browser-profiles-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: profile_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_id
+          KeyType: HASH
+        - AttributeName: profile_id
+          KeyType: RANGE
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+      DeletionProtectionEnabled: !If [IsProd, true, false]
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: memoru
+
   #============================================================
   # API Gateway (HTTP API)
   #============================================================
@@ -290,6 +319,8 @@ Resources:
             TableName: !Ref ReviewsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref DecksTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BrowserProfilesTable
         - Version: '2012-10-17'
           Statement:
             - Effect: Allow
@@ -303,6 +334,7 @@ Resources:
           OIDC_ISSUER: !Ref OidcIssuer
           BEDROCK_MODEL_ID: !Ref BedrockModelId
           LINE_CHANNEL_ID: !Ref LineChannelId
+          BROWSER_PROFILES_TABLE: !Ref BrowserProfilesTable
       Events:
         # User endpoints
         GetUser:
@@ -436,6 +468,25 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /stats/forecast
             Method: GET
+        # Browser profile endpoints
+        ListBrowserProfiles:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /browser-profiles
+            Method: GET
+        CreateBrowserProfile:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /browser-profiles
+            Method: POST
+        DeleteBrowserProfile:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /browser-profiles/{profileId}
+            Method: DELETE
       Tags:
         Environment: !Ref Environment
         Application: memoru
@@ -462,9 +513,18 @@ Resources:
               Action:
                 - secretsmanager:GetSecretValue
               Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:memoru-${Environment}-line-credentials-*
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource:
+                - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
+                - !Sub arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0
       Environment:
         Variables:
           LINE_CHANNEL_SECRET_ARN: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:memoru-${Environment}-line-credentials
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
       Events:
         LineWebhook:
           Type: HttpApi
@@ -597,6 +657,52 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /advice
             Method: GET
+      Tags:
+        Environment: !Ref Environment
+        Application: memoru
+
+  # URL Card Generation Function (dedicated for longer timeout)
+  UrlGenerateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub memoru-url-generate-${Environment}
+      CodeUri: src/
+      Handler: api.handler.url_generate_handler
+      Description: AI card generation from URL handler for POST /cards/generate-from-url
+      Timeout: 120
+      MemorySize: 512
+      ReservedConcurrentExecutions: 10
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UsersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CardsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DecksTable
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource:
+                - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
+                - !Sub arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0
+            - Effect: Allow
+              Action:
+                - bedrock-agentcore:*
+              Resource: '*'
+      Environment:
+        Variables:
+          OIDC_ISSUER: !Ref OidcIssuer
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+          AGENTCORE_BROWSER_REGION: !Ref AWS::Region
+      Events:
+        UrlGenerate:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /cards/generate-from-url
+            Method: POST
       Tags:
         Environment: !Ref Environment
         Application: memoru

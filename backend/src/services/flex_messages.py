@@ -1,6 +1,8 @@
 """Flex Message templates for LINE Messaging API."""
 
+import json
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote
 
 
 def create_question_message(card_id: str, front: str) -> Dict[str, Any]:
@@ -374,4 +376,206 @@ def create_reminder_message(due_count: int) -> Dict[str, Any]:
                 ],
             },
         },
+    }
+
+
+# ============================================================
+# URL Card Generation Messages
+# ============================================================
+
+
+def create_url_generation_progress_message(url: str) -> Dict[str, Any]:
+    """Create progress message for URL card generation.
+
+    Args:
+        url: The URL being processed.
+
+    Returns:
+        Text message JSON structure.
+    """
+    # Extract domain for display
+    from urllib.parse import urlparse
+
+    domain = urlparse(url).netloc or url
+    return {
+        "type": "text",
+        "text": f"🔄 {domain} からカードを生成中です...\n\nしばらくお待ちください。",
+    }
+
+
+def create_card_preview_carousel(
+    cards: List[Dict[str, Any]],
+    page_title: str,
+    page_url: str,
+    user_id: str,
+) -> Dict[str, Any]:
+    """Create card preview carousel Flex Message.
+
+    Shows generated cards in a carousel format with save button.
+    LINE carousel supports max 10 bubbles.
+
+    Args:
+        cards: List of generated card dicts with front/back/tags.
+        page_title: Title of the source page.
+        page_url: URL of the source page.
+        user_id: System user ID for save postback.
+
+    Returns:
+        Flex Message JSON structure.
+    """
+    if not cards:
+        return {
+            "type": "text",
+            "text": "カードを生成できませんでした。別のURLでお試しください。",
+        }
+
+    # LINE carousel max is 10 bubbles; reserve 1 for summary
+    max_card_bubbles = 9
+    display_cards = cards[:max_card_bubbles]
+
+    bubbles: List[Dict[str, Any]] = []
+
+    for i, card in enumerate(display_cards):
+        front = str(card.get("front", ""))
+        back = str(card.get("back", ""))
+
+        # Truncate long text for display
+        if len(front) > 100:
+            front = front[:97] + "..."
+        if len(back) > 100:
+            back = back[:97] + "..."
+
+        bubble: Dict[str, Any] = {
+            "type": "bubble",
+            "size": "kilo",
+            "header": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": f"カード {i + 1}/{len(display_cards)}",
+                        "size": "xs",
+                        "color": "#888888",
+                    }
+                ],
+                "paddingBottom": "0px",
+            },
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": "問題",
+                        "size": "xs",
+                        "color": "#888888",
+                        "weight": "bold",
+                    },
+                    {
+                        "type": "text",
+                        "text": front,
+                        "wrap": True,
+                        "size": "sm",
+                        "margin": "xs",
+                    },
+                    {
+                        "type": "separator",
+                        "margin": "md",
+                    },
+                    {
+                        "type": "text",
+                        "text": "解答",
+                        "size": "xs",
+                        "color": "#888888",
+                        "weight": "bold",
+                        "margin": "md",
+                    },
+                    {
+                        "type": "text",
+                        "text": back,
+                        "wrap": True,
+                        "size": "sm",
+                        "margin": "xs",
+                        "color": "#1DB446",
+                    },
+                ],
+                "paddingAll": "16px",
+            },
+        }
+        bubbles.append(bubble)
+
+    # Summary bubble with save button
+    cards_json = json.dumps(
+        [{"front": c["front"], "back": c["back"], "tags": c.get("tags", [])} for c in display_cards],
+        ensure_ascii=False,
+    )
+    # Postback data has 300 char limit, so we use a reference key
+    postback_data = f"action=save_url_cards&user_id={user_id}&count={len(display_cards)}&url={quote(page_url, safe='')}"
+
+    summary_bubble: Dict[str, Any] = {
+        "type": "bubble",
+        "size": "kilo",
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {
+                    "type": "text",
+                    "text": f"📄 {page_title}" if page_title else "📄 Webページ",
+                    "weight": "bold",
+                    "size": "sm",
+                    "wrap": True,
+                },
+                {
+                    "type": "text",
+                    "text": f"{len(display_cards)}枚のカードを生成しました",
+                    "size": "sm",
+                    "color": "#888888",
+                    "margin": "md",
+                },
+            ],
+            "paddingAll": "16px",
+        },
+        "footer": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {
+                    "type": "button",
+                    "action": {
+                        "type": "postback",
+                        "label": f"全{len(display_cards)}枚を保存",
+                        "data": postback_data,
+                    },
+                    "style": "primary",
+                    "color": "#1DB446",
+                },
+            ],
+        },
+    }
+    bubbles.append(summary_bubble)
+
+    return {
+        "type": "flex",
+        "altText": f"URLから{len(display_cards)}枚のカードを生成しました",
+        "contents": {
+            "type": "carousel",
+            "contents": bubbles,
+        },
+    }
+
+
+def create_url_generation_error_message(error: str) -> Dict[str, Any]:
+    """Create error message for URL card generation failure.
+
+    Args:
+        error: Error description.
+
+    Returns:
+        Text message JSON structure.
+    """
+    return {
+        "type": "text",
+        "text": f"⚠️ カード生成エラー\n\n{error}\n\n別のURLでお試しください。",
     }
