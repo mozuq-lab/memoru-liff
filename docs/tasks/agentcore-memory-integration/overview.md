@@ -94,7 +94,7 @@ TASK-0163 → TASK-0165
 
 - [x] [TASK-0166: TutorService.start_session リファクタリング](TASK-0166.md) - 8h (TDD) 🔵
 - [x] [TASK-0167: TutorService.send_message リファクタリング](TASK-0167.md) - 8h (TDD) 🔵
-- [ ] [TASK-0168: TutorService.get_session 対応](TASK-0168.md) - 4h (TDD) 🟡
+- [x] [TASK-0168: TutorService.get_session 対応](TASK-0168.md) - 4h (TDD) 🟡
 
 ### 依存関係
 

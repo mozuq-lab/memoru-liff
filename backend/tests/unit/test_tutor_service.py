@@ -846,3 +846,264 @@ class TestGetSession:
 
         with pytest.raises(SessionNotFoundError):
             tutor_service.get_session("test-user", "tutor_nonexistent")
+
+
+class TestGetSessionWithSessionManager:
+    """Tests for TutorService.get_session with SessionManager integration (TASK-0168)."""
+
+    def test_get_session_messages_via_session_manager(
+        self, dynamodb_tables, mock_ai_service
+    ):
+        """TC-get-dynamodb: get_session retrieves messages via SessionManager.initialize()."""
+        _seed_deck(dynamodb_tables)
+
+        # Build a SessionManager mock that populates holder.messages on initialize()
+        mock_sm_factory = MagicMock()
+        mock_sm_start = MagicMock()  # for start_session
+        mock_sm_get = MagicMock()    # for get_session
+
+        call_count = {"n": 0}
+
+        def factory_side_effect(**kwargs):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                return mock_sm_start
+            return mock_sm_get
+
+        mock_sm_factory.side_effect = factory_side_effect
+
+        # When initialize() is called on the get_session SM, populate agent.messages
+        def init_side_effect(agent, session_id=None):
+            agent.messages = [
+                {"role": "user", "content": [{"text": "appleについて教えて"}]},
+                {"role": "assistant", "content": [{"text": "appleはりんごです。"}]},
+            ]
+
+        mock_sm_get.initialize.side_effect = init_side_effect
+
+        with patch.dict(os.environ, {
+            "TUTOR_SESSIONS_TABLE": "memoru-tutor-sessions-test",
+            "DECKS_TABLE": "memoru-decks-test",
+            "CARDS_TABLE": "memoru-cards-test",
+        }):
+            from services.tutor_service import TutorService
+
+            service = TutorService(
+                table_name="memoru-tutor-sessions-test",
+                dynamodb_resource=dynamodb_tables,
+                ai_service=mock_ai_service,
+                session_manager_factory=mock_sm_factory,
+            )
+
+            session = service.start_session(
+                user_id="test-user", deck_id="deck_001", mode="free_talk"
+            )
+
+            result = service.get_session("test-user", session.session_id)
+
+        # Messages should come from SessionManager
+        assert len(result.messages) == 2
+        assert result.messages[0].role == "user"
+        assert result.messages[0].content == "appleについて教えて"
+        assert result.messages[1].role == "assistant"
+        assert result.messages[1].content == "appleはりんごです。"
+        # SessionManager.close() should be called
+        mock_sm_get.close.assert_called_once()
+
+    def test_get_session_response_format(
+        self, dynamodb_tables, mock_ai_service
+    ):
+        """TC-get-response: API response format matches TutorSessionResponse contract."""
+        _seed_deck(dynamodb_tables)
+
+        mock_sm_factory = MagicMock()
+        mock_sm = MagicMock()
+        mock_sm_factory.return_value = mock_sm
+
+        # initialize() sets empty messages
+        def init_side_effect(agent, session_id=None):
+            agent.messages = [
+                {"role": "assistant", "content": [{"text": "こんにちは！"}]},
+            ]
+
+        mock_sm.initialize.side_effect = init_side_effect
+
+        with patch.dict(os.environ, {
+            "TUTOR_SESSIONS_TABLE": "memoru-tutor-sessions-test",
+            "DECKS_TABLE": "memoru-decks-test",
+            "CARDS_TABLE": "memoru-cards-test",
+        }):
+            from services.tutor_service import TutorService
+            from models.tutor import TutorSessionResponse, TutorMessage
+
+            service = TutorService(
+                table_name="memoru-tutor-sessions-test",
+                dynamodb_resource=dynamodb_tables,
+                ai_service=mock_ai_service,
+                session_manager_factory=mock_sm_factory,
+            )
+
+            session = service.start_session(
+                user_id="test-user", deck_id="deck_001", mode="free_talk"
+            )
+
+            result = service.get_session("test-user", session.session_id)
+
+        # Verify response type and structure
+        assert isinstance(result, TutorSessionResponse)
+        assert result.session_id == session.session_id
+        assert result.deck_id == "deck_001"
+        assert result.mode == "free_talk"
+        assert result.status == "active"
+        assert result.created_at is not None
+        assert result.updated_at is not None
+        assert isinstance(result.messages, list)
+        for msg in result.messages:
+            assert isinstance(msg, TutorMessage)
+            assert msg.role in ("user", "assistant")
+            assert isinstance(msg.content, str)
+
+    def test_get_session_empty_messages(
+        self, dynamodb_tables, mock_ai_service
+    ):
+        """TC-get-empty-session: Session with no messages returns empty list without error."""
+        _seed_deck(dynamodb_tables)
+
+        mock_sm_factory = MagicMock()
+        mock_sm = MagicMock()
+        mock_sm_factory.return_value = mock_sm
+
+        # initialize() sets empty messages
+        def init_side_effect(agent, session_id=None):
+            agent.messages = []
+
+        mock_sm.initialize.side_effect = init_side_effect
+
+        with patch.dict(os.environ, {
+            "TUTOR_SESSIONS_TABLE": "memoru-tutor-sessions-test",
+            "DECKS_TABLE": "memoru-decks-test",
+            "CARDS_TABLE": "memoru-cards-test",
+        }):
+            from services.tutor_service import TutorService
+
+            service = TutorService(
+                table_name="memoru-tutor-sessions-test",
+                dynamodb_resource=dynamodb_tables,
+                ai_service=mock_ai_service,
+                session_manager_factory=mock_sm_factory,
+            )
+
+            session = service.start_session(
+                user_id="test-user", deck_id="deck_001", mode="free_talk"
+            )
+
+            result = service.get_session("test-user", session.session_id)
+
+        assert isinstance(result.messages, list)
+        assert len(result.messages) == 0
+
+    def test_get_session_fallback_on_session_manager_error(
+        self, dynamodb_tables, mock_ai_service
+    ):
+        """SessionManager failure falls back to DynamoDB messages field."""
+        _seed_deck(dynamodb_tables)
+
+        mock_sm_factory = MagicMock()
+        call_count = {"n": 0}
+        mock_sm_start = MagicMock()
+
+        def factory_side_effect(**kwargs):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                return mock_sm_start
+            # For get_session, raise an error
+            raise RuntimeError("SessionManager init failed")
+
+        mock_sm_factory.side_effect = factory_side_effect
+
+        with patch.dict(os.environ, {
+            "TUTOR_SESSIONS_TABLE": "memoru-tutor-sessions-test",
+            "DECKS_TABLE": "memoru-decks-test",
+            "CARDS_TABLE": "memoru-cards-test",
+        }):
+            from services.tutor_service import TutorService
+
+            service = TutorService(
+                table_name="memoru-tutor-sessions-test",
+                dynamodb_resource=dynamodb_tables,
+                ai_service=mock_ai_service,
+                session_manager_factory=mock_sm_factory,
+            )
+
+            session = service.start_session(
+                user_id="test-user", deck_id="deck_001", mode="free_talk"
+            )
+
+            # Manually add messages to DynamoDB for fallback
+            table = dynamodb_tables.Table("memoru-tutor-sessions-test")
+            table.update_item(
+                Key={"user_id": "test-user", "session_id": session.session_id},
+                UpdateExpression="SET messages = :msgs",
+                ExpressionAttributeValues={
+                    ":msgs": [
+                        {
+                            "role": "assistant",
+                            "content": "フォールバックメッセージ",
+                            "timestamp": "2026-01-01T00:00:00+00:00",
+                            "related_cards": [],
+                        }
+                    ]
+                },
+            )
+
+            # get_session should not raise, it should fall back
+            result = service.get_session("test-user", session.session_id)
+
+        assert len(result.messages) == 1
+        assert result.messages[0].content == "フォールバックメッセージ"
+
+    def test_get_session_multiline_content(
+        self, dynamodb_tables, mock_ai_service
+    ):
+        """Messages with multi-block content are joined correctly."""
+        _seed_deck(dynamodb_tables)
+
+        mock_sm_factory = MagicMock()
+        mock_sm = MagicMock()
+        mock_sm_factory.return_value = mock_sm
+
+        def init_side_effect(agent, session_id=None):
+            agent.messages = [
+                {
+                    "role": "assistant",
+                    "content": [
+                        {"text": "最初の段落。"},
+                        {"text": "2番目の段落。"},
+                    ],
+                },
+            ]
+
+        mock_sm.initialize.side_effect = init_side_effect
+
+        with patch.dict(os.environ, {
+            "TUTOR_SESSIONS_TABLE": "memoru-tutor-sessions-test",
+            "DECKS_TABLE": "memoru-decks-test",
+            "CARDS_TABLE": "memoru-cards-test",
+        }):
+            from services.tutor_service import TutorService
+
+            service = TutorService(
+                table_name="memoru-tutor-sessions-test",
+                dynamodb_resource=dynamodb_tables,
+                ai_service=mock_ai_service,
+                session_manager_factory=mock_sm_factory,
+            )
+
+            session = service.start_session(
+                user_id="test-user", deck_id="deck_001", mode="free_talk"
+            )
+
+            result = service.get_session("test-user", session.session_id)
+
+        assert len(result.messages) == 1
+        assert result.messages[0].content == "最初の段落。\n2番目の段落。"

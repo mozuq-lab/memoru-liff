@@ -438,7 +438,9 @@ class TutorService:
         item = self._get_session_item(user_id, session_id)
         item = self._check_and_mark_timeout(user_id, item)
 
-        messages = [TutorMessage(**m) for m in item.get("messages", [])]
+        # SessionManager 経由で会話履歴を取得
+        messages = self._get_session_messages(user_id, session_id, item)
+
         return TutorSessionResponse(
             session_id=item["session_id"],
             deck_id=item["deck_id"],
@@ -452,6 +454,62 @@ class TutorService:
         )
 
     # ---- Private helpers ----
+
+    def _get_session_messages(
+        self, user_id: str, session_id: str, item: dict
+    ) -> list[TutorMessage]:
+        """Get conversation messages via SessionManager.
+
+        Uses SessionManager.initialize() to restore messages from the backing
+        store, then converts from Strands format to TutorMessage format.
+        Falls back to DynamoDB item's messages field on any error.
+
+        Args:
+            user_id: The user's ID.
+            session_id: Target session ID.
+            item: Raw DynamoDB session item (for fallback).
+
+        Returns:
+            List of TutorMessage objects.
+        """
+        try:
+            sm = self.session_manager_factory(session_id=session_id, user_id=user_id)
+
+            # Use a lightweight holder to receive messages from initialize()
+            class _MessageHolder:
+                messages: list[dict] = []
+
+            holder = _MessageHolder()
+            holder.messages = []
+            sm.initialize(holder)
+            sm.close()
+
+            # Convert Strands format to TutorMessage format
+            messages: list[TutorMessage] = []
+            for msg in holder.messages:
+                content = msg.get("content", [])
+                if isinstance(content, list):
+                    text_parts = [
+                        block["text"] for block in content if "text" in block
+                    ]
+                    content_str = "\n".join(text_parts)
+                else:
+                    content_str = str(content)
+                messages.append(
+                    TutorMessage(
+                        role=msg["role"],
+                        content=content_str,
+                        related_cards=[],
+                        timestamp="",
+                    )
+                )
+            return messages
+        except Exception:
+            # SessionManager failure: fall back to DynamoDB messages field
+            logger.warning(
+                "Failed to get messages via SessionManager, falling back to DynamoDB"
+            )
+            return [TutorMessage(**m) for m in item.get("messages", [])]
 
     def _get_session_item(self, user_id: str, session_id: str) -> dict:
         """Fetch raw session item from DynamoDB."""
