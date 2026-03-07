@@ -6,4 +6,6 @@ aws-lambda-powertools[tracer]>=2.32.0
 # AI / Strands Agents SDK
 strands-agents>=0.1.0,<2.0.0
 strands-agents-tools>=0.1.0,<1.0.0
+# AgentCore Memory (SessionManager integration)
+bedrock-agentcore[strands-agents]>=0.1.0
 ollama>=0.4.0

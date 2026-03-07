@@ -8,7 +8,6 @@ message limit enforcement, and TTL calculation.
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
 from typing import Any
 
 import boto3
@@ -21,7 +20,8 @@ from models.tutor import (
     TutorSessionResponse,
 )
 from services.prompts.tutor import format_cards_context, get_system_prompt
-from services.tutor_ai_service import create_tutor_ai_service
+from services.tutor_ai_service import clean_response_text, create_tutor_ai_service
+from services.tutor_session_factory import create_tutor_session_manager
 
 logger = Logger()
 
@@ -66,6 +66,7 @@ class TutorService:
         table_name: str | None = None,
         dynamodb_resource: Any | None = None,
         ai_service: Any | None = None,
+        session_manager_factory: Any | None = None,
     ):
         self.table_name = table_name or os.environ.get(
             "TUTOR_SESSIONS_TABLE", "memoru-tutor-sessions-dev"
@@ -90,6 +91,7 @@ class TutorService:
         self.decks_table = self.dynamodb.Table(self.decks_table_name)
 
         self.ai_service = ai_service if ai_service is not None else create_tutor_ai_service()
+        self.session_manager_factory = session_manager_factory or create_tutor_session_manager
 
     def start_session(
         self,
@@ -139,38 +141,23 @@ class TutorService:
             weak_cards_context=weak_cards_context,
         )
 
-        # Generate AI greeting (may raise TutorAITimeoutError)
-        greeting_content, related_cards = self.ai_service.generate_response(
-            system_prompt=system_prompt,
-            messages=[{"role": "user", "content": "セッションを開始してください。デッキの内容を要約して挨拶してください。"}],
-        )
-        greeting_content = self.ai_service.clean_response_text(greeting_content)
-
-        # Validate related_cards against deck's card IDs
+        # Generate session_id before AI call
+        session_id = f"tutor_{uuid.uuid4()}"
         valid_card_ids = {c["card_id"] for c in cards}
-        related_cards = [cid for cid in related_cards if cid in valid_card_ids]
 
-        # All validation passed and AI greeting succeeded — now safe to end old sessions
+        # All validation passed — now safe to end old sessions
         self._auto_end_active_sessions(user_id)
 
         now = datetime.now(timezone.utc)
-        session_id = f"tutor_{uuid.uuid4()}"
 
-        greeting_msg = TutorMessage(
-            role="assistant",
-            content=greeting_content,
-            related_cards=related_cards,
-            timestamp=now.isoformat(),
-        )
-
-        # Persist to DynamoDB
-        item = {
+        # Persist metadata to DynamoDB BEFORE SessionManager writes messages
+        # (put_item replaces entire item, so it must run before append_message)
+        item: dict[str, Any] = {
             "user_id": user_id,
             "session_id": session_id,
             "deck_id": deck_id,
             "mode": mode,
             "status": "active",
-            "messages": [greeting_msg.model_dump()],
             "message_count": 0,
             "created_at": now.isoformat(),
             "updated_at": now.isoformat(),
@@ -178,6 +165,40 @@ class TutorService:
             "deck_card_ids": list(valid_card_ids),
         }
         self.table.put_item(Item=item)
+
+        # Generate AI greeting via SessionManager-attached Agent
+        sm = self.session_manager_factory(session_id=session_id, user_id=user_id)
+        try:
+            greeting_content, related_cards = self.ai_service.generate_response(
+                system_prompt=system_prompt,
+                messages="セッションを開始してください。デッキの内容を要約して挨拶してください。",
+                session_manager=sm,
+            )
+        except Exception:
+            # Rollback: remove the incomplete session to avoid orphaned records
+            try:
+                self.table.delete_item(
+                    Key={"user_id": user_id, "session_id": session_id}
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to cleanup session after AI error",
+                    extra={"session_id": session_id},
+                )
+            raise
+        finally:
+            sm.close()
+        greeting_content = self.ai_service.clean_response_text(greeting_content)
+
+        # Validate related_cards against deck's card IDs
+        related_cards = [cid for cid in related_cards if cid in valid_card_ids]
+
+        greeting_msg = TutorMessage(
+            role="assistant",
+            content=greeting_content,
+            related_cards=related_cards,
+            timestamp=now.isoformat(),
+        )
 
         return TutorSessionResponse(
             session_id=session_id,
@@ -231,30 +252,17 @@ class TutorService:
         if current_count >= self.MAX_ROUNDS:
             raise MessageLimitError(f"Session {session_id} has reached message limit")
 
-        now = datetime.now(timezone.utc)
-
-        # Add user message
-        user_msg = TutorMessage(
-            role="user",
-            content=content,
-            related_cards=[],
-            timestamp=now.isoformat(),
-        )
-
-        # Build conversation history for AI
-        messages = item.get("messages", [])
-        conversation = [
-            {"role": m["role"], "content": m["content"]}
-            for m in messages
-        ]
-        conversation.append({"role": "user", "content": content})
-
-        # Get AI response
+        # Get AI response via SessionManager
         system_prompt = item.get("system_prompt", "")
-        ai_content, related_cards = self.ai_service.generate_response(
-            system_prompt=system_prompt,
-            messages=conversation,
-        )
+        sm = self.session_manager_factory(session_id=session_id, user_id=user_id)
+        try:
+            ai_content, related_cards = self.ai_service.generate_response(
+                system_prompt=system_prompt,
+                messages=content,
+                session_manager=sm,
+            )
+        finally:
+            sm.close()
         ai_content = self.ai_service.clean_response_text(ai_content)
 
         # Validate related_cards against deck's card IDs
@@ -272,15 +280,9 @@ class TutorService:
         new_count = current_count + 1
         is_limit_reached = new_count >= self.MAX_ROUNDS
 
-        # Update DynamoDB
-        updated_messages = messages + [
-            user_msg.model_dump(),
-            ai_msg.model_dump(),
-        ]
-
-        update_expr = "SET messages = :msgs, message_count = :cnt, updated_at = :upd"
+        # Update DynamoDB metadata (messages managed by SessionManager)
+        update_expr = "SET message_count = :cnt, updated_at = :upd"
         expr_values: dict[str, Any] = {
-            ":msgs": updated_messages,
             ":cnt": new_count,
             ":upd": datetime.now(timezone.utc).isoformat(),
         }
@@ -352,7 +354,7 @@ class TutorService:
             ExpressionAttributeNames={"#st": "status", "#ttl": "ttl"},
         )
 
-        messages = [TutorMessage(**m) for m in item.get("messages", [])]
+        messages = self._get_session_messages(user_id, session_id, item)
         return TutorSessionResponse(
             session_id=session_id,
             deck_id=item["deck_id"],
@@ -446,7 +448,9 @@ class TutorService:
         item = self._get_session_item(user_id, session_id)
         item = self._check_and_mark_timeout(user_id, item)
 
-        messages = [TutorMessage(**m) for m in item.get("messages", [])]
+        # SessionManager 経由で会話履歴を取得
+        messages = self._get_session_messages(user_id, session_id, item)
+
         return TutorSessionResponse(
             session_id=item["session_id"],
             deck_id=item["deck_id"],
@@ -460,6 +464,84 @@ class TutorService:
         )
 
     # ---- Private helpers ----
+
+    def _get_session_messages(
+        self, user_id: str, session_id: str, item: dict
+    ) -> list[TutorMessage]:
+        """Get conversation messages via SessionManager.
+
+        Uses SessionManager.read_messages() (DynamoDB backend) or
+        initialize() (other backends) to restore messages, then converts
+        to TutorMessage format with clean_response_text applied.
+        Falls back to DynamoDB item's messages field on any error.
+
+        Args:
+            user_id: The user's ID.
+            session_id: Target session ID.
+            item: Raw DynamoDB session item (for fallback).
+
+        Returns:
+            List of TutorMessage objects.
+        """
+        try:
+            sm = self.session_manager_factory(session_id=session_id, user_id=user_id)
+            try:
+                if hasattr(sm, "read_messages") and callable(sm.read_messages):
+                    # DynamoDB backend: read raw messages preserving metadata
+                    raw_messages = sm.read_messages()
+                    messages: list[TutorMessage] = []
+                    for msg in raw_messages:
+                        content_str = clean_response_text(
+                            msg.get("content", "")
+                        )
+                        messages.append(
+                            TutorMessage(
+                                role=msg["role"],
+                                content=content_str,
+                                related_cards=msg.get("related_cards", []),
+                                timestamp=msg.get("timestamp", ""),
+                            )
+                        )
+                    return messages
+
+                # Other backends: use initialize() with lightweight holder
+                class _Holder:
+                    def __init__(self):
+                        self.messages: list[dict] = []
+
+                holder = _Holder()
+                sm.initialize(holder)
+
+                messages = []
+                for msg in holder.messages:
+                    content = msg.get("content", [])
+                    if isinstance(content, list):
+                        text_parts = [
+                            block["text"]
+                            for block in content
+                            if "text" in block
+                        ]
+                        content_str = "\n".join(text_parts)
+                    else:
+                        content_str = str(content)
+                    content_str = clean_response_text(content_str)
+                    messages.append(
+                        TutorMessage(
+                            role=msg["role"],
+                            content=content_str,
+                            related_cards=[],
+                            timestamp="",
+                        )
+                    )
+                return messages
+            finally:
+                sm.close()
+        except Exception:
+            # SessionManager failure: fall back to DynamoDB messages field
+            logger.warning(
+                "Failed to get messages via SessionManager, falling back to DynamoDB"
+            )
+            return [TutorMessage(**m) for m in item.get("messages", [])]
 
     def _get_session_item(self, user_id: str, session_id: str) -> dict:
         """Fetch raw session item from DynamoDB."""
