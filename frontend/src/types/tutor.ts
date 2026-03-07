@@ -43,4 +43,5 @@ export interface SendMessageResponse {
 
 export interface SessionListResponse {
   sessions: TutorSession[];
+  total: number;
 }

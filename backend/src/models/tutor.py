@@ -54,6 +54,7 @@ class SessionListResponse(BaseModel):
     """List of tutor sessions."""
 
     sessions: list[TutorSessionResponse]
+    total: int
 
 
 LearningMode = Literal["free_talk", "quiz", "weak_point"]

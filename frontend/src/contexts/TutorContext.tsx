@@ -167,16 +167,15 @@ export const TutorProvider = ({ children }: TutorProviderProps) => {
     setError(null);
     try {
       await tutorApi.endSession(session.session_id);
+    } catch {
+      // 409 (already ended) / 404 (not found) are expected — ignore
+    } finally {
+      // Always clear local state regardless of API result
       setSession(null);
       setMessages([]);
       setIsLimitReached(false);
       setIsTimedOut(false);
       clearTimeoutTimer();
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "セッションの終了に失敗しました";
-      setError(message);
-    } finally {
       setIsLoading(false);
     }
   }, [session, clearTimeoutTimer]);

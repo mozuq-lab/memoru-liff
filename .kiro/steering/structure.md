@@ -23,10 +23,10 @@
 **Patterns**:
 - `pages/`: ルーティング対応のページコンポーネント（1ページ1ファイル）
 - `components/`: UI コンポーネント。共通部品は `components/common/`、機能別部品は `components/{feature}/`（例: `components/stats/`）に分離
-- `contexts/`: React Context によるグローバル状態管理（`AuthContext`, `CardsContext`, `DecksContext`）
+- `contexts/`: React Context によるグローバル状態管理（`AuthContext`, `CardsContext`, `DecksContext`, `TutorContext`）
 - `hooks/`: カスタムフック（`useAuth` など）
 - `services/`: API 通信・認証・LIFF SDK のサービス層
-- `types/`: TypeScript 型定義（`card.ts`, `user.ts`, `deck.ts`, `stats.ts`）
+- `types/`: TypeScript 型定義（`card.ts`, `user.ts`, `deck.ts`, `stats.ts`, `tutor.ts`）
 - `config/`: 設定（OIDC 設定など）
 
 ### Infrastructure: IaC (AWS CDK)

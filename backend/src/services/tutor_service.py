@@ -42,6 +42,10 @@ class MessageLimitError(TutorServiceError):
     """Raised when session message limit is reached."""
 
 
+class DeckNotFoundError(TutorServiceError):
+    """Raised when a deck cannot be found."""
+
+
 class EmptyDeckError(TutorServiceError):
     """Raised when a deck has no cards."""
 
@@ -106,14 +110,10 @@ class TutorService:
         Returns:
             TutorSessionResponse with the new session data.
         """
-        # Auto-end existing active sessions
-        self._auto_end_active_sessions(user_id)
-
-        # Load deck and cards
+        # Validate deck and cards BEFORE ending existing sessions (C-1 fix)
         deck = self._get_deck(user_id, deck_id)
         cards = self._get_deck_cards(user_id, deck_id)
 
-        # Validate deck is not empty
         if not cards:
             raise EmptyDeckError(
                 "このデッキにはカードがありません。カードを追加してからセッションを開始してください。"
@@ -139,12 +139,19 @@ class TutorService:
             weak_cards_context=weak_cards_context,
         )
 
-        # Generate AI greeting
+        # Generate AI greeting (may raise TutorAITimeoutError)
         greeting_content, related_cards = self.ai_service.generate_response(
             system_prompt=system_prompt,
             messages=[{"role": "user", "content": "セッションを開始してください。デッキの内容を要約して挨拶してください。"}],
         )
         greeting_content = self.ai_service.clean_response_text(greeting_content)
+
+        # Validate related_cards against deck's card IDs
+        valid_card_ids = {c["card_id"] for c in cards}
+        related_cards = [cid for cid in related_cards if cid in valid_card_ids]
+
+        # All validation passed and AI greeting succeeded — now safe to end old sessions
+        self._auto_end_active_sessions(user_id)
 
         now = datetime.now(timezone.utc)
         session_id = f"tutor_{uuid.uuid4()}"
@@ -168,6 +175,7 @@ class TutorService:
             "created_at": now.isoformat(),
             "updated_at": now.isoformat(),
             "system_prompt": system_prompt,
+            "deck_card_ids": list(valid_card_ids),
         }
         self.table.put_item(Item=item)
 
@@ -221,7 +229,7 @@ class TutorService:
         # Check message limit
         current_count = int(item.get("message_count", 0))
         if current_count >= self.MAX_ROUNDS:
-            raise SessionEndedError(f"Session {session_id} has reached message limit")
+            raise MessageLimitError(f"Session {session_id} has reached message limit")
 
         now = datetime.now(timezone.utc)
 
@@ -248,6 +256,11 @@ class TutorService:
             messages=conversation,
         )
         ai_content = self.ai_service.clean_response_text(ai_content)
+
+        # Validate related_cards against deck's card IDs
+        deck_card_ids = set(item.get("deck_card_ids", []))
+        if deck_card_ids:
+            related_cards = [cid for cid in related_cards if cid in deck_card_ids]
 
         ai_msg = TutorMessage(
             role="assistant",
@@ -392,6 +405,10 @@ class TutorService:
 
         sessions = []
         for item in items:
+            item = self._check_and_mark_timeout(user_id, item)
+            # Skip items that no longer match the requested status filter
+            if status and item["status"] != status:
+                continue
             # Return empty messages for list view (per API contract)
             sessions.append(
                 TutorSessionResponse(
@@ -427,6 +444,7 @@ class TutorService:
             SessionNotFoundError: If session doesn't exist.
         """
         item = self._get_session_item(user_id, session_id)
+        item = self._check_and_mark_timeout(user_id, item)
 
         messages = [TutorMessage(**m) for m in item.get("messages", [])]
         return TutorSessionResponse(
@@ -453,6 +471,22 @@ class TutorService:
             raise SessionNotFoundError(f"Session {session_id} not found")
         return item
 
+    def _check_and_mark_timeout(self, user_id: str, item: dict) -> dict:
+        """Check if an active session has timed out and mark it if so.
+
+        Returns the item with updated status/timestamps if timed out.
+        """
+        if item["status"] != "active":
+            return item
+        updated_at = datetime.fromisoformat(item["updated_at"])
+        now = datetime.now(timezone.utc)
+        if now - updated_at > timedelta(minutes=self.TIMEOUT_MINUTES):
+            self._mark_timed_out(user_id, item["session_id"])
+            item["status"] = "timed_out"
+            item["ended_at"] = now.isoformat()
+            item["updated_at"] = now.isoformat()
+        return item
+
     def _auto_end_active_sessions(self, user_id: str) -> None:
         """End all active sessions for the user."""
         active_sessions = self.list_sessions(user_id, status="active")
@@ -467,20 +501,28 @@ class TutorService:
                 pass  # Already ended or deleted, safe to ignore
 
     def _mark_timed_out(self, user_id: str, session_id: str) -> None:
-        """Mark a session as timed out."""
+        """Mark a session as timed out (idempotent)."""
         now = datetime.now(timezone.utc)
         ttl = int((now + timedelta(days=self.TTL_DAYS)).timestamp())
-        self.table.update_item(
-            Key={"user_id": user_id, "session_id": session_id},
-            UpdateExpression="SET #st = :status, ended_at = :ended, updated_at = :upd, #ttl = :ttl",
-            ExpressionAttributeValues={
-                ":status": "timed_out",
-                ":ended": now.isoformat(),
-                ":upd": now.isoformat(),
-                ":ttl": ttl,
-            },
-            ExpressionAttributeNames={"#st": "status", "#ttl": "ttl"},
-        )
+        try:
+            self.table.update_item(
+                Key={"user_id": user_id, "session_id": session_id},
+                UpdateExpression="SET #st = :status, ended_at = :ended, updated_at = :upd, #ttl = :ttl",
+                ConditionExpression="#st = :active",
+                ExpressionAttributeValues={
+                    ":status": "timed_out",
+                    ":active": "active",
+                    ":ended": now.isoformat(),
+                    ":upd": now.isoformat(),
+                    ":ttl": ttl,
+                },
+                ExpressionAttributeNames={"#st": "status", "#ttl": "ttl"},
+            )
+        except ClientError as e:
+            if e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+                pass  # Already marked — idempotent
+            else:
+                raise
 
     def _get_deck(self, user_id: str, deck_id: str) -> dict:
         """Fetch deck info from DynamoDB."""
@@ -489,7 +531,7 @@ class TutorService:
         )
         item = response.get("Item")
         if not item:
-            raise TutorServiceError(f"Deck {deck_id} not found")
+            raise DeckNotFoundError(f"Deck {deck_id} not found")
         return item
 
     def _get_deck_cards(self, user_id: str, deck_id: str) -> list[dict]:

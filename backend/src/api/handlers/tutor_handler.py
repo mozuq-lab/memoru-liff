@@ -14,8 +14,10 @@ from models.tutor import (
     StartSessionRequest,
 )
 from services.tutor_service import (
+    DeckNotFoundError,
     EmptyDeckError,
     InsufficientReviewDataError,
+    MessageLimitError,
     SessionEndedError,
     SessionNotFoundError,
     TutorService,
@@ -62,6 +64,12 @@ def create_session():
             status_code=201,
             content_type=content_types.APPLICATION_JSON,
             body=json.dumps(session.model_dump(mode="json")),
+        )
+    except DeckNotFoundError as e:
+        return Response(
+            status_code=404,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": str(e)}),
         )
     except InsufficientReviewDataError as e:
         return Response(
@@ -125,6 +133,12 @@ def send_message(session_id: str):
             status_code=404,
             content_type=content_types.APPLICATION_JSON,
             body=json.dumps({"error": f"Session not found: {session_id}"}),
+        )
+    except MessageLimitError:
+        return Response(
+            status_code=429,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": f"Session has reached message limit: {session_id}"}),
         )
     except SessionEndedError:
         return Response(

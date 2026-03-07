@@ -71,6 +71,7 @@ Parameters:
 Conditions:
   IsProd: !Equals [!Ref Environment, prod]
   IsNotProd: !Not [!Equals [!Ref Environment, prod]]
+  HasTutorModelId: !Not [!Equals [!Ref TutorModelId, ""]]
 
 Resources:
   #============================================================
@@ -381,6 +382,16 @@ Resources:
               Resource:
                 - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
                 - !Sub arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0
+        - !If
+          - HasTutorModelId
+          - Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource:
+                  - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${TutorModelId}
+          - !Ref AWS::NoValue
       Environment:
         Variables:
           OIDC_ISSUER: !Ref OidcIssuer

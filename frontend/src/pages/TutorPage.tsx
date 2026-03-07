@@ -52,12 +52,13 @@ export const TutorPage = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // When session starts, switch to chat view
+  // When session starts (not via mode switch), switch to chat view
+  const [pendingModeSwitch, setPendingModeSwitch] = useState(false);
   useEffect(() => {
-    if (session && view === "mode-select") {
+    if (session && view === "mode-select" && !pendingModeSwitch) {
       setView("chat");
     }
-  }, [session, view]);
+  }, [session, view, pendingModeSwitch]);
 
   if (!deckId) {
     return (
@@ -68,6 +69,7 @@ export const TutorPage = () => {
   }
 
   const handleModeSelect = async (mode: LearningMode) => {
+    setPendingModeSwitch(false);
     await startSession(deckId, mode);
   };
 
@@ -75,8 +77,12 @@ export const TutorPage = () => {
     await sendMessage(content);
   };
 
-  // T025a: モード切り替え — 新しいセッションを開始
-  const handleModeSwitch = () => {
+  // T025a: モード切り替え — セッションをクリアしてモード選択に戻る
+  const handleModeSwitch = async () => {
+    if (session) {
+      await endSession();
+    }
+    setPendingModeSwitch(true);
     setView("mode-select");
   };
 

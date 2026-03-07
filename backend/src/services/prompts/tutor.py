@@ -4,10 +4,7 @@ Mode-specific system prompts with card context injection
 and language-matching instruction (FR-017).
 """
 
-from typing import Literal
-
-
-LearningMode = Literal["free_talk", "quiz", "weak_point"]
+from models.tutor import LearningMode
 
 
 def format_cards_context(cards: list[dict], max_cards: int = 100) -> str:
