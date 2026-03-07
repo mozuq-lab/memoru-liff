@@ -187,51 +187,70 @@ class StrandsTutorAIService:
             model = BedrockModel(model_id=model_id)
             return model, "strands_bedrock"
 
-    def _create_agent(self, system_prompt: str, messages: list[dict]):
+    def _create_agent(self, system_prompt: str, messages: list[dict] | None = None, session_manager=None):
         """Create a Strands Agent instance. Separated for testability."""
         from strands import Agent
 
-        return Agent(
-            model=self.model,
-            system_prompt=system_prompt,
-            messages=messages,
-        )
+        kwargs: dict = {
+            "model": self.model,
+            "system_prompt": system_prompt,
+        }
+        if session_manager is not None:
+            kwargs["session_manager"] = session_manager
+            kwargs["agent_id"] = "tutor"
+        if messages is not None:
+            kwargs["messages"] = messages
+        return Agent(**kwargs)
 
     def generate_response(
         self,
         system_prompt: str,
-        messages: list[dict],
+        messages: list[dict] | str,
+        session_manager=None,
     ) -> tuple[str, list[str]]:
         """Generate an AI response using Strands Agent.
 
         Args:
             system_prompt: Mode-specific system prompt with card context.
-            messages: Conversation history as list of {"role": ..., "content": ...}.
-                The last message must be a user message.
+            messages: When session_manager is None, conversation history as
+                list of {"role": ..., "content": ...} (last message must be user).
+                When session_manager is provided, a single user message string.
+            session_manager: Optional SessionManager instance. When provided,
+                the SessionManager handles conversation history automatically.
 
         Returns:
             Tuple of (response_content, related_card_ids).
         """
         try:
-            # Split into history + latest user message
-            if not messages:
-                raise TutorAIServiceError("messages must not be empty")
-            history = messages[:-1]
-            last_user_content = messages[-1]["content"]
+            if session_manager is not None:
+                # SessionManager mode: messages is a single user message string
+                user_message = messages if isinstance(messages, str) else messages[-1]["content"]
+                agent = self._create_agent(
+                    system_prompt=system_prompt[:_MAX_SYSTEM_PROMPT_CHARS],
+                    session_manager=session_manager,
+                )
+                response = agent(user_message)
+                content = str(response)
+            else:
+                # Backward-compatible mode: messages is list[dict] with full history
+                if not messages:
+                    raise TutorAIServiceError("messages must not be empty")
+                history = messages[:-1]
+                last_user_content = messages[-1]["content"]
 
-            # Convert history to Strands message format: content is list of {"text": ...}
-            strands_messages = []
-            for msg in history:
-                strands_messages.append({
-                    "role": msg["role"],
-                    "content": [{"text": msg["content"]}],
-                })
-            agent = self._create_agent(
-                system_prompt=system_prompt[:_MAX_SYSTEM_PROMPT_CHARS],
-                messages=strands_messages,
-            )
-            response = agent(last_user_content)
-            content = str(response)
+                # Convert history to Strands message format: content is list of {"text": ...}
+                strands_messages = []
+                for msg in history:
+                    strands_messages.append({
+                        "role": msg["role"],
+                        "content": [{"text": msg["content"]}],
+                    })
+                agent = self._create_agent(
+                    system_prompt=system_prompt[:_MAX_SYSTEM_PROMPT_CHARS],
+                    messages=strands_messages,
+                )
+                response = agent(last_user_content)
+                content = str(response)
 
             related_cards = extract_related_cards(content)
             return content, related_cards

@@ -387,3 +387,152 @@ class TestStrandsEmptyMessages:
                     system_prompt="sys",
                     messages=[],
                 )
+
+
+# ===================================================================
+# StrandsTutorAIService SessionManager integration tests (TASK-0165)
+# ===================================================================
+
+
+class TestStrandsSessionManagerIntegration:
+    """Tests for StrandsTutorAIService with SessionManager injection."""
+
+    def _create_service(self):
+        """Helper to create a StrandsTutorAIService with mocked model."""
+        from services.tutor_ai_service import StrandsTutorAIService
+
+        with patch(
+            "services.tutor_ai_service.StrandsTutorAIService._create_model",
+            return_value=(MagicMock(), "strands_ollama"),
+        ):
+            return StrandsTutorAIService(environment="dev")
+
+    def test_session_manager_injection_creates_agent_with_session_manager_and_agent_id(self):
+        """TC-004-01: SessionManager 注入時に Agent が session_manager + agent_id='tutor' で生成される."""
+        service = self._create_service()
+        mock_session_manager = MagicMock()
+        mock_agent_instance = MagicMock()
+        mock_agent_instance.return_value = "応答テスト"
+        service._create_agent = MagicMock(return_value=mock_agent_instance)
+
+        content, related_cards = service.generate_response(
+            system_prompt="You are a tutor.",
+            messages="質問です",
+            session_manager=mock_session_manager,
+        )
+
+        # _create_agent was called with session_manager and without messages
+        create_kwargs = service._create_agent.call_args[1]
+        assert create_kwargs["session_manager"] is mock_session_manager
+        assert "messages" not in create_kwargs
+
+        # Agent was called with the user message
+        mock_agent_instance.assert_called_once_with("質問です")
+        assert content == "応答テスト"
+
+    def test_agent_id_tutor_is_set_when_session_manager_provided(self):
+        """TC-agent_id: Agent に agent_id='tutor' が設定される."""
+        from services.tutor_ai_service import StrandsTutorAIService
+
+        mock_session_manager = MagicMock()
+        mock_agent_cls = MagicMock()
+        mock_agent_instance = MagicMock()
+        mock_agent_instance.return_value = "応答"
+        mock_agent_cls.return_value = mock_agent_instance
+
+        with patch(
+            "services.tutor_ai_service.StrandsTutorAIService._create_model",
+            return_value=(MagicMock(), "strands_ollama"),
+        ):
+            service = StrandsTutorAIService(environment="dev")
+
+        with patch("services.tutor_ai_service.Agent", mock_agent_cls, create=True):
+            # Call _create_agent directly to verify kwargs
+            from strands import Agent as _OrigAgent  # noqa: F811
+            with patch("strands.Agent", mock_agent_cls):
+                agent = service._create_agent(
+                    system_prompt="sys",
+                    session_manager=mock_session_manager,
+                )
+
+            # Verify Agent was instantiated with agent_id="tutor"
+            call_kwargs = mock_agent_cls.call_args[1]
+            assert call_kwargs["agent_id"] == "tutor"
+            assert call_kwargs["session_manager"] is mock_session_manager
+
+    def test_backward_compatible_without_session_manager(self):
+        """TC-後方互換: SessionManager なしで既存動作が維持される."""
+        service = self._create_service()
+        mock_agent_instance = MagicMock()
+        mock_agent_instance.return_value = "既存動作の応答。[RELATED_CARDS: card_x]"
+        service._create_agent = MagicMock(return_value=mock_agent_instance)
+
+        content, related_cards = service.generate_response(
+            system_prompt="sys",
+            messages=[
+                {"role": "user", "content": "hello"},
+                {"role": "assistant", "content": "hi"},
+                {"role": "user", "content": "質問"},
+            ],
+        )
+
+        # _create_agent was called with messages (history) and no session_manager
+        create_kwargs = service._create_agent.call_args[1]
+        assert "session_manager" not in create_kwargs
+        assert "messages" in create_kwargs
+        assert len(create_kwargs["messages"]) == 2  # history without last msg
+
+        mock_agent_instance.assert_called_once_with("質問")
+        assert "card_x" in related_cards
+
+    def test_session_manager_connection_error_wrapped(self):
+        """TC-004-E01: SessionManager 接続エラー時に TutorAIServiceError でラップ."""
+        from services.tutor_ai_service import TutorAIServiceError
+
+        service = self._create_service()
+        mock_session_manager = MagicMock()
+        mock_agent_instance = MagicMock()
+        mock_agent_instance.side_effect = ConnectionError("session manager connection failed")
+        service._create_agent = MagicMock(return_value=mock_agent_instance)
+
+        with pytest.raises(TutorAIServiceError, match="connection"):
+            service.generate_response(
+                system_prompt="sys",
+                messages="質問",
+                session_manager=mock_session_manager,
+            )
+
+    def test_session_manager_generic_error_wrapped(self):
+        """SessionManager 経由の一般エラーが TutorAIServiceError でラップされる."""
+        from services.tutor_ai_service import TutorAIServiceError
+
+        service = self._create_service()
+        mock_session_manager = MagicMock()
+        mock_agent_instance = MagicMock()
+        mock_agent_instance.side_effect = RuntimeError("unexpected error")
+        service._create_agent = MagicMock(return_value=mock_agent_instance)
+
+        with pytest.raises(TutorAIServiceError, match="AI service error"):
+            service.generate_response(
+                system_prompt="sys",
+                messages="質問",
+                session_manager=mock_session_manager,
+            )
+
+    def test_session_manager_with_related_cards_extraction(self):
+        """SessionManager モードでも関連カード抽出が動作する."""
+        service = self._create_service()
+        mock_session_manager = MagicMock()
+        mock_agent_instance = MagicMock()
+        mock_agent_instance.return_value = "解説です。[RELATED_CARDS: card_a, card_b]"
+        service._create_agent = MagicMock(return_value=mock_agent_instance)
+
+        content, related_cards = service.generate_response(
+            system_prompt="sys",
+            messages="この概念を教えて",
+            session_manager=mock_session_manager,
+        )
+
+        assert "解説です。" in content
+        assert "card_a" in related_cards
+        assert "card_b" in related_cards
