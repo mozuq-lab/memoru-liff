@@ -7,7 +7,7 @@ import { CardPreview } from '@/components/CardPreview';
 import { DeckSelector } from '@/components/DeckSelector';
 import { Navigation } from '@/components/Navigation';
 import { Loading } from '@/components/common/Loading';
-import { Error } from '@/components/common/Error';
+import { Error as ErrorMessage } from '@/components/common/Error';
 import { UrlInput } from '@/components/UrlInput';
 import { GenerateProgress } from '@/components/GenerateProgress';
 import { GenerateOptions } from '@/components/GenerateOptions';
@@ -395,7 +395,7 @@ export const GeneratePage = () => {
         {/* エラー表示 */}
         {error && (
           <div className="mt-6" data-testid="error">
-            <Error
+            <ErrorMessage
               message={error}
               onRetry={inputMode === 'text' ? handleGenerateFromText : handleGenerateFromUrl}
             />
