@@ -72,7 +72,7 @@ Parameters:
 
   TutorSessionBackend:
     Type: String
-    Default: "agentcore"
+    Default: "dynamodb"
     AllowedValues:
       - "agentcore"
       - "dynamodb"
@@ -87,6 +87,7 @@ Conditions:
   IsProd: !Equals [!Ref Environment, prod]
   IsNotProd: !Not [!Equals [!Ref Environment, prod]]
   HasTutorModelId: !Not [!Equals [!Ref TutorModelId, ""]]
+  UseAgentCore: !Equals [!Ref TutorSessionBackend, "agentcore"]
 
 Resources:
   #============================================================
@@ -407,12 +408,16 @@ Resources:
                 Resource:
                   - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${TutorModelId}
           - !Ref AWS::NoValue
-        - Version: "2012-10-17"
-          Statement:
-            - Effect: Allow
-              Action:
-                - bedrock-agentcore:*
-              Resource: "*"
+        - !If
+          - UseAgentCore
+          - Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock-agentcore:InvokeMemory
+                  - bedrock-agentcore:RetrieveMemory
+                Resource: "*"
+          - !Ref AWS::NoValue
       Environment:
         Variables:
           OIDC_ISSUER: !Ref OidcIssuer

@@ -106,6 +106,7 @@ class TestCreateTutorSessionManagerDynamodb:
             table_name=TUTOR_SESSIONS_TABLE,
             session_id=SESSION_ID,
             user_id=USER_ID,
+            dynamodb_resource=None,
         )
         assert result is mock_dynamo_instance
 

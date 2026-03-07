@@ -97,12 +97,14 @@ class BedrockTutorAIService:
         self,
         system_prompt: str,
         messages: list[dict],
+        session_manager=None,
     ) -> tuple[str, list[str]]:
         """Generate an AI response for a multi-turn conversation.
 
         Args:
             system_prompt: Mode-specific system prompt with card context.
             messages: Conversation history as list of {"role": ..., "content": ...}.
+            session_manager: Accepted for interface compatibility but ignored.
 
         Returns:
             Tuple of (response_content, related_card_ids).

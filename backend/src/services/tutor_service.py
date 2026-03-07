@@ -141,38 +141,17 @@ class TutorService:
             weak_cards_context=weak_cards_context,
         )
 
-        # Generate session_id and SessionManager before AI call
+        # Generate session_id before AI call
         session_id = f"tutor_{uuid.uuid4()}"
-        sm = self.session_manager_factory(session_id=session_id, user_id=user_id)
-
-        # Generate AI greeting via SessionManager-attached Agent
-        try:
-            greeting_content, related_cards = self.ai_service.generate_response(
-                system_prompt=system_prompt,
-                messages="セッションを開始してください。デッキの内容を要約して挨拶してください。",
-                session_manager=sm,
-            )
-        finally:
-            sm.close()
-        greeting_content = self.ai_service.clean_response_text(greeting_content)
-
-        # Validate related_cards against deck's card IDs
         valid_card_ids = {c["card_id"] for c in cards}
-        related_cards = [cid for cid in related_cards if cid in valid_card_ids]
 
-        # All validation passed and AI greeting succeeded — now safe to end old sessions
+        # All validation passed — now safe to end old sessions
         self._auto_end_active_sessions(user_id)
 
         now = datetime.now(timezone.utc)
 
-        greeting_msg = TutorMessage(
-            role="assistant",
-            content=greeting_content,
-            related_cards=related_cards,
-            timestamp=now.isoformat(),
-        )
-
-        # Persist metadata to DynamoDB (messages managed by SessionManager)
+        # Persist metadata to DynamoDB BEFORE SessionManager writes messages
+        # (put_item replaces entire item, so it must run before append_message)
         item: dict[str, Any] = {
             "user_id": user_id,
             "session_id": session_id,
@@ -186,6 +165,28 @@ class TutorService:
             "deck_card_ids": list(valid_card_ids),
         }
         self.table.put_item(Item=item)
+
+        # Generate AI greeting via SessionManager-attached Agent
+        sm = self.session_manager_factory(session_id=session_id, user_id=user_id)
+        try:
+            greeting_content, related_cards = self.ai_service.generate_response(
+                system_prompt=system_prompt,
+                messages="セッションを開始してください。デッキの内容を要約して挨拶してください。",
+                session_manager=sm,
+            )
+        finally:
+            sm.close()
+        greeting_content = self.ai_service.clean_response_text(greeting_content)
+
+        # Validate related_cards against deck's card IDs
+        related_cards = [cid for cid in related_cards if cid in valid_card_ids]
+
+        greeting_msg = TutorMessage(
+            role="assistant",
+            content=greeting_content,
+            related_cards=related_cards,
+            timestamp=now.isoformat(),
+        )
 
         return TutorSessionResponse(
             session_id=session_id,
@@ -341,7 +342,7 @@ class TutorService:
             ExpressionAttributeNames={"#st": "status", "#ttl": "ttl"},
         )
 
-        messages = [TutorMessage(**m) for m in item.get("messages", [])]
+        messages = self._get_session_messages(user_id, session_id, item)
         return TutorSessionResponse(
             session_id=session_id,
             deck_id=item["deck_id"],
@@ -474,10 +475,10 @@ class TutorService:
 
             # Use a lightweight holder to receive messages from initialize()
             class _MessageHolder:
-                messages: list[dict] = []
+                def __init__(self):
+                    self.messages: list[dict] = []
 
             holder = _MessageHolder()
-            holder.messages = []
             sm.initialize(holder)
             sm.close()
 

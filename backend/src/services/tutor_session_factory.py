@@ -67,6 +67,7 @@ def create_tutor_session_manager(
     session_id: str,
     user_id: str,
     backend: str | None = None,
+    dynamodb_resource=None,
 ):
     """Create a SessionManager based on backend selection.
 
@@ -121,6 +122,7 @@ def create_tutor_session_manager(
             table_name=table_name,
             session_id=session_id,
             user_id=user_id,
+            dynamodb_resource=dynamodb_resource,
         )
 
     else:
