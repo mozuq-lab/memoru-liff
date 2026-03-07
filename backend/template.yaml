@@ -24,6 +24,8 @@ Globals:
         USE_STRANDS: !Ref UseStrands
         OLLAMA_HOST: ""
         OLLAMA_MODEL: ""
+        TUTOR_SESSION_BACKEND: !Ref TutorSessionBackend
+        AGENTCORE_MEMORY_ID: !Ref AgentCoreMemoryId
 
 Parameters:
   Environment:
@@ -67,6 +69,19 @@ Parameters:
       - "true"
       - "false"
     Description: Enable Strands Agents SDK for AI services
+
+  TutorSessionBackend:
+    Type: String
+    Default: "agentcore"
+    AllowedValues:
+      - "agentcore"
+      - "dynamodb"
+    Description: Tutor session history backend (agentcore or dynamodb)
+
+  AgentCoreMemoryId:
+    Type: String
+    Default: ""
+    Description: AgentCore Memory ID for tutor session management
 
 Conditions:
   IsProd: !Equals [!Ref Environment, prod]
@@ -392,6 +407,12 @@ Resources:
                 Resource:
                   - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${TutorModelId}
           - !Ref AWS::NoValue
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - bedrock-agentcore:*
+              Resource: "*"
       Environment:
         Variables:
           OIDC_ISSUER: !Ref OidcIssuer
