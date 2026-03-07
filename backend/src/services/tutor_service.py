@@ -22,6 +22,7 @@ from models.tutor import (
 )
 from services.prompts.tutor import format_cards_context, get_system_prompt
 from services.tutor_ai_service import create_tutor_ai_service
+from services.tutor_session_factory import create_tutor_session_manager
 
 logger = Logger()
 
@@ -66,6 +67,7 @@ class TutorService:
         table_name: str | None = None,
         dynamodb_resource: Any | None = None,
         ai_service: Any | None = None,
+        session_manager_factory: Any | None = None,
     ):
         self.table_name = table_name or os.environ.get(
             "TUTOR_SESSIONS_TABLE", "memoru-tutor-sessions-dev"
@@ -90,6 +92,7 @@ class TutorService:
         self.decks_table = self.dynamodb.Table(self.decks_table_name)
 
         self.ai_service = ai_service if ai_service is not None else create_tutor_ai_service()
+        self.session_manager_factory = session_manager_factory or create_tutor_session_manager
 
     def start_session(
         self,
@@ -139,11 +142,19 @@ class TutorService:
             weak_cards_context=weak_cards_context,
         )
 
-        # Generate AI greeting (may raise TutorAITimeoutError)
-        greeting_content, related_cards = self.ai_service.generate_response(
-            system_prompt=system_prompt,
-            messages=[{"role": "user", "content": "セッションを開始してください。デッキの内容を要約して挨拶してください。"}],
-        )
+        # Generate session_id and SessionManager before AI call
+        session_id = f"tutor_{uuid.uuid4()}"
+        sm = self.session_manager_factory(session_id=session_id, user_id=user_id)
+
+        # Generate AI greeting via SessionManager-attached Agent
+        try:
+            greeting_content, related_cards = self.ai_service.generate_response(
+                system_prompt=system_prompt,
+                messages="セッションを開始してください。デッキの内容を要約して挨拶してください。",
+                session_manager=sm,
+            )
+        finally:
+            sm.close()
         greeting_content = self.ai_service.clean_response_text(greeting_content)
 
         # Validate related_cards against deck's card IDs
@@ -154,7 +165,6 @@ class TutorService:
         self._auto_end_active_sessions(user_id)
 
         now = datetime.now(timezone.utc)
-        session_id = f"tutor_{uuid.uuid4()}"
 
         greeting_msg = TutorMessage(
             role="assistant",
@@ -163,14 +173,13 @@ class TutorService:
             timestamp=now.isoformat(),
         )
 
-        # Persist to DynamoDB
-        item = {
+        # Persist metadata to DynamoDB (messages managed by SessionManager)
+        item: dict[str, Any] = {
             "user_id": user_id,
             "session_id": session_id,
             "deck_id": deck_id,
             "mode": mode,
             "status": "active",
-            "messages": [greeting_msg.model_dump()],
             "message_count": 0,
             "created_at": now.isoformat(),
             "updated_at": now.isoformat(),
