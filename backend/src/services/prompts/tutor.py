@@ -10,24 +10,32 @@ from typing import Literal
 LearningMode = Literal["free_talk", "quiz", "weak_point"]
 
 
-def format_cards_context(cards: list[dict]) -> str:
+def format_cards_context(cards: list[dict], max_cards: int = 100) -> str:
     """Format card data into a context string for the system prompt.
+
+    For large decks (100+ cards), truncates to `max_cards` entries
+    to stay within Bedrock token limits.
 
     Args:
         cards: List of card dicts with 'front' and 'back' keys.
+        max_cards: Maximum number of cards to include (default: 100).
 
     Returns:
         Formatted string with card content, or empty string if no cards.
     """
     if not cards:
         return ""
+    total = len(cards)
+    truncated = cards[:max_cards]
     lines = []
-    for i, card in enumerate(cards, 1):
+    for i, card in enumerate(truncated, 1):
         card_id = card.get("card_id", "")
         front = card.get("front", "")
         back = card.get("back", "")
         id_part = f" (id: {card_id})" if card_id else ""
         lines.append(f"{i}. Front: {front} | Back: {back}{id_part}")
+    if total > max_cards:
+        lines.append(f"\n(... {total - max_cards} more cards omitted for context length)")
     return "\n".join(lines)
 
 
