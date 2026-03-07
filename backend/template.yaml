@@ -1,4 +1,4 @@
-AWSTemplateFormatVersion: '2010-09-09'
+AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: Memoru LIFF - Backend API and DynamoDB Tables
 
@@ -17,6 +17,7 @@ Globals:
         CARDS_TABLE: !Ref CardsTable
         REVIEWS_TABLE: !Ref ReviewsTable
         DECKS_TABLE: !Ref DecksTable
+        TUTOR_SESSIONS_TABLE: !Ref TutorSessionsTable
         LOG_LEVEL: !If [IsProd, INFO, DEBUG]
         DYNAMODB_ENDPOINT_URL: ""
         AWS_ENDPOINT_URL: ""
@@ -49,9 +50,14 @@ Parameters:
     Default: global.anthropic.claude-haiku-4-5-20251001-v1:0
     Description: Amazon Bedrock model ID for AI card generation
 
+  TutorModelId:
+    Type: String
+    Default: ""
+    Description: Bedrock model ID for AI tutor (defaults to BedrockModelId if empty)
+
   LineChannelId:
     Type: String
-    Default: ''
+    Default: ""
     Description: LINE Login Channel ID for ID token verification
 
   UseStrands:
@@ -178,6 +184,50 @@ Resources:
             ProjectionType: ALL
       TimeToLiveSpecification:
         AttributeName: expires_at
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+      DeletionProtectionEnabled: !If [IsProd, true, false]
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: memoru
+
+  # Tutor Sessions Table
+  TutorSessionsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub memoru-tutor-sessions-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: session_id
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_id
+          KeyType: HASH
+        - AttributeName: session_id
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: user_id-status-index
+          KeySchema:
+            - AttributeName: user_id
+              KeyType: HASH
+            - AttributeName: status
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
         Enabled: true
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
@@ -321,7 +371,9 @@ Resources:
             TableName: !Ref DecksTable
         - DynamoDBCrudPolicy:
             TableName: !Ref BrowserProfilesTable
-        - Version: '2012-10-17'
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TutorSessionsTable
+        - Version: "2012-10-17"
           Statement:
             - Effect: Allow
               Action:
@@ -333,6 +385,7 @@ Resources:
         Variables:
           OIDC_ISSUER: !Ref OidcIssuer
           BEDROCK_MODEL_ID: !Ref BedrockModelId
+          TUTOR_MODEL_ID: !Ref TutorModelId
           LINE_CHANNEL_ID: !Ref LineChannelId
           BROWSER_PROFILES_TABLE: !Ref BrowserProfilesTable
       Events:
@@ -487,6 +540,37 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /browser-profiles/{profileId}
             Method: DELETE
+        # Tutor endpoints
+        CreateTutorSession:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /tutor/sessions
+            Method: POST
+        SendTutorMessage:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /tutor/sessions/{sessionId}/messages
+            Method: POST
+        EndTutorSession:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /tutor/sessions/{sessionId}
+            Method: DELETE
+        ListTutorSessions:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /tutor/sessions
+            Method: GET
+        GetTutorSession:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /tutor/sessions/{sessionId}
+            Method: GET
       Tags:
         Environment: !Ref Environment
         Application: memoru
@@ -507,7 +591,7 @@ Resources:
             TableName: !Ref CardsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref ReviewsTable
-        - Version: '2012-10-17'
+        - Version: "2012-10-17"
           Statement:
             - Effect: Allow
               Action:
@@ -553,13 +637,13 @@ Resources:
             TableName: !Ref UsersTable
         - DynamoDBReadPolicy:
             TableName: !Ref CardsTable
-        - Version: '2012-10-17'
+        - Version: "2012-10-17"
           Statement:
             - Effect: Allow
               Action:
                 - dynamodb:UpdateItem
               Resource: !GetAtt UsersTable.Arn
-        - Version: '2012-10-17'
+        - Version: "2012-10-17"
           Statement:
             - Effect: Allow
               Action:
@@ -597,7 +681,7 @@ Resources:
             TableName: !Ref CardsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref ReviewsTable
-        - Version: '2012-10-17'
+        - Version: "2012-10-17"
           Statement:
             - Effect: Allow
               Action:
@@ -638,7 +722,7 @@ Resources:
             TableName: !Ref CardsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref ReviewsTable
-        - Version: '2012-10-17'
+        - Version: "2012-10-17"
           Statement:
             - Effect: Allow
               Action:
@@ -1009,6 +1093,18 @@ Outputs:
     Value: !GetAtt DecksTable.Arn
     Export:
       Name: !Sub memoru-${Environment}-decks-table-arn
+
+  TutorSessionsTableName:
+    Description: Tutor Sessions table name
+    Value: !Ref TutorSessionsTable
+    Export:
+      Name: !Sub memoru-${Environment}-tutor-sessions-table
+
+  TutorSessionsTableArn:
+    Description: Tutor Sessions table ARN
+    Value: !GetAtt TutorSessionsTable.Arn
+    Export:
+      Name: !Sub memoru-${Environment}-tutor-sessions-table-arn
 
   # API Gateway
   ApiEndpoint:
