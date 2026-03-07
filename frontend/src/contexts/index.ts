@@ -1,3 +1,4 @@
 export { AuthProvider, useAuthContext } from './AuthContext';
 export { CardsProvider, useCardsContext } from './CardsContext';
 export { DecksProvider, useDecksContext } from './DecksContext';
+export { TutorProvider, useTutorContext } from './TutorContext';

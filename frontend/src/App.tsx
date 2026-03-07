@@ -1,5 +1,5 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import { AuthProvider, CardsProvider, DecksProvider } from '@/contexts';
+import { AuthProvider, CardsProvider, DecksProvider, TutorProvider } from '@/contexts';
 import { Layout, ProtectedRoute } from '@/components/common';
 import {
   HomePage,
@@ -12,6 +12,7 @@ import {
   CallbackPage,
   ReviewPage,
   StatsPage,
+  TutorPage,
 } from '@/pages';
 
 function App() {
@@ -20,6 +21,7 @@ function App() {
       <AuthProvider>
         <CardsProvider>
           <DecksProvider>
+            <TutorProvider>
             <Layout>
               <Routes>
                 <Route path="/callback" element={<CallbackPage />} />
@@ -32,8 +34,10 @@ function App() {
                 <Route path="/review" element={<ProtectedRoute><ReviewPage /></ProtectedRoute>} />
                 <Route path="/stats" element={<ProtectedRoute><StatsPage /></ProtectedRoute>} />
                 <Route path="/link-line" element={<ProtectedRoute><LinkLinePage /></ProtectedRoute>} />
+                <Route path="/tutor/:deckId" element={<ProtectedRoute><TutorPage /></ProtectedRoute>} />
               </Routes>
             </Layout>
+            </TutorProvider>
           </DecksProvider>
         </CardsProvider>
       </AuthProvider>

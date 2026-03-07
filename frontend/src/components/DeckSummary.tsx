@@ -68,6 +68,14 @@ export const DeckSummary = () => {
               </span>
             </div>
             <div className="flex items-center ml-2 flex-shrink-0">
+              <Link
+                to={`/tutor/${deck.deck_id}`}
+                onClick={(e) => e.stopPropagation()}
+                className="mr-2 px-2 py-0.5 text-xs font-medium text-purple-700 bg-purple-100 rounded-full hover:bg-purple-200 transition-colors"
+                aria-label={`${deck.name}でAIチューターを開始`}
+              >
+                AI
+              </Link>
               <span className="text-xs text-gray-500 mr-2">
                 {deck.card_count}枚
               </span>
