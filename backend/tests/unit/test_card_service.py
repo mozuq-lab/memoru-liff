@@ -81,10 +81,17 @@ def dynamodb_table():
 def card_service(dynamodb_table):
     """Create CardService with mock DynamoDB.
 
-    【テスト前準備】: moto の transact_write_items は if_not_exists() を含む
-    ConditionExpression 等をサポートしていないバグがあるため、カスタムモックを使用する。
-    このモックは Update, Put, Delete 操作をシミュレートし、TC-01〜TC-09 のテストを支援する。
-    reviews_table_name パラメータを使用して Delete トランザクション操作をサポートする。
+    moto 5.x の transact_write_items は基本的な Put/Delete をサポートするが、
+    ConditionExpression 内の if_not_exists() を正しく評価できないバグがある
+    (ValueError: Bad comparison で失敗する)。
+    そのため create_card のカード数上限チェック等を含むトランザクションは
+    カスタムモックでシミュレートしている。
+
+    Risk: このモックは DynamoDB のトランザクション分離レベルやコンフリクト検知を
+    再現できないため、並行書き込みの競合条件はテストできない。
+
+    TODO: DynamoDB Local への移行を検討する。DynamoDB Local は完全な
+    transact_write_items をサポートしており、ConditionExpression の評価も正確に行える。
     """
     service = CardService(
         table_name="memoru-cards-test",
@@ -133,8 +140,7 @@ def card_service(dynamodb_table):
                     expr_values = update.get('ExpressionAttributeValues', {})
                     card_count = int(current_item.get('card_count', 0))
 
-                    # 【条件チェック】: create_card の card_count < :limit 条件
-                    # (if_not_exists(card_count, :zero) < :limit を模擬)
+                    # Simulate if_not_exists(card_count, :zero) < :limit
                     if ':limit' in expr_values:
                         limit = int(expr_values[':limit']['N'])
                         if not (card_count < limit):
@@ -1355,9 +1361,10 @@ class TestDeleteCardReviewCleanup:
         with patch("services.card_service.logger") as mock_logger:
             card_service.delete_card("test-user-id", "some-card")
 
-            mock_logger.warning.assert_called_once()
-            call_args = mock_logger.warning.call_args
-            assert "best-effort" in call_args[0][0].lower() or "failed" in call_args[0][0].lower()
+            # C-5: エラーハンドリング強化により、レビュー削除失敗は logger.error で記録される
+            mock_logger.error.assert_called_once()
+            call_args = mock_logger.error.call_args
+            assert "orphaned" in call_args[0][0].lower() or "failed" in call_args[0][0].lower()
             assert call_args[1]["extra"]["card_id"] == "some-card"
 
 

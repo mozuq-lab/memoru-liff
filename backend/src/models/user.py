@@ -1,10 +1,16 @@
 """User models for Memoru LIFF application."""
 
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
+
+DEFAULT_USER_SETTINGS: dict = {
+    "notification_time": "09:00",
+    "timezone": "Asia/Tokyo",
+    "day_start_hour": 4,
+}
 
 
 class LinkLineRequest(BaseModel):
@@ -62,11 +68,19 @@ class UserSettingsRequest(BaseModel):
         return v
 
 
+class UserSettings(BaseModel):
+    """Typed model for user settings."""
+
+    notification_time: Optional[str] = "09:00"
+    timezone: str = "Asia/Tokyo"
+    day_start_hour: int = 4
+
+
 class UserSettingsResponse(BaseModel):
     """Response model for user settings update."""
 
     success: bool
-    settings: dict
+    settings: UserSettings
 
 
 class UserResponse(BaseModel):
@@ -90,9 +104,9 @@ class User(BaseModel):
     line_user_id: Optional[str] = None
     display_name: Optional[str] = None
     picture_url: Optional[str] = None
-    settings: dict = Field(default_factory=lambda: {"notification_time": "09:00", "timezone": "Asia/Tokyo", "day_start_hour": 4})
+    settings: dict = Field(default_factory=lambda: dict(DEFAULT_USER_SETTINGS))
     last_notified_date: Optional[str] = None  # YYYY-MM-DD format
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: Optional[datetime] = None
 
     def to_response(self) -> UserResponse:
@@ -136,7 +150,7 @@ class User(BaseModel):
             line_user_id=item.get("line_user_id"),
             display_name=item.get("display_name"),
             picture_url=item.get("picture_url"),
-            settings=item.get("settings", {"notification_time": "09:00", "timezone": "Asia/Tokyo", "day_start_hour": 4}),
+            settings=item.get("settings", dict(DEFAULT_USER_SETTINGS)),
             last_notified_date=item.get("last_notified_date"),
             created_at=datetime.fromisoformat(item["created_at"]),
             updated_at=datetime.fromisoformat(item["updated_at"]) if item.get("updated_at") else None,

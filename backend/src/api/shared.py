@@ -8,6 +8,8 @@ from aws_lambda_powertools import Logger
 from aws_lambda_powertools.event_handler import Response, content_types
 from aws_lambda_powertools.event_handler.exceptions import UnauthorizedError
 
+from pydantic import ValidationError
+
 from services.ai_service import (
     AIServiceError,
     AITimeoutError,
@@ -115,6 +117,27 @@ def get_user_id_from_event(event: dict) -> str | None:
     # Dev fallback: ENVIRONMENT=dev AND AWS_SAM_LOCAL=true required
     auth_header = (event.get("headers") or {}).get("authorization", "")
     return _jwt_dev_fallback_decode(auth_header)
+
+
+def make_validation_error_response(e: ValidationError) -> Response:
+    """Create a standardized 400 response for Pydantic ValidationError.
+
+    Uses json.loads(e.json()) instead of e.errors() to ensure all values
+    are JSON-serializable (e.errors() can contain raw ValueError objects
+    in the 'ctx' field which are not JSON-serializable).
+
+    Args:
+        e: Pydantic ValidationError instance.
+
+    Returns:
+        Response with status 400, error message, and validation details.
+    """
+    details = json.loads(e.json())
+    return Response(
+        status_code=400,
+        content_type=content_types.APPLICATION_JSON,
+        body=json.dumps({"error": "Invalid request", "details": details}),
+    )
 
 
 def map_ai_error_to_http(error: AIServiceError) -> Response:

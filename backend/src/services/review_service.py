@@ -1,12 +1,12 @@
 """Review service for managing card reviews."""
 
 import os
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 import boto3
 from aws_lambda_powertools import Logger
-from boto3.dynamodb.conditions import Attr, Key
+from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
 
 logger = Logger()
@@ -24,6 +24,7 @@ from models.review import (
 from .ai_service import ReviewSummary
 from .card_service import CardNotFoundError, CardService, CardServiceError
 from .srs import ReviewHistoryEntry, SM2Result, add_review_history, calculate_next_review_boundary, calculate_sm2
+from .stats_service import calculate_streak, calculate_tag_performance
 
 
 class ReviewServiceError(Exception):
@@ -519,11 +520,17 @@ class ReviewService:
             pass
         return None
 
-    def get_review_summary(self, user_id: str) -> ReviewSummary:
+    def get_review_summary(self, user_id: str, user_timezone: str = "UTC") -> ReviewSummary:
         """Get a summary of review statistics for a user.
+
+        M-7: 集計ロジックは stats_service の共通ヘルパー関数に委譲する。
+        DynamoDB クエリは StatsService._fetch_all_cards / _fetch_all_reviews と同等の
+        ページネーション付きクエリを使用する。
 
         Args:
             user_id: The user's ID.
+            user_timezone: ユーザーの IANA タイムゾーン文字列（streak 計算用）。
+                           デフォルトは "UTC"。
 
         Returns:
             ReviewSummary dataclass with aggregated statistics.
@@ -540,9 +547,9 @@ class ReviewService:
         )
 
         try:
-            # Fetch all reviews for the user via the GSI
+            # Fetch all reviews (paginated)
             reviews: List[Dict] = []
-            paginator_kwargs = {
+            paginator_kwargs: Dict = {
                 "IndexName": "user_id-reviewed_at-index",
                 "KeyConditionExpression": Key("user_id").eq(user_id),
             }
@@ -554,9 +561,9 @@ class ReviewService:
                     break
                 paginator_kwargs["ExclusiveStartKey"] = last_key
 
-            # Fetch all cards for the user
+            # Fetch all cards (paginated)
             cards: List[Dict] = []
-            card_kwargs = {
+            card_kwargs: Dict = {
                 "KeyConditionExpression": Key("user_id").eq(user_id),
             }
             while True:
@@ -585,24 +592,10 @@ class ReviewService:
                 {r["reviewed_at"][:10] for r in reviews},
                 reverse=True,
             )
-            streak_days = self._calculate_streak(unique_dates)
 
-            # Build tag_performance: tag -> fraction of reviews with grade >= 3
-            card_tags: Dict[str, List[str]] = {
-                c["card_id"]: c.get("tags") or [] for c in cards
-            }
-            tag_grades: Dict[str, List[int]] = {}
-            for review in reviews:
-                card_id = review.get("card_id", "")
-                grade = int(review["grade"])
-                for tag in card_tags.get(card_id, []):
-                    tag_grades.setdefault(tag, []).append(grade)
-
-            tag_performance: Dict[str, float] = {
-                tag: sum(1 for g in grades if g >= 3) / len(grades)
-                for tag, grades in tag_grades.items()
-                if grades
-            }
+            # M-7: 共通ヘルパー関数に委譲（m-6: user_timezone 対応済み）
+            streak_days = calculate_streak(unique_dates, user_timezone=user_timezone)
+            tag_performance = calculate_tag_performance(cards, reviews)
 
             return ReviewSummary(
                 total_reviews=total_reviews,
@@ -616,34 +609,3 @@ class ReviewService:
 
         except ClientError:
             return default
-
-    @staticmethod
-    def _calculate_streak(sorted_dates_desc: List[str]) -> int:
-        """Calculate consecutive study streak days ending at today or yesterday.
-
-        Args:
-            sorted_dates_desc: Unique review dates as YYYY-MM-DD strings, newest first.
-
-        Returns:
-            Number of consecutive days studied.
-        """
-        if not sorted_dates_desc:
-            return 0
-
-        today = date.today()
-        # Streak must end at today or yesterday
-        latest = date.fromisoformat(sorted_dates_desc[0])
-        if latest < today - timedelta(days=1):
-            return 0
-
-        streak = 0
-        expected = latest
-        for date_str in sorted_dates_desc:
-            d = date.fromisoformat(date_str)
-            if d == expected:
-                streak += 1
-                expected = expected - timedelta(days=1)
-            elif d < expected:
-                break
-
-        return streak

@@ -8,7 +8,7 @@ from aws_lambda_powertools.event_handler.api_gateway import Router
 from aws_lambda_powertools.event_handler.exceptions import NotFoundError
 from pydantic import ValidationError
 
-from api.shared import get_user_id_from_context
+from api.shared import get_user_id_from_context, make_validation_error_response
 from models.deck import CreateDeckRequest, UpdateDeckRequest, DeckListResponse
 from services.deck_service import (
     DeckService,
@@ -28,18 +28,14 @@ deck_service = DeckService()
 def create_deck():
     """Create a new deck."""
     user_id = get_user_id_from_context(router)
-    logger.info(f"Creating deck for user_id: {user_id}")
+    logger.info("Creating deck", extra={"user_id": user_id})
 
     try:
         body = router.current_event.json_body
         request = CreateDeckRequest(**body)
     except ValidationError as e:
-        logger.warning(f"Validation error: {e}")
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid request", "details": str(e)}),
-        )
+        logger.warning("Validation error", extra={"error": str(e)})
+        return make_validation_error_response(e)
     except json.JSONDecodeError:
         return Response(
             status_code=400,
@@ -66,7 +62,7 @@ def create_deck():
             body=json.dumps({"error": "Deck limit exceeded. Maximum 50 decks per user."}),
         )
     except Exception as e:
-        logger.error(f"Error creating deck: {e}")
+        logger.error("Error creating deck", extra={"error": str(e)})
         raise
 
 
@@ -75,7 +71,7 @@ def create_deck():
 def list_decks():
     """List all decks for the current user."""
     user_id = get_user_id_from_context(router)
-    logger.info(f"Listing decks for user_id: {user_id}")
+    logger.info("Listing decks", extra={"user_id": user_id})
 
     try:
         decks = deck_service.list_decks(user_id)
@@ -95,7 +91,7 @@ def list_decks():
             total=len(decks),
         ).model_dump(mode="json")
     except Exception as e:
-        logger.error(f"Error listing decks: {e}")
+        logger.error("Error listing decks", extra={"error": str(e)})
         raise
 
 
@@ -104,24 +100,22 @@ def list_decks():
 def update_deck(deck_id: str):
     """Update a deck."""
     user_id = get_user_id_from_context(router)
-    logger.info(f"Updating deck {deck_id} for user_id: {user_id}")
+    logger.info("Updating deck", extra={"deck_id": deck_id, "user_id": user_id})
 
     try:
         # 【バリデーション + Sentinel 判別】: Pydantic でフォーマット検証し、
-        # raw body の key 存在チェックで null/未送信を判別する
-        # 🔵 信頼性レベル: 青信号 - Red フェーズ Green 実装方針より
+        # model_fields_set で送信されたフィールドを判別する。
+        # raw body の key 存在チェックで null/未送信を判別する（Pydantic は
+        # null と未送信を区別できないため）。
         body = router.current_event.json_body
-        # 【Pydantic バリデーション専用】: color フォーマット等の検証のために先に実行する
-        # 🔵 戻り値は使用しない。null/未送信の判別は raw body の key 存在チェックで行うため。
-        # Pydantic は null と未送信を区別できないので、handler で raw body を直接参照する必要がある。
-        UpdateDeckRequest(**body)  # noqa: F841
+        # 【Pydantic バリデーション】: color フォーマット等の検証を実行。
+        # model_fields_set でどのフィールドが明示的に送信されたかを取得できるが、
+        # null/未送信の判別には raw body の key 存在チェックが必要。
+        validated = UpdateDeckRequest.model_validate(body)
+        _ = validated.model_fields_set  # 送信されたフィールドセットを取得可能
     except ValidationError as e:
-        logger.warning(f"Validation error: {e}")
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid request", "details": str(e)}),
-        )
+        logger.warning("Validation error", extra={"error": str(e)})
+        return make_validation_error_response(e)
     except json.JSONDecodeError:
         return Response(
             status_code=400,
@@ -159,7 +153,7 @@ def update_deck(deck_id: str):
     except DeckNotFoundError:
         raise NotFoundError(f"Deck not found: {deck_id}")
     except Exception as e:
-        logger.error(f"Error updating deck: {e}")
+        logger.error("Error updating deck", extra={"deck_id": deck_id, "error": str(e)})
         raise
 
 
@@ -168,7 +162,7 @@ def update_deck(deck_id: str):
 def delete_deck(deck_id: str):
     """Delete a deck."""
     user_id = get_user_id_from_context(router)
-    logger.info(f"Deleting deck {deck_id} for user_id: {user_id}")
+    logger.info("Deleting deck", extra={"deck_id": deck_id, "user_id": user_id})
 
     try:
         deck_service.delete_deck(user_id, deck_id)
@@ -180,5 +174,5 @@ def delete_deck(deck_id: str):
     except DeckNotFoundError:
         raise NotFoundError(f"Deck not found: {deck_id}")
     except Exception as e:
-        logger.error(f"Error deleting deck: {e}")
+        logger.error("Error deleting deck", extra={"deck_id": deck_id, "error": str(e)})
         raise

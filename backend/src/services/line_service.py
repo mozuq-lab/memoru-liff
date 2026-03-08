@@ -126,8 +126,8 @@ class LineService:
             secret = json.loads(response["SecretString"])
             self.channel_access_token = secret.get("channel_access_token")
             self.channel_secret = secret.get("channel_secret")
-        except ClientError:
-            pass
+        except ClientError as e:
+            logger.error(f"Failed to load LINE credentials from Secrets Manager: {e}")
 
     def verify_request(self, body: str, signature: str) -> bool:
         """Verify LINE webhook request signature.

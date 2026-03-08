@@ -229,7 +229,7 @@ class TestAPICompatibility:
         assert greeting.role == "assistant"
         assert isinstance(greeting.content, str)
         assert len(greeting.content) > 0
-        assert isinstance(greeting.timestamp, str)
+        assert isinstance(greeting.timestamp, datetime)
         assert isinstance(greeting.related_cards, list)
 
     def test_tc_006_02_send_message_response_format(
@@ -280,7 +280,7 @@ class TestAPICompatibility:
         assert len(msg.content) > 0
         assert isinstance(msg.related_cards, list)
         assert msg.related_cards == ["card_int_001"]
-        assert isinstance(msg.timestamp, str)
+        assert isinstance(msg.timestamp, datetime)
 
     def test_tc_006_03_list_sessions_response_format(
         self, integration_dynamodb_tables, mock_ai_service
@@ -911,7 +911,7 @@ class TestEndToEndFlow:
         assert len(result.messages) == 3
         assert result.messages[0].role == "assistant"
         assert result.messages[0].content == "挨拶メッセージ"
-        assert result.messages[0].timestamp == "2026-01-01T00:00:00+00:00"
+        assert result.messages[0].timestamp.isoformat() == "2026-01-01T00:00:00+00:00"
         assert result.messages[1].role == "user"
         assert result.messages[2].role == "assistant"
         assert result.messages[2].related_cards == ["card_int_001"]

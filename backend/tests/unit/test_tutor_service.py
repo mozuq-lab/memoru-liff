@@ -949,11 +949,11 @@ class TestGetSessionWithSessionManager:
         assert len(result.messages) == 2
         assert result.messages[0].role == "user"
         assert result.messages[0].content == "appleについて教えて"
-        assert result.messages[0].timestamp == "2026-01-01T00:00:00+00:00"
+        assert result.messages[0].timestamp.isoformat() == "2026-01-01T00:00:00+00:00"
         assert result.messages[0].related_cards == []
         assert result.messages[1].role == "assistant"
         assert result.messages[1].content == "appleはりんごです。"
-        assert result.messages[1].timestamp == "2026-01-01T00:00:01+00:00"
+        assert result.messages[1].timestamp.isoformat() == "2026-01-01T00:00:01+00:00"
         assert result.messages[1].related_cards == ["card_001"]
         # SessionManager.close() should be called
         mock_sm_get.close.assert_called_once()

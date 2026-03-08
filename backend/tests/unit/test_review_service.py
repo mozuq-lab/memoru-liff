@@ -3,7 +3,6 @@
 import pytest
 from unittest.mock import patch
 from moto import mock_aws
-from unittest.mock import patch
 import boto3
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -161,6 +160,79 @@ class TestSubmitReview:
 
         assert response.updated.repetitions == 0
         assert response.updated.interval == 1
+
+    def test_submit_review_grade_1_resets_repetitions(self, review_service, dynamodb_tables):
+        """Test grade 1 resets repetitions and decreases ease factor."""
+        now = datetime.now(timezone.utc)
+        table = dynamodb_tables.Table("memoru-cards-test")
+        table.put_item(
+            Item={
+                "user_id": "test-user-id",
+                "card_id": "grade1-card",
+                "front": "Q",
+                "back": "A",
+                "next_review_at": now.isoformat(),
+                "interval": 10,
+                "ease_factor": "2.5",
+                "repetitions": 3,
+                "tags": [],
+                "created_at": now.isoformat(),
+            }
+        )
+
+        response = review_service.submit_review(
+            user_id="test-user-id",
+            card_id="grade1-card",
+            grade=1,
+        )
+
+        assert response.updated.repetitions == 0
+        assert response.updated.interval == 1
+        # EF = 2.5 + (0.1 - 4*(0.08 + 4*0.02)) = 1.96
+        assert response.updated.ease_factor == 1.96
+
+    def test_submit_review_grade_2_resets_repetitions(self, review_service, dynamodb_tables):
+        """Test grade 2 resets repetitions and decreases ease factor."""
+        now = datetime.now(timezone.utc)
+        table = dynamodb_tables.Table("memoru-cards-test")
+        table.put_item(
+            Item={
+                "user_id": "test-user-id",
+                "card_id": "grade2-card",
+                "front": "Q",
+                "back": "A",
+                "next_review_at": now.isoformat(),
+                "interval": 10,
+                "ease_factor": "2.5",
+                "repetitions": 3,
+                "tags": [],
+                "created_at": now.isoformat(),
+            }
+        )
+
+        response = review_service.submit_review(
+            user_id="test-user-id",
+            card_id="grade2-card",
+            grade=2,
+        )
+
+        assert response.updated.repetitions == 0
+        assert response.updated.interval == 1
+        # EF = 2.5 + (0.1 - 3*(0.08 + 3*0.02)) = 2.18
+        assert response.updated.ease_factor == 2.18
+
+    def test_submit_review_grade_3_correct_with_difficulty(self, review_service, sample_card):
+        """Test grade 3 increments repetitions but decreases ease factor."""
+        response = review_service.submit_review(
+            user_id="test-user-id",
+            card_id="test-card-id",
+            grade=3,
+        )
+
+        assert response.updated.repetitions == 1
+        assert response.updated.interval == 1  # First review interval
+        # EF = 2.5 + (0.1 - 2*(0.08 + 2*0.02)) = 2.36
+        assert response.updated.ease_factor == 2.36
 
     def test_submit_review_invalid_grade_negative(self, review_service, sample_card):
         """Test invalid negative grade raises error."""

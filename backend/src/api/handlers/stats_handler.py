@@ -21,13 +21,13 @@ stats_service = StatsService()
 def get_stats():
     """Get learning statistics summary."""
     user_id = get_user_id_from_context(router)
-    logger.info(f"Getting stats for user_id: {user_id}")
+    logger.info("Getting stats", extra={"user_id": user_id})
 
     try:
         response = stats_service.get_stats(user_id)
         return response.model_dump(mode="json")
     except Exception as e:
-        logger.error(f"Error getting stats: {e}")
+        logger.error("Error getting stats", extra={"error": str(e)})
         raise
 
 
@@ -36,7 +36,7 @@ def get_stats():
 def get_weak_cards():
     """Get weak cards list."""
     user_id = get_user_id_from_context(router)
-    logger.info(f"Getting weak cards for user_id: {user_id}")
+    logger.info("Getting weak cards", extra={"user_id": user_id})
 
     params = router.current_event.query_string_parameters or {}
     try:
@@ -45,14 +45,14 @@ def get_weak_cards():
         return Response(
             status_code=400,
             content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"message": "limit must be a positive integer"}),
+            body=json.dumps({"error": "limit must be a positive integer"}),
         )
 
     try:
         response = stats_service.get_weak_cards(user_id, limit=limit)
         return response.model_dump(mode="json")
     except Exception as e:
-        logger.error(f"Error getting weak cards: {e}")
+        logger.error("Error getting weak cards", extra={"error": str(e)})
         raise
 
 
@@ -61,7 +61,7 @@ def get_weak_cards():
 def get_forecast():
     """Get review forecast."""
     user_id = get_user_id_from_context(router)
-    logger.info(f"Getting forecast for user_id: {user_id}")
+    logger.info("Getting forecast", extra={"user_id": user_id})
 
     params = router.current_event.query_string_parameters or {}
     try:
@@ -70,12 +70,12 @@ def get_forecast():
         return Response(
             status_code=400,
             content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"message": "days must be a positive integer"}),
+            body=json.dumps({"error": "days must be a positive integer"}),
         )
 
     try:
         response = stats_service.get_forecast(user_id, days=days)
         return response.model_dump(mode="json")
     except Exception as e:
-        logger.error(f"Error getting forecast: {e}")
+        logger.error("Error getting forecast", extra={"error": str(e)})
         raise

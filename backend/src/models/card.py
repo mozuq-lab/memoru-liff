@@ -1,7 +1,7 @@
 """Card models for Memoru LIFF application."""
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
@@ -115,7 +115,7 @@ class Card(BaseModel):
     interval: int = 0  # Days until next review
     ease_factor: float = 2.5  # SM-2 ease factor
     repetitions: int = 0  # Number of successful reviews
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: Optional[datetime] = None
 
     def to_response(self) -> CardResponse:

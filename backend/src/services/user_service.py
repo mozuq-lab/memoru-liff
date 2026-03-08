@@ -200,21 +200,26 @@ class UserService:
         except ClientError as e:
             raise UserServiceError(f"Failed to query user by LINE ID: {e}")
 
-    def get_linked_users(self, limit: int = 100) -> List[User]:
+    def get_linked_users(self) -> List[User]:
         """Get all users with LINE account linked.
 
-        Args:
-            limit: Maximum number of users to return per scan.
+        Note: This method uses a full table Scan with FilterExpression.
+        The FilterExpression reduces data transfer but does not reduce read capacity consumption.
 
         Returns:
             List of users with LINE account linked.
+
+        .. todo::
+            GSI (例: line_user_id-index を Scan するか、linked_status-index を新設) に
+            移行してスキャンコストを削減する。ユーザー数増加に伴い Scan のコストが
+            線形に増大するため、本番運用前に対応が必要。
         """
         users = []
         try:
+            # TODO: GSI 導入後は Query に置き換えてスキャンコストを削減する
             # Scan the table for users with line_user_id
             scan_kwargs = {
                 "FilterExpression": "attribute_exists(line_user_id)",
-                "Limit": limit,
             }
 
             while True:
@@ -231,23 +236,35 @@ class UserService:
         except ClientError as e:
             raise UserServiceError(f"Failed to get linked users: {e}")
 
-    def update_last_notified_date(self, user_id: str, date_str: str) -> None:
-        """Update user's last notification date.
+    def update_last_notified_date(self, user_id: str, date_str: str) -> bool:
+        """Update user's last notification date with idempotency guard.
+
+        Uses ConditionExpression to skip the update if last_notified_date is
+        already set to date_str, ensuring idempotent execution when the due-push
+        job is retried or invoked concurrently.
 
         Args:
             user_id: The user's unique identifier.
             date_str: Date string in YYYY-MM-DD format.
+
+        Returns:
+            True if the update was applied, False if already up-to-date (idempotent skip).
         """
         try:
             self.table.update_item(
                 Key={"user_id": user_id},
                 UpdateExpression="SET last_notified_date = :date, updated_at = :updated_at",
+                ConditionExpression="attribute_not_exists(last_notified_date) OR last_notified_date <> :date",
                 ExpressionAttributeValues={
                     ":date": date_str,
                     ":updated_at": datetime.now(dt_timezone.utc).isoformat(),
                 },
             )
+            return True
         except ClientError as e:
+            if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                # Already notified today — idempotent skip
+                return False
             raise UserServiceError(f"Failed to update last notified date: {e}")
 
     def update_settings(

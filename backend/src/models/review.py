@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 from models.card import Reference
 
@@ -12,14 +12,6 @@ class ReviewRequest(BaseModel):
     """Request model for submitting a review."""
 
     grade: int = Field(..., ge=0, le=5, description="Review grade (0-5)")
-
-    @field_validator("grade")
-    @classmethod
-    def validate_grade(cls, v: int) -> int:
-        """Validate grade is in valid range."""
-        if not 0 <= v <= 5:
-            raise ValueError("Grade must be between 0 and 5")
-        return v
 
 
 class ReviewPreviousState(BaseModel):
