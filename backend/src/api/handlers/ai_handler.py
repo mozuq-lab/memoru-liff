@@ -7,7 +7,7 @@ from aws_lambda_powertools.event_handler import Response, content_types
 from aws_lambda_powertools.event_handler.api_gateway import Router
 from pydantic import ValidationError
 
-from api.shared import get_user_id_from_context, map_ai_error_to_http
+from api.shared import get_user_id_from_context, map_ai_error_to_http, make_validation_error_response
 from services.card_service import CardService
 from models.generate import (
     GenerateCardsRequest,
@@ -41,7 +41,7 @@ router = Router()
 def generate_cards():
     """Generate flashcards from input text using AI."""
     user_id = get_user_id_from_context(router)
-    logger.info(f"Generating cards for user_id: {user_id}")
+    logger.info("Generating cards", extra={"user_id": user_id})
 
     try:
         body = router.current_event.json_body
@@ -53,12 +53,8 @@ def generate_cards():
             )
         request = GenerateCardsRequest(**body)
     except ValidationError as e:
-        logger.warning(f"Validation error: {e}")
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid request", "details": e.errors()}),
-        )
+        logger.warning("Validation error", extra={"error": str(e)})
+        return make_validation_error_response(e)
     except json.JSONDecodeError:
         return Response(
             status_code=400,
@@ -75,8 +71,8 @@ def generate_cards():
             language=request.language,
         )
         logger.info(
-            f"Card generation succeeded: model={result.model_used}, "
-            f"cards={len(result.cards)}, time_ms={result.processing_time_ms}"
+            "Card generation succeeded",
+            extra={"model": result.model_used, "cards": len(result.cards), "time_ms": result.processing_time_ms},
         )
 
         response = GenerateCardsResponse(
@@ -97,10 +93,10 @@ def generate_cards():
         return response.model_dump(mode="json")
 
     except AIServiceError as e:
-        logger.warning(f"AI service error for user_id {user_id}: {type(e).__name__}: {e}")
+        logger.warning("AI service error", extra={"user_id": user_id, "error_type": type(e).__name__, "error": str(e)})
         return map_ai_error_to_http(e)
     except Exception as e:
-        logger.error(f"Error generating cards: {e}")
+        logger.error("Error generating cards", extra={"error": str(e)})
         raise
 
 
@@ -109,7 +105,7 @@ def generate_cards():
 def generate_from_url():
     """Generate flashcards from a URL using AI."""
     user_id = get_user_id_from_context(router)
-    logger.info(f"Generating cards from URL for user_id: {user_id}")
+    logger.info("Generating cards from URL", extra={"user_id": user_id})
 
     try:
         body = router.current_event.json_body
@@ -121,12 +117,8 @@ def generate_from_url():
             )
         request = GenerateFromUrlRequest(**body)
     except ValidationError as e:
-        logger.warning(f"Validation error: {e}")
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid request", "details": e.errors()}),
-        )
+        logger.warning("Validation error", extra={"error": str(e)})
+        return make_validation_error_response(e)
     except json.JSONDecodeError:
         return Response(
             status_code=400,
@@ -159,7 +151,7 @@ def generate_from_url():
             profile_id=getattr(request, "profile_id", None),
         )
     except ContentFetchError as e:
-        logger.warning(f"Content fetch error for user_id {user_id}: {e}")
+        logger.warning("Content fetch error", extra={"user_id": user_id, "error": str(e)})
         error_msg = str(e)
         if "timeout" in error_msg.lower():
             status_code = 408
@@ -205,9 +197,13 @@ def generate_from_url():
             )
 
         logger.info(
-            f"URL card generation succeeded: model={result.model_used}, "
-            f"cards={len(result.cards)}, chunks={len(chunk_texts)}, "
-            f"time_ms={result.processing_time_ms}"
+            "URL card generation succeeded",
+            extra={
+                "model": result.model_used,
+                "cards": len(result.cards),
+                "chunks": len(chunk_texts),
+                "time_ms": result.processing_time_ms,
+            },
         )
 
         response = GenerateFromUrlResponse(
@@ -236,10 +232,10 @@ def generate_from_url():
         return response.model_dump(mode="json", exclude_none=True)
 
     except AIServiceError as e:
-        logger.warning(f"AI service error for user_id {user_id}: {type(e).__name__}: {e}")
+        logger.warning("AI service error", extra={"user_id": user_id, "error_type": type(e).__name__, "error": str(e)})
         return map_ai_error_to_http(e)
     except Exception as e:
-        logger.error(f"Error generating cards from URL: {e}")
+        logger.error("Error generating cards from URL", extra={"error": str(e)})
         raise
 
 
@@ -248,7 +244,7 @@ def generate_from_url():
 def refine_card():
     """Refine/improve user-input flashcard using AI."""
     user_id = get_user_id_from_context(router)
-    logger.info(f"Refining card for user_id: {user_id}")
+    logger.info("Refining card", extra={"user_id": user_id})
 
     try:
         body = router.current_event.json_body
@@ -260,13 +256,8 @@ def refine_card():
             )
         request = RefineCardRequest(**body)
     except ValidationError as e:
-        logger.warning(f"Validation error: {e}")
-        details = json.loads(e.json())
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid request", "details": details}),
-        )
+        logger.warning("Validation error", extra={"error": str(e)})
+        return make_validation_error_response(e)
     except json.JSONDecodeError:
         return Response(
             status_code=400,
@@ -282,8 +273,8 @@ def refine_card():
             language=request.language,
         )
         logger.info(
-            f"Card refinement succeeded for user_id: {user_id}, "
-            f"model={result.model_used}, time_ms={result.processing_time_ms}"
+            "Card refinement succeeded",
+            extra={"user_id": user_id, "model": result.model_used, "time_ms": result.processing_time_ms},
         )
 
         response = RefineCardResponse(
@@ -295,8 +286,8 @@ def refine_card():
         return response.model_dump(mode="json")
 
     except AIServiceError as e:
-        logger.warning(f"AI service error for user_id {user_id}: {type(e).__name__}: {e}")
+        logger.warning("AI service error", extra={"user_id": user_id, "error_type": type(e).__name__, "error": str(e)})
         return map_ai_error_to_http(e)
     except Exception as e:
-        logger.error(f"Error refining card: {e}")
+        logger.error("Error refining card", extra={"error": str(e)})
         raise

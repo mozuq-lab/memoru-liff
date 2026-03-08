@@ -8,7 +8,7 @@ from aws_lambda_powertools.event_handler.api_gateway import Router
 from aws_lambda_powertools.event_handler.exceptions import NotFoundError
 from pydantic import ValidationError
 
-from api.shared import get_user_id_from_context
+from api.shared import get_user_id_from_context, make_validation_error_response
 from models.user import LinkLineResponse, UserSettingsRequest
 from services.user_service import (
     UserService,
@@ -32,13 +32,13 @@ line_service = LineService()
 def get_current_user():
     """Get current user information."""
     user_id = get_user_id_from_context(router)
-    logger.info(f"Getting user info for user_id: {user_id}")
+    logger.info("Getting user info", extra={"user_id": user_id})
 
     try:
         user = user_service.get_or_create_user(user_id)
         return user.to_response().model_dump(mode="json")
     except Exception as e:
-        logger.error(f"Error getting user: {e}")
+        logger.error("Error getting user", extra={"error": str(e)})
         raise
 
 
@@ -47,7 +47,7 @@ def get_current_user():
 def link_line_account():
     """Link LINE account to current user."""
     user_id = get_user_id_from_context(router)
-    logger.info(f"Linking LINE account for user_id: {user_id}")
+    logger.info("Linking LINE account", extra={"user_id": user_id})
 
     try:
         body = router.current_event.json_body
@@ -84,7 +84,7 @@ def link_line_account():
             body=json.dumps({"error": "This LINE account is already linked to another user"}),
         )
     except Exception as e:
-        logger.error(f"Error linking LINE account: {e}")
+        logger.error("Error linking LINE account", extra={"error": str(e)})
         raise
 
 
@@ -93,18 +93,14 @@ def link_line_account():
 def update_user_settings():
     """Update current user settings."""
     user_id = get_user_id_from_context(router)
-    logger.info(f"Updating settings for user_id: {user_id}")
+    logger.info("Updating settings", extra={"user_id": user_id})
 
     try:
         body = router.current_event.json_body
         request = UserSettingsRequest(**body)
     except ValidationError as e:
-        logger.warning(f"Validation error: {e}")
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid request", "details": e.errors()}),
-        )
+        logger.warning("Validation error", extra={"error": str(e)})
+        return make_validation_error_response(e)
     except json.JSONDecodeError:
         return Response(
             status_code=400,
@@ -124,7 +120,7 @@ def update_user_settings():
     except UserNotFoundError:
         raise NotFoundError("User not found")
     except Exception as e:
-        logger.error(f"Error updating settings: {e}")
+        logger.error("Error updating settings", extra={"error": str(e)})
         raise
 
 
@@ -133,7 +129,7 @@ def update_user_settings():
 def unlink_line():
     """Unlink LINE account from current user."""
     user_id = get_user_id_from_context(router)
-    logger.info(f"Unlinking LINE account for user_id: {user_id}")
+    logger.info("Unlinking LINE account", extra={"user_id": user_id})
 
     try:
         user = user_service.unlink_line(user_id)
@@ -145,5 +141,5 @@ def unlink_line():
             body=json.dumps({"error": "LINE account not linked"}),
         )
     except Exception as e:
-        logger.error(f"Error unlinking LINE account: {e}")
+        logger.error("Error unlinking LINE account", extra={"error": str(e)})
         raise

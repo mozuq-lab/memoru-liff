@@ -85,7 +85,7 @@ class TestCreateSession:
         from api.handler import handler
 
         response = handler(event, lambda_context)
-        assert response["statusCode"] == 422
+        assert response["statusCode"] == 400
 
     def test_create_session_missing_deck_id(self, api_gateway_event, lambda_context):
         event = api_gateway_event(
@@ -97,7 +97,7 @@ class TestCreateSession:
         from api.handler import handler
 
         response = handler(event, lambda_context)
-        assert response["statusCode"] == 422
+        assert response["statusCode"] == 400
 
 
 class TestSendMessage:
@@ -153,7 +153,7 @@ class TestSendMessage:
         from api.handler import handler
 
         response = handler(event, lambda_context)
-        assert response["statusCode"] == 422
+        assert response["statusCode"] == 400
 
 
 class TestEndSession:

@@ -307,7 +307,7 @@ class TestGetWeakCardsEndpoint:
 
         assert response["statusCode"] == 400
         body = json.loads(response["body"])
-        assert "limit" in body["message"]
+        assert "limit" in body["error"]
 
     def test_get_weak_cards_negative_limit_clamped(self, api_gateway_event, lambda_context):
         """負の limit は 1 にクランプされること."""
@@ -459,7 +459,7 @@ class TestGetForecastEndpoint:
 
         assert response["statusCode"] == 400
         body = json.loads(response["body"])
-        assert "days" in body["message"]
+        assert "days" in body["error"]
 
     def test_get_forecast_negative_days_clamped(self, api_gateway_event, lambda_context):
         """負の days は 1 にクランプされること."""

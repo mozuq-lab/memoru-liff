@@ -13,7 +13,7 @@ from aws_lambda_powertools.event_handler import APIGatewayHttpResolver
 from aws_lambda_powertools.logging import correlation_paths
 from aws_lambda_powertools.utilities.typing import LambdaContext
 
-from api.shared import get_user_id_from_context, get_user_id_from_event, map_ai_error_to_http
+from api.shared import get_user_id_from_context, get_user_id_from_event, map_ai_error_to_http, make_validation_error_response
 from api.handlers.user_handler import router as user_router
 from api.handlers.cards_handler import router as cards_router
 from api.handlers.decks_handler import router as decks_router
@@ -95,11 +95,7 @@ def grade_ai_handler(event: dict, context: Any) -> dict:
         except json.JSONDecodeError:
             return _make_lambda_response(400, {"error": "Invalid request body"})
         except ValidationError as e:
-            try:
-                details = json.loads(e.json())
-            except Exception:
-                details = []
-            return _make_lambda_response(400, {"error": "Invalid request body", "details": details})
+            return _make_lambda_response(400, {"error": "Invalid request", "details": json.loads(e.json())})
 
         language = (event.get("queryStringParameters") or {}).get("language", "ja")
 
@@ -228,6 +224,12 @@ def url_generate_handler(event: dict, context: Any) -> dict:
 @tracer.capture_lambda_handler
 def handler(event: dict, context: LambdaContext) -> dict:
     """Lambda handler for API Gateway events."""
+    # Stage path prefix補完:
+    # API Gateway HTTP API v2 ではステージ名が "$default" 以外の場合（例: "prod", "dev"）、
+    # rawPath にステージプレフィックスが含まれないことがある。
+    # Lambda Powertools の APIGatewayHttpResolver はルートマッチング時に rawPath を使用するが、
+    # ステージプレフィックスの自動補完は行わないため、手動で付与する必要がある。
+    # 例: stage="prod", rawPath="/cards" → "/prod/cards" に補完してルーティングを正しく動作させる。
     stage = event.get("requestContext", {}).get("stage", "$default")
     raw_path = event.get("rawPath", "/")
     if stage != "$default" and not raw_path.startswith(f"/{stage}"):

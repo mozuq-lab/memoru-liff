@@ -243,64 +243,50 @@ class TestDuePushHandler:
 
     def test_handler_success(self):
         """Test handler returns success response."""
-        # Mock the notification_service before importing handler
-        with patch("services.notification_service.NotificationService") as MockService:
-            mock_service = MagicMock()
-            mock_result = NotificationResult(
-                processed=10,
-                sent=8,
-                skipped=2,
-                errors=[],
-            )
-            mock_service.process_notifications.return_value = mock_result
-            MockService.return_value = mock_service
+        import src.jobs.due_push_handler as handler_module
 
-            # Import and reload module to pick up the mock
-            import importlib
-            import src.jobs.due_push_handler as handler_module
-            importlib.reload(handler_module)
+        mock_service = MagicMock()
+        mock_result = NotificationResult(
+            processed=10,
+            sent=8,
+            skipped=2,
+            errors=[],
+        )
+        mock_service.process_notifications.return_value = mock_result
 
-            # Call handler
+        with patch.object(handler_module, "notification_service", mock_service):
             event = {}
             context = MagicMock()
             response = handler_module.handler(event, context)
 
-            # Verify
-            assert response["statusCode"] == 200
-            body = json.loads(response["body"])
-            assert body["processed_users"] == 10
-            assert body["sent_notifications"] == 8
-            assert body["skipped_users"] == 2
-            assert body["error_count"] == 0
+        assert response["statusCode"] == 200
+        body = json.loads(response["body"])
+        assert body["processed_users"] == 10
+        assert body["sent_notifications"] == 8
+        assert body["skipped_users"] == 2
+        assert body["error_count"] == 0
 
     def test_handler_with_errors(self):
         """Test handler includes error count in response."""
-        # Mock the notification_service before importing handler
-        with patch("services.notification_service.NotificationService") as MockService:
-            mock_service = MagicMock()
-            mock_result = NotificationResult(
-                processed=10,
-                sent=7,
-                skipped=1,
-                errors=[
-                    {"user_id": "user-1", "error": "blocked"},
-                    {"user_id": "user-2", "error": "blocked"},
-                ],
-            )
-            mock_service.process_notifications.return_value = mock_result
-            MockService.return_value = mock_service
+        import src.jobs.due_push_handler as handler_module
 
-            # Import and reload module
-            import importlib
-            import src.jobs.due_push_handler as handler_module
-            importlib.reload(handler_module)
+        mock_service = MagicMock()
+        mock_result = NotificationResult(
+            processed=10,
+            sent=7,
+            skipped=1,
+            errors=[
+                {"user_id": "user-1", "error": "blocked"},
+                {"user_id": "user-2", "error": "blocked"},
+            ],
+        )
+        mock_service.process_notifications.return_value = mock_result
 
-            # Call handler
+        with patch.object(handler_module, "notification_service", mock_service):
             event = {}
             context = MagicMock()
             response = handler_module.handler(event, context)
 
-            # Verify
-            assert response["statusCode"] == 200
-            body = json.loads(response["body"])
-            assert body["error_count"] == 2
+        assert response["statusCode"] == 200
+        body = json.loads(response["body"])
+        assert body["error_count"] == 2

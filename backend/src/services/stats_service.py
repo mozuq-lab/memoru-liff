@@ -1,8 +1,13 @@
-"""Stats service for learning statistics dashboard."""
+"""Stats service for learning statistics dashboard.
+
+集計ロジック（tag_performance, streak, review 統計）の正（single source of truth）。
+review_service.get_review_summary はこのモジュールのヘルパー関数に委譲する。
+"""
 
 import os
 from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 import boto3
 from aws_lambda_powertools import Logger
@@ -14,9 +19,79 @@ from models.stats import (
     WeakCard,
     WeakCardsResponse,
 )
-from services.review_service import ReviewService
 
 logger = Logger()
+
+
+# ---------------------------------------------------------------------------
+# 共通集計ヘルパー関数（M-7: review_service との重複を解消）
+# ---------------------------------------------------------------------------
+
+
+def calculate_tag_performance(
+    cards: List[Dict],
+    reviews: List[Dict],
+) -> Dict[str, float]:
+    """タグごとの正答率を計算する。
+
+    Args:
+        cards: DynamoDB カードアイテムのリスト。
+        reviews: DynamoDB レビューアイテムのリスト。
+
+    Returns:
+        tag -> grade >= 3 の割合 の辞書。
+    """
+    card_tags: Dict[str, List[str]] = {
+        c["card_id"]: c.get("tags") or [] for c in cards
+    }
+    tag_grades: Dict[str, List[int]] = {}
+    for review in reviews:
+        card_id = review.get("card_id", "")
+        grade = int(review["grade"])
+        for tag in card_tags.get(card_id, []):
+            tag_grades.setdefault(tag, []).append(grade)
+
+    return {
+        tag: sum(1 for g in grades if g >= 3) / len(grades)
+        for tag, grades in tag_grades.items()
+        if grades
+    }
+
+
+def calculate_streak(
+    sorted_dates_desc: List[str],
+    user_timezone: str = "UTC",
+) -> int:
+    """連続学習日数（streak）を計算する。
+
+    m-6: date.today() ではなく user_timezone を考慮した「今日」を使用する。
+
+    Args:
+        sorted_dates_desc: ユニークなレビュー日（YYYY-MM-DD）の降順リスト。
+        user_timezone: ユーザーの IANA タイムゾーン文字列。デフォルトは "UTC"。
+
+    Returns:
+        連続学習日数。
+    """
+    if not sorted_dates_desc:
+        return 0
+
+    today = datetime.now(ZoneInfo(user_timezone)).date()
+    latest = date.fromisoformat(sorted_dates_desc[0])
+    if latest < today - timedelta(days=1):
+        return 0
+
+    streak = 0
+    expected = latest
+    for date_str in sorted_dates_desc:
+        d = date.fromisoformat(date_str)
+        if d == expected:
+            streak += 1
+            expected = expected - timedelta(days=1)
+        elif d < expected:
+            break
+
+    return streak
 
 
 class StatsServiceError(Exception):
@@ -145,29 +220,15 @@ class StatsService:
             else 0.0
         )
 
-        # Streak calculation using ReviewService._calculate_streak
+        # Streak calculation（共通ヘルパー使用）
         unique_dates = sorted(
             {r["reviewed_at"][:10] for r in reviews},
             reverse=True,
         )
-        streak_days = ReviewService._calculate_streak(unique_dates)
+        streak_days = calculate_streak(unique_dates)
 
-        # Tag performance: tag -> fraction of reviews with grade >= 3
-        card_tags: Dict[str, List[str]] = {
-            c["card_id"]: c.get("tags") or [] for c in cards
-        }
-        tag_grades: Dict[str, List[int]] = {}
-        for review in reviews:
-            card_id = review.get("card_id", "")
-            grade = int(review["grade"])
-            for tag in card_tags.get(card_id, []):
-                tag_grades.setdefault(tag, []).append(grade)
-
-        tag_performance: Dict[str, float] = {
-            tag: sum(1 for g in grades if g >= 3) / len(grades)
-            for tag, grades in tag_grades.items()
-            if grades
-        }
+        # Tag performance（共通ヘルパー使用）
+        tag_performance = calculate_tag_performance(cards, reviews)
 
         return StatsResponse(
             total_cards=total_cards,

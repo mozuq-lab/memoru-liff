@@ -20,10 +20,10 @@ class TestUrlDetection:
         url = detect_url_in_message("Check this https://example.com/article")
         assert url == "https://example.com/article"
 
-    def test_detect_http_url_normalizes_to_https(self) -> None:
-        """Detects http URL and normalizes to https."""
+    def test_detect_http_url_returns_as_is(self) -> None:
+        """Detects http URL and returns it without normalization (validation delegated to validate_url)."""
         url = detect_url_in_message("See http://example.com/page")
-        assert url == "https://example.com/page"
+        assert url == "http://example.com/page"
 
     def test_detect_url_with_path_and_query(self) -> None:
         """Detects URL with path and query parameters."""

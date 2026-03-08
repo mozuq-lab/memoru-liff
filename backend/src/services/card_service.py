@@ -382,9 +382,20 @@ class CardService:
         # 【カード存在確認】: 削除前にカードが存在することを確認する
         self.get_card(user_id, card_id)
 
-        # 【Reviews 事前削除】: Reviews テーブルのキーは card_id + reviewed_at のため、
-        # トランザクション内の単一 Delete では全レビューを削除できない。
-        # クエリで全レビューを取得し、バッチ削除する（ベストエフォート）。
+        # 【C-5: レビュー削除はトランザクション外】
+        # Reviews テーブルのキーは card_id + reviewed_at の複合キーのため、
+        # TransactWriteItems の単一 Delete 操作では全レビューを一括削除できない。
+        # DynamoDB の TransactWriteItems は最大 100 アイテムの制約があり、
+        # レビュー件数が不定のため完全なアトミック化は困難。
+        #
+        # リスク: カード削除は成功するがレビュー削除が失敗した場合、
+        # 孤立したレビューレコードが Reviews テーブルに残存する可能性がある。
+        # この場合、統計精度に影響するが、アプリケーションの機能には支障なし。
+        #
+        # TODO: 定期バッチジョブで残存レビュー（Cards テーブルに対応するカードが存在しない
+        # レビュー）を検出・クリーンアップする仕組みを導入する。
+        deleted_review_count = 0
+        failed_review_count = 0
         try:
             reviews_table = self.dynamodb.Table(self.reviews_table_name)
             query_kwargs = {
@@ -396,15 +407,44 @@ class CardService:
                 while True:
                     response = reviews_table.query(**query_kwargs)
                     for item in response.get("Items", []):
-                        batch.delete_item(Key={"card_id": item["card_id"], "reviewed_at": item["reviewed_at"]})
+                        try:
+                            batch.delete_item(Key={"card_id": item["card_id"], "reviewed_at": item["reviewed_at"]})
+                            deleted_review_count += 1
+                        except Exception as item_err:
+                            failed_review_count += 1
+                            logger.warning(
+                                "Failed to delete individual review record",
+                                extra={
+                                    "card_id": card_id,
+                                    "reviewed_at": item.get("reviewed_at"),
+                                    "error": str(item_err),
+                                },
+                            )
                     last_key = response.get("LastEvaluatedKey")
                     if not last_key:
                         break
                     query_kwargs["ExclusiveStartKey"] = last_key
         except Exception as e:
+            logger.error(
+                "Failed to delete reviews for card: review records may be orphaned",
+                extra={
+                    "card_id": card_id,
+                    "user_id": user_id,
+                    "deleted_review_count": deleted_review_count,
+                    "failed_review_count": failed_review_count,
+                    "error": str(e),
+                },
+            )
+
+        if failed_review_count > 0:
             logger.warning(
-                "Failed to delete reviews for card (best-effort)",
-                extra={"card_id": card_id, "error": str(e)},
+                "Partial review deletion failure: some reviews may remain orphaned",
+                extra={
+                    "card_id": card_id,
+                    "user_id": user_id,
+                    "deleted_review_count": deleted_review_count,
+                    "failed_review_count": failed_review_count,
+                },
             )
 
         try:
@@ -493,6 +533,53 @@ class CardService:
             return cards, next_cursor
         except ClientError as e:
             raise CardServiceError(f"Failed to list cards: {e}")
+
+    def find_cards_by_reference_url(self, user_id: str, url: str) -> List[Card]:
+        """指定 URL を references に含むカードを全件検索する。
+
+        C-6: list_cards の最初の50件のみで重複 URL を検出していた問題を解消するため、
+        DynamoDB の FilterExpression で全件をチェックする専用メソッド。
+        ページネーション対応で全カードを走査する。
+
+        Args:
+            user_id: ユーザー ID。
+            url: 検索する参照 URL。
+
+        Returns:
+            指定 URL を references フィールドに含むカードのリスト。
+        """
+        try:
+            matched_cards: List[Card] = []
+            query_kwargs = {
+                "KeyConditionExpression": "user_id = :user_id",
+                "FilterExpression": "contains(#references, :url)",
+                "ExpressionAttributeValues": {
+                    ":user_id": user_id,
+                    ":url": url,
+                },
+                "ExpressionAttributeNames": {
+                    "#references": "references",
+                },
+            }
+            while True:
+                response = self.table.query(**query_kwargs)
+                for item in response.get("Items", []):
+                    card = Card.from_dynamodb_item(item)
+                    # FilterExpression の contains は文字列部分一致のため、
+                    # アプリケーション層で references[].value の完全一致を確認する
+                    refs = card.references or []
+                    for ref in refs:
+                        ref_val = ref.get("value", "") if isinstance(ref, dict) else getattr(ref, "value", "")
+                        if ref_val == url:
+                            matched_cards.append(card)
+                            break
+                last_key = response.get("LastEvaluatedKey")
+                if not last_key:
+                    break
+                query_kwargs["ExclusiveStartKey"] = last_key
+            return matched_cards
+        except ClientError as e:
+            raise CardServiceError(f"Failed to find cards by reference URL: {e}")
 
     def get_card_count(self, user_id: str) -> int:
         """Get the number of cards for a user.

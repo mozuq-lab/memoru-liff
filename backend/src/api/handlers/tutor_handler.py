@@ -7,7 +7,7 @@ from aws_lambda_powertools.event_handler import Response, content_types
 from aws_lambda_powertools.event_handler.api_gateway import Router
 from pydantic import ValidationError
 
-from api.shared import get_user_id_from_context
+from api.shared import get_user_id_from_context, make_validation_error_response
 from models.tutor import (
     SendMessageRequest,
     SessionListResponse,
@@ -42,14 +42,11 @@ def create_session():
         body = router.current_event.json_body
         request = StartSessionRequest(**body)
     except ValidationError as e:
-        return Response(
-            status_code=422,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Validation error", "details": e.errors()}),
-        )
+        logger.warning("Validation error", extra={"error": str(e)})
+        return make_validation_error_response(e)
     except json.JSONDecodeError:
         return Response(
-            status_code=422,
+            status_code=400,
             content_type=content_types.APPLICATION_JSON,
             body=json.dumps({"error": "Invalid JSON body"}),
         )
@@ -95,7 +92,7 @@ def create_session():
         return Response(
             status_code=500,
             content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": str(e)}),
+            body=json.dumps({"error": "チューターセッションの開始に失敗しました。"}),
         )
 
 
@@ -109,14 +106,11 @@ def send_message(session_id: str):
         body = router.current_event.json_body
         request = SendMessageRequest(**body)
     except ValidationError as e:
-        return Response(
-            status_code=422,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Validation error", "details": e.errors()}),
-        )
+        logger.warning("Validation error", extra={"error": str(e)})
+        return make_validation_error_response(e)
     except json.JSONDecodeError:
         return Response(
-            status_code=422,
+            status_code=400,
             content_type=content_types.APPLICATION_JSON,
             body=json.dumps({"error": "Invalid JSON body"}),
         )
@@ -158,7 +152,7 @@ def send_message(session_id: str):
         return Response(
             status_code=500,
             content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": str(e)}),
+            body=json.dumps({"error": "メッセージの送信に失敗しました。"}),
         )
 
 

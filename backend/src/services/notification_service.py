@@ -76,7 +76,14 @@ class NotificationService:
         notification_time = user.settings.get("notification_time", "09:00") if user.settings else "09:00"
 
         # 【時刻パース】: HH:MM 形式の文字列を時・分に変換する 🔵
-        notif_hour, notif_min = map(int, notification_time.split(":"))
+        try:
+            notif_hour, notif_min = map(int, notification_time.split(":"))
+        except (ValueError, AttributeError):
+            logger.warning(
+                f"Invalid notification_time format '{notification_time}' for user, "
+                "falling back to 09:00"
+            )
+            notif_hour, notif_min = 9, 0
         local_hour, local_min = local_time.hour, local_time.minute
 
         # 【分単位変換】: 比較のために時・分を合計分数に変換する 🔵

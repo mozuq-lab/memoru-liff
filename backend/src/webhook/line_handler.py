@@ -1,5 +1,6 @@
 """LINE Webhook handler for Memoru LIFF application."""
 
+import base64
 import json
 import os
 import re
@@ -19,7 +20,6 @@ from services.flex_messages import (
     create_question_message,
     create_answer_message,
     create_no_cards_message,
-    create_completion_message,
     create_link_required_message,
     create_error_message,
     create_url_generation_progress_message,
@@ -32,6 +32,7 @@ from services.review_service import ReviewService
 from services.url_content_service import UrlContentService, ContentFetchError
 from services.content_chunker import chunk_content
 from services.ai_service import create_ai_service, AIServiceError
+from utils.url_validator import validate_url, UrlValidationError
 
 logger = Logger()
 tracer = Tracer()
@@ -58,18 +59,15 @@ def detect_url_in_message(text: str) -> Optional[str]:
         text: Message text.
 
     Returns:
-        Normalized URL (https) if found, None otherwise.
+        Extracted URL if found, None otherwise.
+        URL validation (including scheme check) is handled by validate_url().
     """
     if not text:
         return None
     match = _URL_PATTERN.search(text)
     if not match:
         return None
-    url = match.group(0)
-    # Normalize http to https
-    if url.startswith("http://"):
-        url = "https://" + url[7:]
-    return url
+    return match.group(0)
 
 
 def parse_postback_data(data: str) -> Dict[str, str]:
@@ -169,9 +167,12 @@ def handle_grade_action(
             line_service.reply_message(reply_token, [message])
         else:
             # No more cards - session complete
-            # Count is approximate since we don't track session
-            message = create_completion_message(1)
-            line_service.reply_message(reply_token, [message])
+            # Use due_response.total_due_count as a proxy for reviewed count
+            # since we don't track session-level review count
+            line_service.reply_message(
+                reply_token,
+                [{"type": "text", "text": "🎊 本日の復習が完了しました！お疲れさまです！"}],
+            )
 
     except CardNotFoundError:
         logger.warning(f"Card not found: {card_id}")
@@ -199,6 +200,19 @@ def handle_url_card_generation(
         reply_token: Reply token for response.
     """
     logger.info(f"Generating cards from URL for user: {user_id}, url: {url}")
+
+    # Validate URL before processing (M-1: SSRF prevention)
+    try:
+        url = validate_url(url)
+    except UrlValidationError as e:
+        logger.warning(f"URL validation failed: {e}")
+        line_service.reply_message(
+            reply_token,
+            [create_url_generation_error_message(
+                f"無効なURLです: {e}"
+            )],
+        )
+        return
 
     # Send progress message first
     try:
@@ -313,6 +327,17 @@ def handle_save_url_cards(
         reply_token: Reply token for response.
     """
     logger.info(f"Saving URL cards for user: {user_id}, url: {url}")
+
+    # Validate URL before processing (C-2: SSRF prevention)
+    try:
+        url = validate_url(url)
+    except UrlValidationError as e:
+        logger.warning(f"URL validation failed in save_url_cards: {e}")
+        line_service.reply_message(
+            reply_token,
+            [create_url_generation_error_message(f"無効なURLです: {e}")],
+        )
+        return
 
     try:
         # Re-fetch and generate
@@ -491,6 +516,18 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
 
     # Get request body and signature
     body = event.get("body", "")
+
+    # C-1: Handle base64-encoded body from API Gateway
+    if event.get("isBase64Encoded", False) and body:
+        try:
+            body = base64.b64decode(body).decode("utf-8")
+        except Exception as e:
+            logger.error(f"Failed to decode base64 body: {e}")
+            return {
+                "statusCode": 400,
+                "body": json.dumps({"error": "Invalid request body encoding"}),
+            }
+
     headers = event.get("headers", {})
 
     # Normalize header names (case-insensitive)

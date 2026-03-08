@@ -1,6 +1,7 @@
 """Pydantic models for AI Tutor feature."""
 
-from typing import Literal
+from datetime import datetime
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -11,7 +12,7 @@ class TutorMessage(BaseModel):
     role: Literal["user", "assistant"]
     content: str
     related_cards: list[str] = Field(default_factory=list)
-    timestamp: str
+    timestamp: datetime
 
 
 class TutorSessionResponse(BaseModel):
@@ -23,9 +24,9 @@ class TutorSessionResponse(BaseModel):
     status: Literal["active", "ended", "timed_out"]
     messages: list[TutorMessage]
     message_count: int
-    created_at: str
-    updated_at: str
-    ended_at: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    ended_at: Optional[datetime] = None
 
 
 class StartSessionRequest(BaseModel):

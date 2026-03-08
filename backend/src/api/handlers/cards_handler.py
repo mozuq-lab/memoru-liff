@@ -8,7 +8,7 @@ from aws_lambda_powertools.event_handler.api_gateway import Router
 from aws_lambda_powertools.event_handler.exceptions import NotFoundError
 from pydantic import ValidationError
 
-from api.shared import get_user_id_from_context
+from api.shared import get_user_id_from_context, make_validation_error_response
 from models.card import CreateCardRequest, UpdateCardRequest, CardListResponse
 from services.user_service import UserService
 from services.card_service import (
@@ -30,10 +30,17 @@ card_service = CardService()
 def list_cards():
     """List cards for the current user."""
     user_id = get_user_id_from_context(router)
-    logger.info(f"Listing cards for user_id: {user_id}")
+    logger.info("Listing cards", extra={"user_id": user_id})
 
     params = router.current_event.query_string_parameters or {}
-    limit = min(int(params.get("limit", 50)), 100)
+    try:
+        limit = min(int(params.get("limit", 50)), 100)
+    except (ValueError, TypeError):
+        return Response(
+            status_code=400,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": "limit must be a positive integer"}),
+        )
     cursor = params.get("cursor")
     deck_id = params.get("deck_id")
 
@@ -50,7 +57,7 @@ def list_cards():
             next_cursor=next_cursor,
         ).model_dump(mode="json")
     except Exception as e:
-        logger.error(f"Error listing cards: {e}")
+        logger.error("Error listing cards", extra={"error": str(e)})
         raise
 
 
@@ -59,18 +66,14 @@ def list_cards():
 def create_card():
     """Create a new card."""
     user_id = get_user_id_from_context(router)
-    logger.info(f"Creating card for user_id: {user_id}")
+    logger.info("Creating card", extra={"user_id": user_id})
 
     try:
         body = router.current_event.json_body
         request = CreateCardRequest(**body)
     except ValidationError as e:
-        logger.warning(f"Validation error: {e}")
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid request", "details": e.errors()}),
-        )
+        logger.warning("Validation error", extra={"error": str(e)})
+        return make_validation_error_response(e)
     except json.JSONDecodeError:
         return Response(
             status_code=400,
@@ -101,7 +104,7 @@ def create_card():
             body=json.dumps({"error": "Card limit exceeded. Maximum 2000 cards per user."}),
         )
     except Exception as e:
-        logger.error(f"Error creating card: {e}")
+        logger.error("Error creating card", extra={"error": str(e)})
         raise
 
 
@@ -110,7 +113,7 @@ def create_card():
 def get_card(card_id: str):
     """Get a specific card."""
     user_id = get_user_id_from_context(router)
-    logger.info(f"Getting card {card_id} for user_id: {user_id}")
+    logger.info("Getting card", extra={"card_id": card_id, "user_id": user_id})
 
     try:
         card = card_service.get_card(user_id, card_id)
@@ -118,7 +121,7 @@ def get_card(card_id: str):
     except CardNotFoundError:
         raise NotFoundError(f"Card not found: {card_id}")
     except Exception as e:
-        logger.error(f"Error getting card: {e}")
+        logger.error("Error getting card", extra={"card_id": card_id, "error": str(e)})
         raise
 
 
@@ -127,18 +130,14 @@ def get_card(card_id: str):
 def update_card(card_id: str):
     """Update a card."""
     user_id = get_user_id_from_context(router)
-    logger.info(f"Updating card {card_id} for user_id: {user_id}")
+    logger.info("Updating card", extra={"card_id": card_id, "user_id": user_id})
 
     try:
         body = router.current_event.json_body
         request = UpdateCardRequest(**body)
     except ValidationError as e:
-        logger.warning(f"Validation error: {e}")
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid request", "details": e.errors()}),
-        )
+        logger.warning("Validation error", extra={"error": str(e)})
+        return make_validation_error_response(e)
     except json.JSONDecodeError:
         return Response(
             status_code=400,
@@ -172,7 +171,7 @@ def update_card(card_id: str):
     except CardNotFoundError:
         raise NotFoundError(f"Card not found: {card_id}")
     except Exception as e:
-        logger.error(f"Error updating card: {e}")
+        logger.error("Error updating card", extra={"card_id": card_id, "error": str(e)})
         raise
 
 
@@ -181,7 +180,7 @@ def update_card(card_id: str):
 def delete_card(card_id: str):
     """Delete a card."""
     user_id = get_user_id_from_context(router)
-    logger.info(f"Deleting card {card_id} for user_id: {user_id}")
+    logger.info("Deleting card", extra={"card_id": card_id, "user_id": user_id})
 
     try:
         card_service.delete_card(user_id, card_id)
@@ -193,5 +192,5 @@ def delete_card(card_id: str):
     except CardNotFoundError:
         raise NotFoundError(f"Card not found: {card_id}")
     except Exception as e:
-        logger.error(f"Error deleting card: {e}")
+        logger.error("Error deleting card", extra={"card_id": card_id, "error": str(e)})
         raise
