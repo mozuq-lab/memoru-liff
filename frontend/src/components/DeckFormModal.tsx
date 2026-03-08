@@ -143,10 +143,10 @@ export const DeckFormModal = ({ mode, deck, isOpen, onClose, onSubmit }: DeckFor
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       data-testid="deck-form-modal-overlay"
     >
-      <div className="bg-white rounded-xl w-full max-w-md shadow-xl" data-testid="deck-form-modal">
+      <div className="bg-white rounded-xl w-full max-w-md shadow-xl" data-testid="deck-form-modal" role="dialog" aria-modal="true" aria-labelledby="deck-form-title">
         {/* ヘッダー */}
         <div className="flex items-center justify-between p-4 border-b">
-          <h2 className="text-lg font-bold text-gray-800">
+          <h2 id="deck-form-title" className="text-lg font-bold text-gray-800">
             {mode === 'create' ? 'デッキを作成' : 'デッキを編集'}
           </h2>
           <button

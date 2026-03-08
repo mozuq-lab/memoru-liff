@@ -92,19 +92,27 @@ describe('DecksContext', () => {
   });
 
   describe('createDeck', () => {
-    it('デッキを作成できること', async () => {
+    it('デッキを作成し、レスポンスで直接 state を更新すること', async () => {
       const newDeck: Deck = { ...mockDeck, deck_id: 'deck-new', name: '新デッキ' };
       vi.mocked(decksApi.createDeck).mockResolvedValueOnce(newDeck);
 
       const { result } = renderHook(() => useDecksContext(), { wrapper });
+
+      // まず既存データを取得
+      await act(async () => {
+        await result.current.fetchDecks();
+      });
+      const getDecksCallCount = vi.mocked(decksApi.getDecks).mock.calls.length;
 
       await act(async () => {
         const created = await result.current.createDeck({ name: '新デッキ' });
         expect(created.name).toBe('新デッキ');
       });
 
-      // 作成後に fetchDecks が再呼出しされている
-      expect(decksApi.getDecks).toHaveBeenCalled();
+      // 作成後に全件再取得ではなく、直接 state を更新している
+      expect(vi.mocked(decksApi.getDecks).mock.calls.length).toBe(getDecksCallCount);
+      // 新しいデッキが追加されている
+      expect(result.current.decks).toContainEqual(newDeck);
     });
 
     it('作成エラー時に例外がスローされること', async () => {
@@ -121,18 +129,27 @@ describe('DecksContext', () => {
   });
 
   describe('updateDeck', () => {
-    it('デッキを更新できること', async () => {
+    it('デッキを更新し、レスポンスで直接 state を更新すること', async () => {
       const updatedDeck: Deck = { ...mockDeck, name: '更新名' };
       vi.mocked(decksApi.updateDeck).mockResolvedValueOnce(updatedDeck);
 
       const { result } = renderHook(() => useDecksContext(), { wrapper });
+
+      // まず既存データを取得
+      await act(async () => {
+        await result.current.fetchDecks();
+      });
+      const getDecksCallCount = vi.mocked(decksApi.getDecks).mock.calls.length;
 
       await act(async () => {
         const updated = await result.current.updateDeck('deck-1', { name: '更新名' });
         expect(updated.name).toBe('更新名');
       });
 
-      expect(decksApi.getDecks).toHaveBeenCalled();
+      // 更新後に全件再取得ではなく、直接 state を更新している
+      expect(vi.mocked(decksApi.getDecks).mock.calls.length).toBe(getDecksCallCount);
+      // 更新されたデッキが反映されている
+      expect(result.current.decks.find(d => d.deck_id === 'deck-1')?.name).toBe('更新名');
     });
 
     it('更新エラー時に例外がスローされること', async () => {
@@ -149,17 +166,27 @@ describe('DecksContext', () => {
   });
 
   describe('deleteDeck', () => {
-    it('デッキを削除できること', async () => {
+    it('デッキを削除し、直接 state から除去すること', async () => {
       vi.mocked(decksApi.deleteDeck).mockResolvedValueOnce(undefined);
 
       const { result } = renderHook(() => useDecksContext(), { wrapper });
+
+      // まず既存データを取得
+      await act(async () => {
+        await result.current.fetchDecks();
+      });
+      expect(result.current.decks).toHaveLength(1);
+      const getDecksCallCount = vi.mocked(decksApi.getDecks).mock.calls.length;
 
       await act(async () => {
         await result.current.deleteDeck('deck-1');
       });
 
       expect(decksApi.deleteDeck).toHaveBeenCalledWith('deck-1');
-      expect(decksApi.getDecks).toHaveBeenCalled();
+      // 削除後に全件再取得ではなく、直接 state から除去している
+      expect(vi.mocked(decksApi.getDecks).mock.calls.length).toBe(getDecksCallCount);
+      // デッキが除去されている
+      expect(result.current.decks).toHaveLength(0);
     });
 
     it('削除エラー時に例外がスローされること', async () => {

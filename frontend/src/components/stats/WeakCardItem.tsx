@@ -31,7 +31,7 @@ export const WeakCardItem = ({ card, rank }: WeakCardItemProps) => {
         className="ml-2 flex-shrink-0 text-xs font-medium px-2 py-1 rounded-full bg-red-100 text-red-700"
         data-testid="weak-card-ease"
       >
-        EF:{card.ease_factor.toFixed(1)}
+        EF:{(card.ease_factor ?? 0).toFixed(1)}
       </span>
     </Link>
   );

@@ -3,6 +3,7 @@ import {
   useContext,
   useState,
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   type ReactNode,
@@ -35,6 +36,9 @@ interface TutorProviderProps {
 
 /** 30分のタイムアウト閾値（ミリ秒） */
 const TIMEOUT_MS = 30 * 60 * 1000;
+
+/** セッションあたりのメッセージ上限数 */
+const MESSAGE_LIMIT = 20;
 
 export const TutorProvider = ({ children }: TutorProviderProps) => {
   const [session, setSession] = useState<TutorSession | null>(null);
@@ -71,6 +75,13 @@ export const TutorProvider = ({ children }: TutorProviderProps) => {
       timeoutTimerRef.current = null;
     }
   }, []);
+
+  // アンマウント時にタイマーをクリーンアップ
+  useEffect(() => {
+    return () => {
+      clearTimeoutTimer();
+    };
+  }, [clearTimeoutTimer]);
 
   const startSession = useCallback(
     async (deckId: string, mode: LearningMode) => {
@@ -120,12 +131,14 @@ export const TutorProvider = ({ children }: TutorProviderProps) => {
       setError(null);
       lastFailedContentRef.current = null;
 
-      // Optimistically add user message
+      // Optimistically add user message with tempId for safe removal on error
+      const tempId = crypto.randomUUID();
       const userMsg: TutorMessage = {
         role: "user",
         content,
         related_cards: [],
         timestamp: new Date().toISOString(),
+        tempId,
       };
       setMessages((prev) => [...prev, userMsg]);
 
@@ -133,7 +146,11 @@ export const TutorProvider = ({ children }: TutorProviderProps) => {
         const response = await tutorApi.sendMessage(session.session_id, {
           content,
         });
-        setMessages((prev) => [...prev, response.message]);
+        // Remove tempId from optimistic message and append assistant response
+        setMessages((prev) => [
+          ...prev.map((m) => (m.tempId === tempId ? { ...m, tempId: undefined } : m)),
+          response.message,
+        ]);
         setSession((prev) =>
           prev ? { ...prev, message_count: response.message_count } : null,
         );
@@ -142,8 +159,8 @@ export const TutorProvider = ({ children }: TutorProviderProps) => {
         }
         resetTimeoutTimer();
       } catch (err) {
-        // Remove optimistic user message on error
-        setMessages((prev) => prev.slice(0, -1));
+        // Remove optimistic user message by tempId (safe even if other messages were added)
+        setMessages((prev) => prev.filter((m) => m.tempId !== tempId));
         lastFailedContentRef.current = content;
         const message =
           err instanceof Error ? err.message : "メッセージの送信に失敗しました";
@@ -201,7 +218,7 @@ export const TutorProvider = ({ children }: TutorProviderProps) => {
 
           setSession(active);
           setMessages(active.messages);
-          setIsLimitReached(active.message_count >= 20);
+          setIsLimitReached(active.message_count >= MESSAGE_LIMIT);
           resetTimeoutTimer();
           return true;
         }

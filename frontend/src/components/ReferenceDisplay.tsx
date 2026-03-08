@@ -4,23 +4,12 @@
  * 【テスト対応】: TASK-0159
  * 🔵 青信号: 設計文書 architecture.md のコンポーネント仕様より
  */
-import type { Reference, ReferenceType } from '@/types/card';
+import type { Reference } from '@/types/card';
+import { getTypeIcon } from '@/utils/reference';
 
 interface ReferenceDisplayProps {
   references: Reference[];
 }
-
-/** 【タイプアイコン取得】 */
-const getTypeIcon = (type: ReferenceType): string => {
-  switch (type) {
-    case 'url':
-      return '🔗';
-    case 'book':
-      return '📖';
-    case 'note':
-      return '📝';
-  }
-};
 
 /**
  * 【機能概要】: 参考情報の表示コンポーネント

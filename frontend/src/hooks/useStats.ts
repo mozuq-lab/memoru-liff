@@ -37,7 +37,7 @@ export const useStats = (): UseStatsReturn => {
       setWeakCards(weakCardsData);
       setForecast(forecastData);
     } catch (err) {
-      setError(err as Error);
+      setError(err instanceof Error ? err : new Error(String(err)));
     } finally {
       setIsLoading(false);
     }

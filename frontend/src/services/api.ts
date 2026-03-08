@@ -57,22 +57,30 @@ class ApiClient {
         `Bearer ${this.accessToken}`;
     }
 
+    const signal = options.signal ?? AbortSignal.timeout(30_000);
+
     const response = await fetch(`${API_BASE_URL}${endpoint}`, {
       ...options,
       headers,
+      signal,
     });
 
     // 401 Unauthorized - トークンリフレッシュ処理（リトライは1回のみ）
     if (response.status === 401) {
       if (_isRetry) {
         // リトライ後も 401 - ログイン画面にリダイレクト
-        authService.login();
+        authService.login().catch((e) => {
+          console.error("Login redirect failed:", e);
+        });
         throw new Error("Session expired");
       }
 
       if (!this.isRefreshing) {
         this.isRefreshing = true;
-        this.refreshPromise = this.refreshToken();
+        this.refreshPromise = this.refreshToken().finally(() => {
+          this.isRefreshing = false;
+          this.refreshPromise = null;
+        });
       }
       try {
         await this.refreshPromise;
@@ -80,11 +88,10 @@ class ApiClient {
         return this.request<T>(endpoint, options, true);
       } catch {
         // リフレッシュ失敗 - ログイン画面にリダイレクト
-        authService.login();
+        authService.login().catch((e) => {
+          console.error("Login redirect failed:", e);
+        });
         throw new Error("Session expired");
-      } finally {
-        this.isRefreshing = false;
-        this.refreshPromise = null;
       }
     }
 
@@ -130,7 +137,7 @@ class ApiClient {
   }
 
   async getCard(id: string): Promise<Card> {
-    return this.request<Card>(`/cards/${id}`);
+    return this.request<Card>(`/cards/${encodeURIComponent(id)}`);
   }
 
   async createCard(data: CreateCardRequest): Promise<Card> {
@@ -141,14 +148,14 @@ class ApiClient {
   }
 
   async updateCard(id: string, data: UpdateCardRequest): Promise<Card> {
-    return this.request<Card>(`/cards/${id}`, {
+    return this.request<Card>(`/cards/${encodeURIComponent(id)}`, {
       method: "PUT",
       body: JSON.stringify(data),
     });
   }
 
   async deleteCard(id: string): Promise<void> {
-    await this.request<void>(`/cards/${id}`, {
+    await this.request<void>(`/cards/${encodeURIComponent(id)}`, {
       method: "DELETE",
     });
   }
@@ -201,14 +208,14 @@ class ApiClient {
 
   // レビュー API
   async submitReview(cardId: string, grade: number): Promise<ReviewResponse> {
-    return this.request<ReviewResponse>(`/reviews/${cardId}`, {
+    return this.request<ReviewResponse>(`/reviews/${encodeURIComponent(cardId)}`, {
       method: "POST",
       body: JSON.stringify({ grade }),
     });
   }
 
   async undoReview(cardId: string): Promise<UndoReviewResponse> {
-    return this.request<UndoReviewResponse>(`/reviews/${cardId}/undo`, {
+    return this.request<UndoReviewResponse>(`/reviews/${encodeURIComponent(cardId)}/undo`, {
       method: "POST",
     });
   }
@@ -252,14 +259,14 @@ class ApiClient {
   }
 
   async updateDeck(id: string, data: UpdateDeckRequest): Promise<Deck> {
-    return this.request<Deck>(`/decks/${id}`, {
+    return this.request<Deck>(`/decks/${encodeURIComponent(id)}`, {
       method: "PUT",
       body: JSON.stringify(data),
     });
   }
 
   async deleteDeck(id: string): Promise<void> {
-    await this.request<void>(`/decks/${id}`, {
+    await this.request<void>(`/decks/${encodeURIComponent(id)}`, {
       method: "DELETE",
     });
   }
@@ -350,7 +357,7 @@ class ApiClient {
   }
 
   async deleteBrowserProfile(profileId: string): Promise<void> {
-    await this.request<void>(`/browser-profiles/${profileId}`, {
+    await this.request<void>(`/browser-profiles/${encodeURIComponent(profileId)}`, {
       method: 'DELETE',
     });
   }

@@ -22,7 +22,7 @@ export const UrlInput = ({ value, onChange, disabled = false }: UrlInputProps) =
 
   const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
     const pastedText = e.clipboardData.getData('text').trim();
-    if (pastedText && (pastedText.startsWith('https://') || pastedText.startsWith('http://'))) {
+    if (pastedText && pastedText.startsWith('https://')) {
       e.preventDefault();
       onChange(pastedText);
       setTouched(true);

@@ -44,6 +44,8 @@ export const TutorPage = () => {
       if (resumed) {
         setView("chat");
       }
+    }).catch(() => {
+      // セッション復元失敗時はモード選択画面に留まる
     });
   }, [deckId, resumeChecked, resumeSession]);
 

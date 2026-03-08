@@ -8,6 +8,26 @@ import { format, isToday, isBefore, addDays, parseISO } from 'date-fns';
 import { ja } from 'date-fns/locale';
 
 /**
+ * 【機能概要】: 日付文字列を M/DD 形式にフォーマット（予測バー用）
+ * @param dateStr - ISO 8601形式の日付文字列
+ * @returns M/DD 形式の文字列（例: 1/05）
+ */
+export const formatShortDate = (dateStr: string): string => {
+  const date = parseISO(dateStr);
+  return format(date, 'M/dd');
+};
+
+/**
+ * 【機能概要】: 日付文字列を日時表示にフォーマット（セッション履歴用）
+ * @param dateStr - ISO 8601形式の日付文字列
+ * @returns 日本語ロケールの短い月日+時分（例: 1月5日 14:30）
+ */
+export const formatDateTime = (dateStr: string): string => {
+  const date = parseISO(dateStr);
+  return format(date, 'M月d日 HH:mm', { locale: ja });
+};
+
+/**
  * 【型定義】: 復習日ステータス
  */
 export interface DueStatus {

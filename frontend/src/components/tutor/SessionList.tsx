@@ -1,20 +1,11 @@
 import { useEffect, useState } from "react";
 import { ChatMessage } from "./ChatMessage";
 import * as tutorApi from "@/services/tutor-api";
+import { formatDateTime } from "@/utils/date";
 import type { TutorSession } from "@/types";
 
 interface SessionListProps {
   deckId: string;
-}
-
-function formatDate(dateStr: string): string {
-  const d = new Date(dateStr);
-  return d.toLocaleDateString("ja-JP", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 function modeLabel(mode: string): string {
@@ -46,6 +37,7 @@ function statusLabel(status: string): string {
 export const SessionList = ({ deckId }: SessionListProps) => {
   const [sessions, setSessions] = useState<TutorSession[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [expandedSession, setExpandedSession] = useState<TutorSession | null>(
     null,
@@ -60,7 +52,7 @@ export const SessionList = ({ deckId }: SessionListProps) => {
         setSessions(sessions);
       })
       .catch(() => {
-        // ignore
+        setFetchError("セッション履歴の取得に失敗しました");
       })
       .finally(() => setLoading(false));
   }, [deckId]);
@@ -89,6 +81,14 @@ export const SessionList = ({ deckId }: SessionListProps) => {
     );
   }
 
+  if (fetchError) {
+    return (
+      <p className="text-center text-red-500 text-sm py-8">
+        {fetchError}
+      </p>
+    );
+  }
+
   if (sessions.length === 0) {
     return (
       <p className="text-center text-gray-500 text-sm py-8">
@@ -103,6 +103,8 @@ export const SessionList = ({ deckId }: SessionListProps) => {
         <div key={s.session_id} className="bg-white rounded-lg shadow">
           <button
             onClick={() => handleExpand(s.session_id)}
+            aria-expanded={expandedId === s.session_id}
+            aria-label={`${modeLabel(s.mode)} セッション詳細`}
             className="w-full text-left p-4 hover:bg-gray-50 transition-colors"
           >
             <div className="flex justify-between items-center">
@@ -115,7 +117,7 @@ export const SessionList = ({ deckId }: SessionListProps) => {
                 </span>
               </div>
               <span className="text-xs text-gray-400">
-                {formatDate(s.created_at)}
+                {formatDateTime(s.created_at)}
               </span>
             </div>
             <p className="text-xs text-gray-500 mt-1">

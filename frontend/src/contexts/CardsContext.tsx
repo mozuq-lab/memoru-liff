@@ -8,8 +8,8 @@ interface CardsContextType {
   isLoading: boolean;
   error: Error | null;
   // 【TASK-0091】: deckId パラメータ追加（省略時は従来通り全カード取得） 🔵
-  fetchCards: (deckId?: string) => Promise<void>;
-  fetchDueCards: (deckId?: string) => Promise<void>;
+  fetchCards: (deckId?: string, options?: { signal?: AbortSignal }) => Promise<void>;
+  fetchDueCards: (deckId?: string, options?: { signal?: AbortSignal }) => Promise<void>;
   addCard: (card: Card) => void;
   updateCard: (cardId: string, updates: Partial<Card>) => void;
   deleteCard: (cardId: string) => void;
@@ -52,17 +52,23 @@ export const CardsProvider = ({ children }: CardsProviderProps) => {
    * 🔵 青信号: architecture.md セクション6・REQ-001・REQ-102 に基づく
    * @param deckId - フィルタするデッキID（省略時は全カード取得）
    */
-  const fetchCards = useCallback(async (deckId?: string) => {
+  const fetchCards = useCallback(async (deckId?: string, options?: { signal?: AbortSignal }) => {
     setIsLoading(true);
     setError(null);
     try {
       // 【API呼び出し】: deckId を API レイヤーに伝搬（undefined の場合は全カード取得）
       const data = await cardsApi.getCards(deckId);
+      // 【C-3修正】: AbortController による中断時は setState をスキップ
+      if (options?.signal?.aborted) return;
       setCards(data);
     } catch (err) {
-      setError(err as Error);
+      if (options?.signal?.aborted) return;
+      // 【W-30修正】: 型安全なエラーラッピング
+      setError(err instanceof Error ? err : new Error(String(err)));
     } finally {
-      setIsLoading(false);
+      if (!options?.signal?.aborted) {
+        setIsLoading(false);
+      }
     }
   }, []);
 
@@ -73,18 +79,24 @@ export const CardsProvider = ({ children }: CardsProviderProps) => {
    * 🔵 青信号: architecture.md セクション6・既存 getDueCards 実装（deckId パラメータ対応済み）に基づく
    * @param deckId - フィルタするデッキID（省略時は全復習対象カード取得）
    */
-  const fetchDueCards = useCallback(async (deckId?: string) => {
+  const fetchDueCards = useCallback(async (deckId?: string, options?: { signal?: AbortSignal }) => {
     setIsLoading(true);
     setError(null);
     try {
       // 【API呼び出し】: limit は undefined、deckId を第2引数として伝搬
       const response = await cardsApi.getDueCards(undefined, deckId);
+      // 【C-3修正】: AbortController による中断時は setState をスキップ
+      if (options?.signal?.aborted) return;
       setDueCards(response.due_cards.map(dueCardToCard));
       setDueCount(response.total_due_count);
     } catch (err) {
-      setError(err as Error);
+      if (options?.signal?.aborted) return;
+      // 【W-30修正】: 型安全なエラーラッピング
+      setError(err instanceof Error ? err : new Error(String(err)));
     } finally {
-      setIsLoading(false);
+      if (!options?.signal?.aborted) {
+        setIsLoading(false);
+      }
     }
   }, []);
 

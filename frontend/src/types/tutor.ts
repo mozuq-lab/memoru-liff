@@ -11,6 +11,8 @@ export interface TutorMessage {
   content: string;
   related_cards: string[];
   timestamp: string;
+  /** 楽観的更新時の一時識別子（API レスポンスには含まれない） */
+  tempId?: string;
 }
 
 export interface TutorSession {

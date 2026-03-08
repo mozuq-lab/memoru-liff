@@ -91,8 +91,11 @@ export const CardsPage = () => {
   }, [activeTab, deckId, fetchCards, fetchDueCards]);
 
   // 【成功メッセージの自動非表示】
+  // W-15 fix: state 消費後に history.replaceState で state をクリアし、
+  // ブラウザの戻る操作で成功メッセージが再表示されることを防ぐ
   useEffect(() => {
     if (successMessage) {
+      window.history.replaceState({}, document.title);
       const timer = setTimeout(() => setSuccessMessage(null), 3000);
       return () => clearTimeout(timer);
     }

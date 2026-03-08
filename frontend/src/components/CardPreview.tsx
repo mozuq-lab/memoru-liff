@@ -47,10 +47,11 @@ export const CardPreview = ({ card, isSelected, onToggle, onEdit }: CardPreviewP
         /* 編集モード */
         <div className="space-y-3">
           <div>
-            <label className="block text-sm font-medium text-gray-600 mb-1">
+            <label htmlFor={`card-front-${card.tempId}`} className="block text-sm font-medium text-gray-600 mb-1">
               表面（質問）
             </label>
             <textarea
+              id={`card-front-${card.tempId}`}
               value={editFront}
               onChange={(e) => setEditFront(e.target.value)}
               className="w-full p-2 border border-gray-300 rounded resize-none h-20"
@@ -58,10 +59,11 @@ export const CardPreview = ({ card, isSelected, onToggle, onEdit }: CardPreviewP
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-600 mb-1">
+            <label htmlFor={`card-back-${card.tempId}`} className="block text-sm font-medium text-gray-600 mb-1">
               裏面（解答）
             </label>
             <textarea
+              id={`card-back-${card.tempId}`}
               value={editBack}
               onChange={(e) => setEditBack(e.target.value)}
               className="w-full p-2 border border-gray-300 rounded resize-none h-20"

@@ -61,7 +61,7 @@ export const StatsSummary = ({ stats }: StatsSummaryProps) => {
           総復習: <strong className="text-gray-800" data-testid="total-reviews">{stats.total_reviews}回</strong>
         </span>
         <span>
-          平均: <strong className="text-gray-800" data-testid="average-grade">{stats.average_grade.toFixed(1)}</strong>
+          平均: <strong className="text-gray-800" data-testid="average-grade">{(stats.average_grade ?? 0).toFixed(1)}</strong>
         </span>
       </div>
     </section>
