@@ -62,7 +62,15 @@ export const DeckSummary = () => {
           <li
             key={deck.deck_id}
             className="flex items-center justify-between cursor-pointer hover:bg-gray-50 rounded-lg p-2 -mx-2 transition-colors"
+            role="button"
+            tabIndex={0}
             onClick={() => navigate(`/cards?deck_id=${deck.deck_id}`)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                navigate(`/cards?deck_id=${deck.deck_id}`);
+              }
+            }}
           >
             <div className="flex items-center min-w-0">
               <div

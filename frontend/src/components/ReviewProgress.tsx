@@ -4,7 +4,7 @@ interface ReviewProgressProps {
 }
 
 export const ReviewProgress = ({ current, total }: ReviewProgressProps) => {
-  const percentage = Math.round((current / total) * 100);
+  const percentage = total > 0 ? Math.round((current / total) * 100) : 0;
 
   return (
     <div className="w-full space-y-1">
@@ -15,7 +15,7 @@ export const ReviewProgress = ({ current, total }: ReviewProgressProps) => {
         className="w-full bg-gray-200 rounded-full h-2"
         role="progressbar"
         aria-valuenow={current}
-        aria-valuemin={1}
+        aria-valuemin={0}
         aria-valuemax={total}
       >
         <div

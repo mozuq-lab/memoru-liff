@@ -6,6 +6,7 @@
  */
 import { useState } from 'react';
 import type { Reference, ReferenceType } from '@/types/card';
+import { getTypeIcon } from '@/utils/reference';
 
 interface ReferenceEditorProps {
   references: Reference[];
@@ -80,18 +81,6 @@ export const ReferenceEditor = ({
   // 【編集キャンセルハンドラ】
   const handleEditCancel = () => {
     setEditingIndex(null);
-  };
-
-  // 【タイプアイコン取得】
-  const getTypeIcon = (type: ReferenceType): string => {
-    switch (type) {
-      case 'url':
-        return '🔗';
-      case 'book':
-        return '📖';
-      case 'note':
-        return '📝';
-    }
   };
 
   return (

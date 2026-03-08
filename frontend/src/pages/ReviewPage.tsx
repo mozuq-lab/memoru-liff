@@ -229,6 +229,9 @@ export const ReviewPage = () => {
         );
 
         // 【再確認キュー追加判定】: quality 0-2 の場合のみキューに追加
+        // W-17 fix: setReconfirmQueue を updater 関数パターンに統一し、
+        // 最新の state を参照する。moveToNext には updater で計算した値と
+        // 同一のローカル変数を渡すことで整合性を保つ。
         let newReconfirmQueue = reconfirmQueue;
         if (grade < 3) {
           const newCard = buildReconfirmCard(
@@ -238,7 +241,7 @@ export const ReviewPage = () => {
             grade,
           );
           newReconfirmQueue = [...reconfirmQueue, newCard];
-          setReconfirmQueue(newReconfirmQueue);
+          setReconfirmQueue((prev) => [...prev, newCard]);
         }
 
         setReviewResults((prev) => [

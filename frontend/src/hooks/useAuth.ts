@@ -81,7 +81,7 @@ export const useAuth = (): UseAuthReturn => {
       } catch (err) {
         // 【エラー処理】: 初期化エラーを状態に設定
         // 🔵 青信号: エラーハンドリングの仕様
-        setError(err as Error);
+        setError(err instanceof Error ? err : new Error(String(err)));
         setUser(null);
       } finally {
         // 【ローディング完了】: 初期化処理の完了を通知
@@ -109,7 +109,7 @@ export const useAuth = (): UseAuthReturn => {
     } catch (err) {
       // 【エラー処理】: ログインエラーを状態に設定
       // 🔵 青信号: エラーハンドリングの仕様
-      setError(err as Error);
+      setError(err instanceof Error ? err : new Error(String(err)));
       setIsLoading(false);
     }
   }, []);
@@ -133,7 +133,7 @@ export const useAuth = (): UseAuthReturn => {
     } catch (err) {
       // 【エラー処理】: ログアウトエラーを状態に設定
       // 🔵 青信号: エラーハンドリングの仕様
-      setError(err as Error);
+      setError(err instanceof Error ? err : new Error(String(err)));
     } finally {
       setIsLoading(false);
     }
@@ -168,7 +168,7 @@ export const useAuth = (): UseAuthReturn => {
     } catch (err) {
       // 【エラー処理】: リフレッシュエラーを状態に設定
       // 🔵 青信号: エラーハンドリングの仕様
-      setError(err as Error);
+      setError(err instanceof Error ? err : new Error(String(err)));
     }
   }, []);
 

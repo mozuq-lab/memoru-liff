@@ -57,7 +57,7 @@ describe('ReviewProgress', () => {
     it('aria-valuemin と aria-valuemax が設定されている', () => {
       renderReviewProgress(3, 10);
       const progressBar = screen.getByRole('progressbar');
-      expect(progressBar).toHaveAttribute('aria-valuemin', '1');
+      expect(progressBar).toHaveAttribute('aria-valuemin', '0');
       expect(progressBar).toHaveAttribute('aria-valuemax', '10');
     });
   });

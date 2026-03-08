@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, type ReactNode } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { apiClient } from '@/services/api';
 
@@ -40,15 +40,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     }
   }, [auth.user?.access_token]);
 
-  const value = useMemo(() => auth, [
-    auth.user,
-    auth.isLoading,
-    auth.isAuthenticated,
-    auth.error,
-    auth.login,
-    auth.logout,
-    auth.refreshToken,
-  ]);
+  const value = auth;
 
   return (
     <AuthContext.Provider value={value}>

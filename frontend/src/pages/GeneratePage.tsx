@@ -51,7 +51,7 @@ export const GeneratePage = () => {
   const [inputUrl, setInputUrl] = useState('');
   const [urlProgressStage, setUrlProgressStage] = useState<UrlProgressStage>('fetching');
   const [pageInfo, setPageInfo] = useState<PageInfo | null>(null);
-  const progressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const progressTimerRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   // 生成オプション state
   const [cardType, setCardType] = useState<CardType>('qa');
@@ -137,7 +137,7 @@ export const GeneratePage = () => {
     // プログレスステージのシミュレーション
     const timer1 = setTimeout(() => setUrlProgressStage('analyzing'), 3000);
     const timer2 = setTimeout(() => setUrlProgressStage('generating'), 8000);
-    progressTimerRef.current = timer1;
+    progressTimerRef.current = [timer1, timer2];
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), MAX_URL_GENERATION_TIME);
@@ -178,15 +178,13 @@ export const GeneratePage = () => {
       }
     } finally {
       setIsGenerating(false);
-      progressTimerRef.current = null;
+      progressTimerRef.current = [];
     }
   }, [canGenerateUrl, inputUrl, cardType, targetCount, difficulty, selectedProfileId]);
 
   useEffect(() => {
     return () => {
-      if (progressTimerRef.current) {
-        clearTimeout(progressTimerRef.current);
-      }
+      progressTimerRef.current.forEach(clearTimeout);
     };
   }, []);
 

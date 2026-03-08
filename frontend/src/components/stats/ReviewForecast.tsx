@@ -12,7 +12,7 @@ interface ReviewForecastProps {
 }
 
 export const ReviewForecast = ({ forecast }: ReviewForecastProps) => {
-  const maxCount = Math.max(...forecast.map(d => d.due_count), 1);
+  const maxCount = forecast.reduce((max, d) => Math.max(max, d.due_count), 1);
 
   return (
     <section

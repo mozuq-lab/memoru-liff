@@ -47,28 +47,43 @@ export const DecksProvider = ({ children }: DecksProviderProps) => {
       const data = await decksApi.getDecks();
       setDecks(data);
     } catch (err) {
-      setError(err as Error);
+      setError(err instanceof Error ? err : new Error(String(err)));
     } finally {
       setIsLoading(false);
     }
   }, []);
 
   const createDeck = useCallback(async (data: CreateDeckRequest): Promise<Deck> => {
-    const deck = await decksApi.createDeck(data);
-    await fetchDecks();
-    return deck;
-  }, [fetchDecks]);
+    setIsLoading(true);
+    try {
+      const deck = await decksApi.createDeck(data);
+      setDecks((prev) => [...prev, deck]);
+      return deck;
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   const updateDeck = useCallback(async (id: string, data: UpdateDeckRequest): Promise<Deck> => {
-    const deck = await decksApi.updateDeck(id, data);
-    await fetchDecks();
-    return deck;
-  }, [fetchDecks]);
+    setIsLoading(true);
+    try {
+      const deck = await decksApi.updateDeck(id, data);
+      setDecks((prev) => prev.map((d) => (d.deck_id === id ? deck : d)));
+      return deck;
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   const deleteDeck = useCallback(async (id: string): Promise<void> => {
-    await decksApi.deleteDeck(id);
-    await fetchDecks();
-  }, [fetchDecks]);
+    setIsLoading(true);
+    try {
+      await decksApi.deleteDeck(id);
+      setDecks((prev) => prev.filter((d) => d.deck_id !== id));
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   const value = useMemo(
     () => ({
