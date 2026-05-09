@@ -104,6 +104,7 @@ def create_tutor_session_manager(
                 "AGENTCORE_MEMORY_ID is required for agentcore backend"
             )
 
+        _ensure_agentcore_imports()
         boto_session = _get_agentcore_boto_session()
 
         config = AgentCoreMemoryConfig(

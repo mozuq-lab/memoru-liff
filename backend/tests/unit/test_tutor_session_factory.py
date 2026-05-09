@@ -248,3 +248,60 @@ class TestGetAgentcoreBotoSessionSingleton:
 
         assert first is second
         mock_boto3.Session.assert_called_once()
+
+
+# ===================================================================
+# Lazy import (regression test for missing _ensure_agentcore_imports call)
+# ===================================================================
+
+
+class TestAgentcoreLazyImport:
+    """Regression: agentcore backend must call _ensure_agentcore_imports()."""
+
+    @patch("services.tutor_session_factory.boto3")
+    @patch("services.tutor_session_factory._ensure_agentcore_imports")
+    def test_agentcore_backend_invokes_ensure_imports(
+        self, mock_ensure_imports, mock_boto3
+    ):
+        """agentcore 分岐で _ensure_agentcore_imports() が必ず呼ばれる。
+
+        モジュール変数 AgentCoreMemoryConfig 等は本番未 patch では None なので、
+        この呼び出しが欠けると本番で TypeError になる。
+        """
+        import services.tutor_session_factory as factory_mod
+
+        # 模擬 import: _ensure_agentcore_imports() が走った体でモジュール変数を埋める
+        def fake_ensure():
+            factory_mod.MemoryClient = MagicMock()
+            factory_mod.AgentCoreMemoryConfig = MagicMock()
+            factory_mod.AgentCoreMemorySessionManager = MagicMock(
+                return_value=MagicMock()
+            )
+
+        mock_ensure_imports.side_effect = fake_ensure
+
+        env = {
+            "TUTOR_SESSION_BACKEND": "agentcore",
+            "AGENTCORE_MEMORY_ID": AGENTCORE_MEMORY_ID,
+        }
+        original_config = factory_mod.AgentCoreMemoryConfig
+        original_sm = factory_mod.AgentCoreMemorySessionManager
+        original_mc = factory_mod.MemoryClient
+        try:
+            # 本番初期状態を再現
+            factory_mod.MemoryClient = None
+            factory_mod.AgentCoreMemoryConfig = None
+            factory_mod.AgentCoreMemorySessionManager = None
+
+            with patch.dict(os.environ, env, clear=False):
+                from services.tutor_session_factory import (
+                    create_tutor_session_manager,
+                )
+
+                create_tutor_session_manager(SESSION_ID, USER_ID)
+
+            mock_ensure_imports.assert_called_once()
+        finally:
+            factory_mod.MemoryClient = original_mc
+            factory_mod.AgentCoreMemoryConfig = original_config
+            factory_mod.AgentCoreMemorySessionManager = original_sm
