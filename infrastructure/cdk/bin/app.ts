@@ -24,9 +24,12 @@ if (!stage || stage === 'dev') {
       cognitoDomainPrefix: 'memoru-dev', // TODO: Replace with actual domain prefix
       callbackUrls: ['http://localhost:3000/callback', 'https://localhost:3000/callback'],
       logoutUrls: ['http://localhost:3000/', 'https://localhost:3000/'],
-      // TODO: prod 環境では AWS Secrets Manager の Dynamic Reference に移行する
       lineLoginChannelId: process.env.LINE_LOGIN_CHANNEL_ID,
-      lineLoginChannelSecret: process.env.LINE_LOGIN_CHANNEL_SECRET,
+      // dev のみ平文 fallback を許容 (互換性目的)。優先は Secrets Manager 名 / ARN。
+      lineLoginChannelSecretName: process.env.LINE_LOGIN_CHANNEL_SECRET_NAME,
+      lineLoginChannelSecret: process.env.LINE_LOGIN_CHANNEL_SECRET_NAME
+        ? undefined
+        : process.env.LINE_LOGIN_CHANNEL_SECRET,
     }),
 
     new KeycloakStack(app, 'MemoruKeycloakDev', {
@@ -54,9 +57,9 @@ if (stage === 'prod') {
       cognitoDomainPrefix: 'memoru-prod', // TODO: Replace with actual domain prefix
       callbackUrls: ['https://liff.example.com/callback'], // TODO: Replace with actual URLs
       logoutUrls: ['https://liff.example.com/'], // TODO: Replace with actual URLs
-      // TODO: AWS Secrets Manager の Dynamic Reference に移行する
       lineLoginChannelId: process.env.LINE_LOGIN_CHANNEL_ID,
-      lineLoginChannelSecret: process.env.LINE_LOGIN_CHANNEL_SECRET,
+      // prod は Secrets Manager 必須 (CognitoStack 側で平文を弾く)
+      lineLoginChannelSecretName: process.env.LINE_LOGIN_CHANNEL_SECRET_NAME,
     }),
 
     new KeycloakStack(app, 'MemoruKeycloakProd', {

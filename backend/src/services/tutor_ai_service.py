@@ -96,19 +96,40 @@ class BedrockTutorAIService:
     def generate_response(
         self,
         system_prompt: str,
-        messages: list[dict],
+        messages: list[dict] | str,
         session_manager=None,
     ) -> tuple[str, list[str]]:
         """Generate an AI response for a multi-turn conversation.
 
         Args:
             system_prompt: Mode-specific system prompt with card context.
-            messages: Conversation history as list of {"role": ..., "content": ...}.
-            session_manager: Accepted for interface compatibility but ignored.
+            messages: Conversation history as list of {"role": ..., "content": ...},
+                or a single user-message string. String input is normalized to
+                [{"role": "user", "content": <str>}] for interface compatibility,
+                but note that BedrockTutorAIService does NOT manage conversation
+                history — pass the full history when continuing a session.
+            session_manager: Must be None for BedrockTutorAIService.
+                BedrockTutorAIService cannot restore conversation history from a
+                SessionManager (Strands-specific integration), so combining it
+                with a session_manager would silently lose multi-turn context.
+                Use StrandsTutorAIService (USE_STRANDS=true) for tutor sessions.
 
         Returns:
             Tuple of (response_content, related_card_ids).
+
+        Raises:
+            TutorAIServiceError: If session_manager is provided, or messages is empty.
         """
+        if session_manager is not None:
+            raise TutorAIServiceError(
+                "BedrockTutorAIService does not support SessionManager. "
+                "Set USE_STRANDS=true to enable tutor multi-turn sessions."
+            )
+        if isinstance(messages, str):
+            messages = [{"role": "user", "content": messages}]
+        elif not messages:
+            raise TutorAIServiceError("messages must not be empty")
+
         request_body = {
             "anthropic_version": "bedrock-2023-05-31",
             "max_tokens": _MAX_TOKENS,

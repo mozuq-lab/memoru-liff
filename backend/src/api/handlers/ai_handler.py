@@ -27,6 +27,7 @@ from services.ai_service import (
     create_ai_service,
     AIServiceError,
 )
+from services.browser_profile_service import BrowserProfileService
 from services.browser_service import BrowserService
 from services.content_chunker import chunk_content
 from services.url_content_service import ContentFetchError, UrlContentService
@@ -143,12 +144,40 @@ def generate_from_url():
     except Exception:
         pass  # Non-critical: don't block generation on duplicate check failure
 
+    # Validate profile ownership before passing to BrowserService.
+    # Without this check, a user could supply another user's profile_id and
+    # use their authenticated browser session via AgentCore.
+    profile_id = getattr(request, "profile_id", None)
+    if profile_id:
+        try:
+            profile_service = BrowserProfileService()
+            if not profile_service.validate_profile(user_id, profile_id):
+                logger.warning(
+                    "Browser profile not owned by user",
+                    extra={"user_id": user_id, "profile_id": profile_id},
+                )
+                return Response(
+                    status_code=404,
+                    content_type=content_types.APPLICATION_JSON,
+                    body=json.dumps({"error": "Profile not found"}),
+                )
+        except Exception as e:
+            logger.error(
+                "Failed to validate browser profile",
+                extra={"user_id": user_id, "profile_id": profile_id, "error": str(e)},
+            )
+            return Response(
+                status_code=500,
+                content_type=content_types.APPLICATION_JSON,
+                body=json.dumps({"error": "Failed to validate profile"}),
+            )
+
     # Fetch page content
     try:
         content_service = UrlContentService(browser_service=BrowserService())
         page = content_service.fetch_content(
             request.url,
-            profile_id=getattr(request, "profile_id", None),
+            profile_id=profile_id,
         )
     except ContentFetchError as e:
         logger.warning("Content fetch error", extra={"user_id": user_id, "error": str(e)})

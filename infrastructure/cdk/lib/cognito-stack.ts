@@ -1,5 +1,6 @@
 import * as cdk from 'aws-cdk-lib';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import type { Construct } from 'constructs';
 
 type Environment = 'dev' | 'staging' | 'prod';
@@ -11,7 +12,19 @@ export interface CognitoStackProps extends cdk.StackProps {
   logoutUrls: string[];
   /** LINE Login Channel ID（両方指定時のみ LINE IdP を登録） */
   lineLoginChannelId?: string;
-  /** LINE Login Channel Secret */
+  /**
+   * LINE Login Channel Secret を保持する Secrets Manager シークレットの名前または ARN。
+   * 指定すると CFN dynamic reference (`{{resolve:secretsmanager:...}}`) を使って
+   * client_secret に埋め込むため、テンプレートや cdk.out に平文が残らない。
+   *
+   * シークレット本体（プレーンテキスト）はデプロイ前に手動で投入しておく必要がある。
+   */
+  lineLoginChannelSecretName?: string;
+  /**
+   * @deprecated 平文の Channel Secret を直接渡すと CloudFormation テンプレートと
+   * cdk.out に Secret が残る。`lineLoginChannelSecretName` 経由の Secrets Manager
+   * 参照を使うこと。後方互換のため残しているが、prod では使用禁止。
+   */
   lineLoginChannelSecret?: string;
 }
 
@@ -59,9 +72,35 @@ export class CognitoStack extends cdk.Stack {
       },
     });
 
-    // LINE Login 外部 OIDC IdP（両方の Props が指定された場合のみ作成）
+    // LINE Login Channel Secret の解決:
+    //   1. lineLoginChannelSecretName が指定されていれば Secrets Manager の dynamic
+    //      reference に解決する (CFN テンプレートに平文が残らない)
+    //   2. lineLoginChannelSecret (deprecated) が指定されていれば文字列をそのまま使う
+    //      ※ prod 環境ではフォールバック自体を禁止する
+    let resolvedLineSecret: string | undefined;
+    if (props.lineLoginChannelSecretName) {
+      const lineSecret = secretsmanager.Secret.fromSecretNameV2(
+        this,
+        'LineLoginChannelSecret',
+        props.lineLoginChannelSecretName,
+      );
+      // UserPoolIdentityProviderOidc.clientSecret は string 型を要求するため
+      // unsafeUnwrap で Token を文字列化するが、CFN レベルでは dynamic reference
+      // (`{{resolve:secretsmanager:...}}`) として解決される。
+      resolvedLineSecret = lineSecret.secretValue.unsafeUnwrap();
+    } else if (props.lineLoginChannelSecret) {
+      if (props.environment === 'prod') {
+        throw new Error(
+          'LINE Channel Secret は prod では Secrets Manager 経由 (lineLoginChannelSecretName) で渡してください。'
+            + ' 平文プロパティ (lineLoginChannelSecret) は prod では使用禁止です。',
+        );
+      }
+      resolvedLineSecret = props.lineLoginChannelSecret;
+    }
+
+    // LINE Login 外部 OIDC IdP（Channel ID と Secret が両方解決できた場合のみ作成）
     let lineProvider: cognito.UserPoolIdentityProviderOidc | undefined;
-    if (props.lineLoginChannelId && props.lineLoginChannelSecret) {
+    if (props.lineLoginChannelId && resolvedLineSecret) {
       // LINE OIDC エンドポイントは .well-known/openid-configuration から取得可能だが、
       // CDK の UserPoolIdentityProviderOidc は手動指定が必要
       // ref: https://access.line.me/.well-known/openid-configuration
@@ -69,7 +108,7 @@ export class CognitoStack extends cdk.Stack {
         userPool: this.userPool,
         name: 'LINE',
         clientId: props.lineLoginChannelId,
-        clientSecret: props.lineLoginChannelSecret,
+        clientSecret: resolvedLineSecret,
         issuerUrl: 'https://access.line.me',
         scopes: ['openid', 'profile'],
         endpoints: {

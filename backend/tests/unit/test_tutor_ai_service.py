@@ -118,6 +118,42 @@ class TestGenerateResponse:
         request_body = json.loads(call_args[1]["body"])
         assert request_body["messages"] == messages
 
+    def test_generate_response_normalizes_string_to_user_message(self):
+        """文字列入力は [{"role":"user","content":<str>}] に正規化される。"""
+        from services.tutor_ai_service import TutorAIService
+
+        mock_client = MagicMock()
+        mock_response_body = json.dumps({"content": [{"text": "OK"}]})
+        mock_client.invoke_model.return_value = {
+            "body": MagicMock(read=MagicMock(return_value=mock_response_body.encode()))
+        }
+
+        service = TutorAIService(model_id="test-model", bedrock_client=mock_client)
+        service.generate_response(system_prompt="sys", messages="hello")
+
+        call_args = mock_client.invoke_model.call_args
+        request_body = json.loads(call_args[1]["body"])
+        assert request_body["messages"] == [{"role": "user", "content": "hello"}]
+
+    def test_generate_response_with_session_manager_raises(self):
+        """SessionManager と組み合わせた場合は明示的にエラーになる(履歴喪失防止)。"""
+        from services.tutor_ai_service import TutorAIService, TutorAIServiceError
+
+        service = TutorAIService(model_id="test-model", bedrock_client=MagicMock())
+        with pytest.raises(TutorAIServiceError, match="USE_STRANDS=true"):
+            service.generate_response(
+                system_prompt="sys",
+                messages="hello",
+                session_manager=MagicMock(),
+            )
+
+    def test_generate_response_empty_list_raises(self):
+        from services.tutor_ai_service import TutorAIService, TutorAIServiceError
+
+        service = TutorAIService(model_id="test-model", bedrock_client=MagicMock())
+        with pytest.raises(TutorAIServiceError, match="messages must not be empty"):
+            service.generate_response(system_prompt="sys", messages=[])
+
 
 class TestExtractRelatedCards:
     """Tests for related card extraction from AI response."""
