@@ -335,7 +335,26 @@ exports[`CognitoStack LINE Login IdP スナップショット（LINE あり） p
           "authorize_scopes": "openid profile",
           "authorize_url": "https://access.line.me/oauth2/v2.1/authorize",
           "client_id": "test-channel-id",
-          "client_secret": "test-channel-secret",
+          "client_secret": {
+            "Fn::Join": [
+              "",
+              [
+                "{{resolve:secretsmanager:arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":secretsmanager:",
+                {
+                  "Ref": "AWS::Region",
+                },
+                ":",
+                {
+                  "Ref": "AWS::AccountId",
+                },
+                ":secret:memoru/prod/line-channel-secret:SecretString:::}}",
+              ],
+            ],
+          },
           "jwks_uri": "https://api.line.me/oauth2/v2.1/certs",
           "oidc_issuer": "https://access.line.me",
           "token_url": "https://api.line.me/oauth2/v2.1/token",

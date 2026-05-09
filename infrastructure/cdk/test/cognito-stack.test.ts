@@ -167,10 +167,11 @@ describe('CognitoStack', () => {
     lineLoginChannelSecret: 'test-channel-secret',
   };
 
+  // prod は平文 secret を許容しないため Secrets Manager 名で指定する
   const prodPropsWithLine: CognitoStackProps = {
     ...prodProps,
     lineLoginChannelId: 'test-channel-id',
-    lineLoginChannelSecret: 'test-channel-secret',
+    lineLoginChannelSecretName: 'memoru/prod/line-channel-secret',
   };
 
   describe('LINE Login IdP', () => {
@@ -219,7 +220,7 @@ describe('CognitoStack', () => {
         });
       });
 
-      test('client_id と client_secret が Props から設定されている', () => {
+      test('client_id と client_secret が Props から設定されている (dev: 平文 fallback)', () => {
         const template = Template.fromStack(createStack(devPropsWithLine));
         template.hasResourceProperties('AWS::Cognito::UserPoolIdentityProvider', {
           ProviderDetails: {
@@ -227,6 +228,38 @@ describe('CognitoStack', () => {
             client_secret: 'test-channel-secret',
           },
         });
+      });
+
+      test('Secrets Manager 名指定時は client_secret が dynamic reference になる', () => {
+        const propsWithSecretName: CognitoStackProps = {
+          ...devProps,
+          lineLoginChannelId: 'test-channel-id',
+          lineLoginChannelSecretName: 'memoru/dev/line-channel-secret',
+        };
+        const template = Template.fromStack(createStack(propsWithSecretName));
+        const idps = template.findResources('AWS::Cognito::UserPoolIdentityProvider');
+        const idp = Object.values(idps)[0] as {
+          Properties: { ProviderDetails: { client_secret: unknown } };
+        };
+        // CDK は SecretValue.unsafeUnwrap() を Fn::Join + 内部 Token として返す。
+        // 文字列化して `{{resolve:secretsmanager:...}}` を含むか確認する。
+        const serialized = JSON.stringify(idp.Properties.ProviderDetails.client_secret);
+        expect(serialized).toContain('{{resolve:secretsmanager:');
+        expect(serialized).toContain('memoru/dev/line-channel-secret');
+        expect(serialized).toContain(':SecretString');
+        // 平文 fallback の値が紛れ込まないこと
+        expect(serialized).not.toContain('test-channel-secret');
+      });
+
+      test('prod で平文 lineLoginChannelSecret を渡すと synth が失敗する', () => {
+        const prodPropsWithPlaintext: CognitoStackProps = {
+          ...prodProps,
+          lineLoginChannelId: 'test-channel-id',
+          lineLoginChannelSecret: 'plaintext-not-allowed',
+        };
+        expect(() => createStack(prodPropsWithPlaintext)).toThrow(
+          /Secrets Manager 経由/,
+        );
       });
 
       test('OIDC スコープが openid と profile である', () => {
