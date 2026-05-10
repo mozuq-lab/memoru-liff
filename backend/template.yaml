@@ -804,6 +804,9 @@ Resources:
             TableName: !Ref CardsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref DecksTable
+        # validate_profile() で BrowserProfilesTable を読むため Read 権限が必要
+        - DynamoDBReadPolicy:
+            TableName: !Ref BrowserProfilesTable
         - Version: '2012-10-17'
           Statement:
             - Effect: Allow
@@ -812,15 +815,24 @@ Resources:
               Resource:
                 - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
                 - !Sub arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0
+            # AgentCore Browser: BrowserService が呼ぶアクションのみに限定し、
+            # リソースをリージョン/アカウント配下に縛る (旧: bedrock-agentcore:* + Resource: '*')
             - Effect: Allow
               Action:
-                - bedrock-agentcore:*
-              Resource: '*'
+                - bedrock-agentcore:CreateBrowserSession
+                - bedrock-agentcore:GetBrowserSession
+                - bedrock-agentcore:CloseBrowserSession
+                - bedrock-agentcore:ListBrowserSessions
+                - bedrock-agentcore:GetBrowserContent
+              Resource:
+                - !Sub arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:browser/*
+                - !Sub arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:browser-session/*
       Environment:
         Variables:
           OIDC_ISSUER: !Ref OidcIssuer
           BEDROCK_MODEL_ID: !Ref BedrockModelId
           AGENTCORE_BROWSER_REGION: !Ref AWS::Region
+          BROWSER_PROFILES_TABLE: !Ref BrowserProfilesTable
       Events:
         UrlGenerate:
           Type: HttpApi
