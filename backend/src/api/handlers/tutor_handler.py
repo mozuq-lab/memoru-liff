@@ -14,6 +14,7 @@ from models.tutor import (
     StartSessionRequest,
 )
 from services.tutor_service import (
+    ConcurrentSendError,
     DeckNotFoundError,
     EmptyDeckError,
     InsufficientReviewDataError,
@@ -133,6 +134,14 @@ def send_message(session_id: str):
             status_code=429,
             content_type=content_types.APPLICATION_JSON,
             body=json.dumps({"error": f"Session has reached message limit: {session_id}"}),
+        )
+    except ConcurrentSendError:
+        return Response(
+            status_code=409,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps(
+                {"error": "別のメッセージを処理中です。少し待ってからお試しください。"}
+            ),
         )
     except SessionEndedError:
         return Response(

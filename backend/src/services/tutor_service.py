@@ -42,6 +42,10 @@ class MessageLimitError(TutorServiceError):
     """Raised when session message limit is reached."""
 
 
+class ConcurrentSendError(TutorServiceError):
+    """Raised when concurrent send_message is detected (optimistic lock failed)."""
+
+
 class DeckNotFoundError(TutorServiceError):
     """Raised when a deck cannot be found."""
 
@@ -60,6 +64,10 @@ class TutorService:
     MAX_ROUNDS = int(os.environ.get("TUTOR_MAX_ROUNDS", "20"))
     TIMEOUT_MINUTES = int(os.environ.get("TUTOR_TIMEOUT_MINUTES", "30"))
     TTL_DAYS = 7
+
+    # send_message の in-flight ロック上限。Lambda タイムアウト + バッファ。
+    # この時間を超えた processing 状態は stale とみなし、新しい送信が引き継げる。
+    LOCK_TIMEOUT_SECONDS = int(os.environ.get("TUTOR_LOCK_TIMEOUT_SECONDS", "150"))
 
     def __init__(
         self,
@@ -233,6 +241,7 @@ class TutorService:
             SessionNotFoundError: If session doesn't exist.
             SessionEndedError: If session is ended/timed_out.
             MessageLimitError: If message limit reached.
+            ConcurrentSendError: If a concurrent send is detected (optimistic lock failed).
         """
         item = self._get_session_item(user_id, session_id)
 
@@ -252,23 +261,89 @@ class TutorService:
         if current_count >= self.MAX_ROUNDS:
             raise MessageLimitError(f"Session {session_id} has reached message limit")
 
+        # In-flight lock: processing_started_at の属性存在で in-flight 状態を表す。
+        # AI 呼び出し中に到着した後続の send_message は ConditionExpression で弾く
+        # (Bedrock 二重呼び出しと履歴破壊を防ぐ)。
+        # message_count だけの楽観ロックでは「先行が count を進めた後に到着した
+        # リクエスト」を弾けないため、in-flight 排他制御が必要。
+        now = datetime.now(timezone.utc)
+        stale_threshold = (
+            now - timedelta(seconds=self.LOCK_TIMEOUT_SECONDS)
+        ).isoformat()
+        try:
+            self.table.update_item(
+                Key={"user_id": user_id, "session_id": session_id},
+                UpdateExpression=(
+                    "SET processing_started_at = :now, updated_at = :now"
+                ),
+                # status が active で、かつロックが取れていない or stale の場合のみ取得
+                ConditionExpression=(
+                    "#st = :active "
+                    "AND (attribute_not_exists(processing_started_at) "
+                    "OR processing_started_at < :stale)"
+                ),
+                ExpressionAttributeNames={"#st": "status"},
+                ExpressionAttributeValues={
+                    ":active": "active",
+                    ":now": now.isoformat(),
+                    ":stale": stale_threshold,
+                },
+            )
+        except ClientError as e:
+            if e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+                logger.warning(
+                    "Concurrent send detected (in-flight lock held)",
+                    extra={
+                        "user_id": user_id,
+                        "session_id": session_id,
+                    },
+                )
+                raise ConcurrentSendError(
+                    f"Session {session_id} has an in-flight send in progress"
+                ) from e
+            raise
+
         # Get AI response via SessionManager
         system_prompt = item.get("system_prompt", "")
-        sm = self.session_manager_factory(session_id=session_id, user_id=user_id)
         try:
-            ai_content, related_cards = self.ai_service.generate_response(
-                system_prompt=system_prompt,
-                messages=content,
-                session_manager=sm,
-            )
-        finally:
-            sm.close()
+            sm = self.session_manager_factory(session_id=session_id, user_id=user_id)
+            try:
+                ai_content, related_cards = self.ai_service.generate_response(
+                    system_prompt=system_prompt,
+                    messages=content,
+                    session_manager=sm,
+                )
+            finally:
+                sm.close()
+        except Exception:
+            # AI error: ロックを解放する (count は進めない)。
+            # 解放に失敗しても LOCK_TIMEOUT_SECONDS 後には他の送信が引き継げる。
+            try:
+                self.table.update_item(
+                    Key={"user_id": user_id, "session_id": session_id},
+                    UpdateExpression="REMOVE processing_started_at",
+                    ConditionExpression="attribute_exists(processing_started_at)",
+                )
+            except ClientError as rb_err:
+                logger.warning(
+                    "Failed to release in-flight lock after AI error",
+                    extra={
+                        "user_id": user_id,
+                        "session_id": session_id,
+                        "error": str(rb_err),
+                    },
+                )
+            raise
+
         ai_content = self.ai_service.clean_response_text(ai_content)
 
         # Validate related_cards against deck's card IDs
         deck_card_ids = set(item.get("deck_card_ids", []))
         if deck_card_ids:
             related_cards = [cid for cid in related_cards if cid in deck_card_ids]
+
+        new_count = current_count + 1
+        is_limit_reached = new_count >= self.MAX_ROUNDS
 
         ai_msg = TutorMessage(
             role="assistant",
@@ -277,36 +352,46 @@ class TutorService:
             timestamp=datetime.now(timezone.utc).isoformat(),
         )
 
-        new_count = current_count + 1
-        is_limit_reached = new_count >= self.MAX_ROUNDS
-
-        # Update DynamoDB metadata (messages managed by SessionManager)
-        update_expr = "SET message_count = :cnt, updated_at = :upd"
-        expr_values: dict[str, Any] = {
-            ":cnt": new_count,
-            ":upd": datetime.now(timezone.utc).isoformat(),
-        }
-
-        # If limit reached, auto-end the session
+        # AI 成功後: ロック解放 (REMOVE processing_started_at) + count++ を
+        # 同一 update_item で行う。limit reached なら session を ended に遷移。
+        completion_now = datetime.now(timezone.utc)
         if is_limit_reached:
-            ended_at = datetime.now(timezone.utc)
-            ttl = int((ended_at + timedelta(days=self.TTL_DAYS)).timestamp())
-            update_expr += ", #st = :status, ended_at = :ended, #ttl = :ttl"
-            expr_values[":status"] = "ended"
-            expr_values[":ended"] = ended_at.isoformat()
-            expr_values[":ttl"] = ttl
-
+            ttl = int(
+                (completion_now + timedelta(days=self.TTL_DAYS)).timestamp()
+            )
             self.table.update_item(
                 Key={"user_id": user_id, "session_id": session_id},
-                UpdateExpression=update_expr,
-                ExpressionAttributeValues=expr_values,
+                UpdateExpression=(
+                    "SET message_count = :cnt, "
+                    "#st = :ended, "
+                    "ended_at = :ended_at, "
+                    "#ttl = :ttl, "
+                    "updated_at = :upd "
+                    "REMOVE processing_started_at"
+                ),
+                ConditionExpression="attribute_exists(processing_started_at)",
+                ExpressionAttributeValues={
+                    ":cnt": new_count,
+                    ":ended": "ended",
+                    ":ended_at": completion_now.isoformat(),
+                    ":ttl": ttl,
+                    ":upd": completion_now.isoformat(),
+                },
                 ExpressionAttributeNames={"#st": "status", "#ttl": "ttl"},
             )
         else:
             self.table.update_item(
                 Key={"user_id": user_id, "session_id": session_id},
-                UpdateExpression=update_expr,
-                ExpressionAttributeValues=expr_values,
+                UpdateExpression=(
+                    "SET message_count = :cnt, "
+                    "updated_at = :upd "
+                    "REMOVE processing_started_at"
+                ),
+                ConditionExpression="attribute_exists(processing_started_at)",
+                ExpressionAttributeValues={
+                    ":cnt": new_count,
+                    ":upd": completion_now.isoformat(),
+                },
             )
 
         return SendMessageResponse(

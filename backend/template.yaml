@@ -804,6 +804,9 @@ Resources:
             TableName: !Ref CardsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref DecksTable
+        # validate_profile() で BrowserProfilesTable を読むため Read 権限が必要
+        - DynamoDBReadPolicy:
+            TableName: !Ref BrowserProfilesTable
         - Version: '2012-10-17'
           Statement:
             - Effect: Allow
@@ -812,15 +815,30 @@ Resources:
               Resource:
                 - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
                 - !Sub arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0
+            # AgentCore Browser: 実際の API オペレーション名に合わせて限定
+            # (旧: bedrock-agentcore:* + Resource: '*')
+            # 参照: AWS Service Authorization Reference (Amazon Bedrock AgentCore)
+            #   - Browser session API は Start/Get/Stop/Invoke/List BrowserSession(s)
+            #   - Browser リソース ARN は ${Partition}:bedrock-agentcore:${Region}:aws:browser/*
+            #     (アカウント部分は AWS 管理リソースを示す `aws` 固定)
+            #   - profile_id 指定で StartBrowserSession を呼ぶと、認証情報を保持する
+            #     ユーザーリソース browser-profile も IAM 上必要になる
             - Effect: Allow
               Action:
-                - bedrock-agentcore:*
-              Resource: '*'
+                - bedrock-agentcore:StartBrowserSession
+                - bedrock-agentcore:GetBrowserSession
+                - bedrock-agentcore:StopBrowserSession
+                - bedrock-agentcore:InvokeBrowser
+                - bedrock-agentcore:ListBrowserSessions
+              Resource:
+                - !Sub arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:aws:browser/*
+                - !Sub arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:browser-profile/*
       Environment:
         Variables:
           OIDC_ISSUER: !Ref OidcIssuer
           BEDROCK_MODEL_ID: !Ref BedrockModelId
           AGENTCORE_BROWSER_REGION: !Ref AWS::Region
+          BROWSER_PROFILES_TABLE: !Ref BrowserProfilesTable
       Events:
         UrlGenerate:
           Type: HttpApi

@@ -261,6 +261,153 @@ class TestSendMessage:
         with pytest.raises(SessionEndedError):
             tutor_service.send_message("test-user", session.session_id, "hello")
 
+    def test_concurrent_send_raises_when_inflight_lock_held(
+        self, tutor_service, dynamodb_tables, mock_ai_service
+    ):
+        """先行リクエストが in-flight ロックを取得している間に到着した
+        後続リクエストは、count に関係なく ConcurrentSendError で弾かれる。
+        AI も呼ばれない (Bedrock 二重課金を防止)。"""
+        from datetime import datetime, timezone
+
+        from services.tutor_service import ConcurrentSendError
+
+        _seed_deck(dynamodb_tables)
+        session = tutor_service.start_session(
+            user_id="test-user", deck_id="deck_001", mode="free_talk"
+        )
+
+        # 先行リクエストが in-flight 中の状態を擬似再現:
+        # processing_started_at が直近 (stale ではない) に書かれている = lock held
+        tutor_service.table.update_item(
+            Key={"user_id": "test-user", "session_id": session.session_id},
+            UpdateExpression="SET processing_started_at = :now",
+            ExpressionAttributeValues={
+                ":now": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+
+        mock_ai_service.generate_response.reset_mock()
+
+        with pytest.raises(ConcurrentSendError):
+            tutor_service.send_message(
+                "test-user", session.session_id, "q-blocked"
+            )
+
+        # AI が呼ばれないこと (Bedrock 課金が発生しない)
+        mock_ai_service.generate_response.assert_not_called()
+
+    def test_concurrent_send_blocks_second_caller_during_ai_call(
+        self, tutor_service, dynamodb_tables, mock_ai_service
+    ):
+        """AI 呼び出し中に到着した2件目の send_message が、count が進む前であっても
+        in-flight ロックで ConcurrentSendError になる (Codex 指摘の主要シナリオ)。"""
+        from services.tutor_service import ConcurrentSendError
+
+        _seed_deck(dynamodb_tables)
+        session = tutor_service.start_session(
+            user_id="test-user", deck_id="deck_001", mode="free_talk"
+        )
+        # start_session で AI が呼ばれているので、send_message 検証用にリセット
+        mock_ai_service.generate_response.reset_mock()
+
+        second_call_error: list[Exception] = []
+
+        # 1件目の AI 呼び出し中に「2件目の send_message」を発火させる
+        def first_ai_then_second_send(*args, **kwargs):
+            try:
+                tutor_service.send_message(
+                    "test-user", session.session_id, "q2-while-q1-running"
+                )
+            except Exception as exc:  # ConcurrentSendError 期待
+                second_call_error.append(exc)
+            return ("AI response for q1", [])
+
+        mock_ai_service.generate_response.side_effect = first_ai_then_second_send
+
+        # 1件目は正常に完了する
+        resp = tutor_service.send_message(
+            "test-user", session.session_id, "q1"
+        )
+        assert resp.message_count == 1
+
+        # 2件目は AI が走っている間に ConcurrentSendError になる
+        assert len(second_call_error) == 1
+        assert isinstance(second_call_error[0], ConcurrentSendError)
+
+        # AI が呼ばれたのは1件目だけ (= 2件目では Bedrock を呼ばずに弾けた)
+        assert mock_ai_service.generate_response.call_count == 1
+
+    def test_stale_lock_can_be_acquired_by_new_send(
+        self, tutor_service, dynamodb_tables, mock_ai_service
+    ):
+        """LOCK_TIMEOUT_SECONDS を超えた古いロックは stale とみなし、
+        新しい送信が引き継げる (Lambda クラッシュ等への耐性)。"""
+        from datetime import datetime, timedelta, timezone
+
+        _seed_deck(dynamodb_tables)
+        session = tutor_service.start_session(
+            user_id="test-user", deck_id="deck_001", mode="free_talk"
+        )
+        # start_session が AI を 1 回呼んでいるのでリセットしてから検証
+        mock_ai_service.generate_response.reset_mock()
+
+        # 過去のロック (LOCK_TIMEOUT_SECONDS の倍 + 1 秒前) を直接 DB に書く
+        stale_time = (
+            datetime.now(timezone.utc)
+            - timedelta(seconds=tutor_service.LOCK_TIMEOUT_SECONDS * 2 + 1)
+        ).isoformat()
+        tutor_service.table.update_item(
+            Key={"user_id": "test-user", "session_id": session.session_id},
+            UpdateExpression="SET processing_started_at = :stale",
+            ExpressionAttributeValues={":stale": stale_time},
+        )
+
+        mock_ai_service.generate_response.return_value = ("recovered", [])
+
+        # stale lock は引き継げる
+        resp = tutor_service.send_message(
+            "test-user", session.session_id, "q-after-crash"
+        )
+        assert resp.message_count == 1
+        assert mock_ai_service.generate_response.call_count == 1
+
+    def test_send_message_releases_lock_on_ai_error(
+        self, tutor_service, dynamodb_tables, mock_ai_service
+    ):
+        """AI 呼び出しが失敗した場合、in-flight ロックは解放され message_count は
+        据え置き。次の送信が即座に引き継げる。"""
+        _seed_deck(dynamodb_tables)
+        session = tutor_service.start_session(
+            user_id="test-user", deck_id="deck_001", mode="free_talk"
+        )
+
+        from services.tutor_ai_service import TutorAIServiceError
+
+        mock_ai_service.generate_response.side_effect = TutorAIServiceError(
+            "Bedrock down"
+        )
+
+        with pytest.raises(TutorAIServiceError):
+            tutor_service.send_message(
+                "test-user", session.session_id, "q-fail"
+            )
+
+        item = tutor_service.table.get_item(
+            Key={"user_id": "test-user", "session_id": session.session_id}
+        )["Item"]
+        # message_count は進めない (失敗したラウンドはカウントしない)
+        assert int(item["message_count"]) == 0
+        # in-flight ロックは解放されている (processing_started_at 属性が消えている)
+        assert "processing_started_at" not in item
+
+        # 次の送信は即座に成功すること (ロックが残っていない証拠)
+        mock_ai_service.generate_response.side_effect = None
+        mock_ai_service.generate_response.return_value = ("recovered", [])
+        resp = tutor_service.send_message(
+            "test-user", session.session_id, "q-retry"
+        )
+        assert resp.message_count == 1
+
 
 class TestEndSession:
     """Tests for TutorService.end_session."""
