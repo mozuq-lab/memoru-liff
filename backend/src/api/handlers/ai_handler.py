@@ -27,7 +27,6 @@ from services.ai_service import (
     create_ai_service,
     AIServiceError,
 )
-from services.browser_profile_service import BrowserProfileService
 from services.browser_service import BrowserService
 from services.content_chunker import chunk_content
 from services.url_content_service import ContentFetchError, UrlContentService
@@ -144,40 +143,35 @@ def generate_from_url():
     except Exception:
         pass  # Non-critical: don't block generation on duplicate check failure
 
-    # Validate profile ownership before passing to BrowserService.
-    # Without this check, a user could supply another user's profile_id and
-    # use their authenticated browser session via AgentCore.
+    # Authenticated-page support (profile_id) is disabled until the
+    # AgentCore Browser integration is rewritten. Reject early with 501
+    # rather than letting it fall through and 500 inside BrowserService.
     profile_id = getattr(request, "profile_id", None)
     if profile_id:
-        try:
-            profile_service = BrowserProfileService()
-            if not profile_service.validate_profile(user_id, profile_id):
-                logger.warning(
-                    "Browser profile not owned by user",
-                    extra={"user_id": user_id, "profile_id": profile_id},
-                )
-                return Response(
-                    status_code=404,
-                    content_type=content_types.APPLICATION_JSON,
-                    body=json.dumps({"error": "Profile not found"}),
-                )
-        except Exception as e:
-            logger.error(
-                "Failed to validate browser profile",
-                extra={"user_id": user_id, "profile_id": profile_id, "error": str(e)},
-            )
-            return Response(
-                status_code=500,
-                content_type=content_types.APPLICATION_JSON,
-                body=json.dumps({"error": "Failed to validate profile"}),
-            )
+        logger.info(
+            "profile_id request rejected: browser integration disabled",
+            extra={"user_id": user_id, "profile_id": profile_id},
+        )
+        return Response(
+            status_code=501,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps(
+                {
+                    "error": (
+                        "認証付きページからのカード生成は現在対応していません。"
+                    ),
+                    "code": "browser_unavailable",
+                }
+            ),
+        )
 
-    # Fetch page content
+    # Fetch page content (no profile_id path; SPA fallback also disabled and
+    # will surface as a 422 from the BrowserFetchError → ContentFetchError chain).
     try:
         content_service = UrlContentService(browser_service=BrowserService())
         page = content_service.fetch_content(
             request.url,
-            profile_id=profile_id,
+            profile_id=None,
         )
     except ContentFetchError as e:
         logger.warning("Content fetch error", extra={"user_id": user_id, "error": str(e)})
