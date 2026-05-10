@@ -65,6 +65,10 @@ class TutorService:
     TIMEOUT_MINUTES = int(os.environ.get("TUTOR_TIMEOUT_MINUTES", "30"))
     TTL_DAYS = 7
 
+    # send_message の in-flight ロック上限。Lambda タイムアウト + バッファ。
+    # この時間を超えた processing 状態は stale とみなし、新しい送信が引き継げる。
+    LOCK_TIMEOUT_SECONDS = int(os.environ.get("TUTOR_LOCK_TIMEOUT_SECONDS", "150"))
+
     def __init__(
         self,
         table_name: str | None = None,
@@ -257,37 +261,45 @@ class TutorService:
         if current_count >= self.MAX_ROUNDS:
             raise MessageLimitError(f"Session {session_id} has reached message limit")
 
-        # Optimistic lock: pre-increment message_count atomically before invoking AI.
-        # Concurrent sends on the same session are rejected here, preventing
-        # duplicate Bedrock calls (cost) and lost-update on message_count.
-        new_count = current_count + 1
-        is_limit_reached = new_count >= self.MAX_ROUNDS
+        # In-flight lock: processing_started_at の属性存在で in-flight 状態を表す。
+        # AI 呼び出し中に到着した後続の send_message は ConditionExpression で弾く
+        # (Bedrock 二重呼び出しと履歴破壊を防ぐ)。
+        # message_count だけの楽観ロックでは「先行が count を進めた後に到着した
+        # リクエスト」を弾けないため、in-flight 排他制御が必要。
         now = datetime.now(timezone.utc)
+        stale_threshold = (
+            now - timedelta(seconds=self.LOCK_TIMEOUT_SECONDS)
+        ).isoformat()
         try:
             self.table.update_item(
                 Key={"user_id": user_id, "session_id": session_id},
-                UpdateExpression="SET message_count = :next, updated_at = :upd",
-                ConditionExpression="#st = :active AND message_count = :prev",
+                UpdateExpression=(
+                    "SET processing_started_at = :now, updated_at = :now"
+                ),
+                # status が active で、かつロックが取れていない or stale の場合のみ取得
+                ConditionExpression=(
+                    "#st = :active "
+                    "AND (attribute_not_exists(processing_started_at) "
+                    "OR processing_started_at < :stale)"
+                ),
                 ExpressionAttributeNames={"#st": "status"},
                 ExpressionAttributeValues={
-                    ":next": new_count,
-                    ":prev": current_count,
                     ":active": "active",
-                    ":upd": now.isoformat(),
+                    ":now": now.isoformat(),
+                    ":stale": stale_threshold,
                 },
             )
         except ClientError as e:
             if e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
                 logger.warning(
-                    "Concurrent send detected",
+                    "Concurrent send detected (in-flight lock held)",
                     extra={
                         "user_id": user_id,
                         "session_id": session_id,
-                        "expected_count": current_count,
                     },
                 )
                 raise ConcurrentSendError(
-                    f"Session {session_id} is being updated concurrently"
+                    f"Session {session_id} has an in-flight send in progress"
                 ) from e
             raise
 
@@ -304,24 +316,17 @@ class TutorService:
             finally:
                 sm.close()
         except Exception:
-            # AI error: roll back the pre-incremented count (best-effort).
-            # If rollback fails, the session's message_count is one ahead but the
-            # session remains usable; the user will hit MAX_ROUNDS one message early.
+            # AI error: ロックを解放する (count は進めない)。
+            # 解放に失敗しても LOCK_TIMEOUT_SECONDS 後には他の送信が引き継げる。
             try:
                 self.table.update_item(
                     Key={"user_id": user_id, "session_id": session_id},
-                    UpdateExpression="SET message_count = :rollback",
-                    ConditionExpression="message_count = :advanced",
-                    ExpressionAttributeValues={
-                        ":rollback": current_count,
-                        ":advanced": new_count,
-                    },
+                    UpdateExpression="REMOVE processing_started_at",
+                    ConditionExpression="attribute_exists(processing_started_at)",
                 )
             except ClientError as rb_err:
-                # Rollback may legitimately fail (e.g. another writer advanced again).
-                # Log and continue raising the original AI error.
                 logger.warning(
-                    "Failed to roll back pre-incremented message_count",
+                    "Failed to release in-flight lock after AI error",
                     extra={
                         "user_id": user_id,
                         "session_id": session_id,
@@ -337,6 +342,9 @@ class TutorService:
         if deck_card_ids:
             related_cards = [cid for cid in related_cards if cid in deck_card_ids]
 
+        new_count = current_count + 1
+        is_limit_reached = new_count >= self.MAX_ROUNDS
+
         ai_msg = TutorMessage(
             role="assistant",
             content=ai_content,
@@ -344,24 +352,46 @@ class TutorService:
             timestamp=datetime.now(timezone.utc).isoformat(),
         )
 
-        # If limit reached, auto-end the session (separate update from the
-        # pre-increment to avoid coupling the lock with end-state metadata).
+        # AI 成功後: ロック解放 (REMOVE processing_started_at) + count++ を
+        # 同一 update_item で行う。limit reached なら session を ended に遷移。
+        completion_now = datetime.now(timezone.utc)
         if is_limit_reached:
-            ended_at = datetime.now(timezone.utc)
-            ttl = int((ended_at + timedelta(days=self.TTL_DAYS)).timestamp())
+            ttl = int(
+                (completion_now + timedelta(days=self.TTL_DAYS)).timestamp()
+            )
             self.table.update_item(
                 Key={"user_id": user_id, "session_id": session_id},
                 UpdateExpression=(
-                    "SET #st = :status, ended_at = :ended, #ttl = :ttl, "
-                    "updated_at = :upd"
+                    "SET message_count = :cnt, "
+                    "#st = :ended, "
+                    "ended_at = :ended_at, "
+                    "#ttl = :ttl, "
+                    "updated_at = :upd "
+                    "REMOVE processing_started_at"
                 ),
+                ConditionExpression="attribute_exists(processing_started_at)",
                 ExpressionAttributeValues={
-                    ":status": "ended",
-                    ":ended": ended_at.isoformat(),
+                    ":cnt": new_count,
+                    ":ended": "ended",
+                    ":ended_at": completion_now.isoformat(),
                     ":ttl": ttl,
-                    ":upd": ended_at.isoformat(),
+                    ":upd": completion_now.isoformat(),
                 },
                 ExpressionAttributeNames={"#st": "status", "#ttl": "ttl"},
+            )
+        else:
+            self.table.update_item(
+                Key={"user_id": user_id, "session_id": session_id},
+                UpdateExpression=(
+                    "SET message_count = :cnt, "
+                    "updated_at = :upd "
+                    "REMOVE processing_started_at"
+                ),
+                ConditionExpression="attribute_exists(processing_started_at)",
+                ExpressionAttributeValues={
+                    ":cnt": new_count,
+                    ":upd": completion_now.isoformat(),
+                },
             )
 
         return SendMessageResponse(
