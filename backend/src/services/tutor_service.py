@@ -42,6 +42,10 @@ class MessageLimitError(TutorServiceError):
     """Raised when session message limit is reached."""
 
 
+class ConcurrentSendError(TutorServiceError):
+    """Raised when concurrent send_message is detected (optimistic lock failed)."""
+
+
 class DeckNotFoundError(TutorServiceError):
     """Raised when a deck cannot be found."""
 
@@ -233,6 +237,7 @@ class TutorService:
             SessionNotFoundError: If session doesn't exist.
             SessionEndedError: If session is ended/timed_out.
             MessageLimitError: If message limit reached.
+            ConcurrentSendError: If a concurrent send is detected (optimistic lock failed).
         """
         item = self._get_session_item(user_id, session_id)
 
@@ -252,17 +257,79 @@ class TutorService:
         if current_count >= self.MAX_ROUNDS:
             raise MessageLimitError(f"Session {session_id} has reached message limit")
 
+        # Optimistic lock: pre-increment message_count atomically before invoking AI.
+        # Concurrent sends on the same session are rejected here, preventing
+        # duplicate Bedrock calls (cost) and lost-update on message_count.
+        new_count = current_count + 1
+        is_limit_reached = new_count >= self.MAX_ROUNDS
+        now = datetime.now(timezone.utc)
+        try:
+            self.table.update_item(
+                Key={"user_id": user_id, "session_id": session_id},
+                UpdateExpression="SET message_count = :next, updated_at = :upd",
+                ConditionExpression="#st = :active AND message_count = :prev",
+                ExpressionAttributeNames={"#st": "status"},
+                ExpressionAttributeValues={
+                    ":next": new_count,
+                    ":prev": current_count,
+                    ":active": "active",
+                    ":upd": now.isoformat(),
+                },
+            )
+        except ClientError as e:
+            if e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+                logger.warning(
+                    "Concurrent send detected",
+                    extra={
+                        "user_id": user_id,
+                        "session_id": session_id,
+                        "expected_count": current_count,
+                    },
+                )
+                raise ConcurrentSendError(
+                    f"Session {session_id} is being updated concurrently"
+                ) from e
+            raise
+
         # Get AI response via SessionManager
         system_prompt = item.get("system_prompt", "")
-        sm = self.session_manager_factory(session_id=session_id, user_id=user_id)
         try:
-            ai_content, related_cards = self.ai_service.generate_response(
-                system_prompt=system_prompt,
-                messages=content,
-                session_manager=sm,
-            )
-        finally:
-            sm.close()
+            sm = self.session_manager_factory(session_id=session_id, user_id=user_id)
+            try:
+                ai_content, related_cards = self.ai_service.generate_response(
+                    system_prompt=system_prompt,
+                    messages=content,
+                    session_manager=sm,
+                )
+            finally:
+                sm.close()
+        except Exception:
+            # AI error: roll back the pre-incremented count (best-effort).
+            # If rollback fails, the session's message_count is one ahead but the
+            # session remains usable; the user will hit MAX_ROUNDS one message early.
+            try:
+                self.table.update_item(
+                    Key={"user_id": user_id, "session_id": session_id},
+                    UpdateExpression="SET message_count = :rollback",
+                    ConditionExpression="message_count = :advanced",
+                    ExpressionAttributeValues={
+                        ":rollback": current_count,
+                        ":advanced": new_count,
+                    },
+                )
+            except ClientError as rb_err:
+                # Rollback may legitimately fail (e.g. another writer advanced again).
+                # Log and continue raising the original AI error.
+                logger.warning(
+                    "Failed to roll back pre-incremented message_count",
+                    extra={
+                        "user_id": user_id,
+                        "session_id": session_id,
+                        "error": str(rb_err),
+                    },
+                )
+            raise
+
         ai_content = self.ai_service.clean_response_text(ai_content)
 
         # Validate related_cards against deck's card IDs
@@ -277,36 +344,24 @@ class TutorService:
             timestamp=datetime.now(timezone.utc).isoformat(),
         )
 
-        new_count = current_count + 1
-        is_limit_reached = new_count >= self.MAX_ROUNDS
-
-        # Update DynamoDB metadata (messages managed by SessionManager)
-        update_expr = "SET message_count = :cnt, updated_at = :upd"
-        expr_values: dict[str, Any] = {
-            ":cnt": new_count,
-            ":upd": datetime.now(timezone.utc).isoformat(),
-        }
-
-        # If limit reached, auto-end the session
+        # If limit reached, auto-end the session (separate update from the
+        # pre-increment to avoid coupling the lock with end-state metadata).
         if is_limit_reached:
             ended_at = datetime.now(timezone.utc)
             ttl = int((ended_at + timedelta(days=self.TTL_DAYS)).timestamp())
-            update_expr += ", #st = :status, ended_at = :ended, #ttl = :ttl"
-            expr_values[":status"] = "ended"
-            expr_values[":ended"] = ended_at.isoformat()
-            expr_values[":ttl"] = ttl
-
             self.table.update_item(
                 Key={"user_id": user_id, "session_id": session_id},
-                UpdateExpression=update_expr,
-                ExpressionAttributeValues=expr_values,
+                UpdateExpression=(
+                    "SET #st = :status, ended_at = :ended, #ttl = :ttl, "
+                    "updated_at = :upd"
+                ),
+                ExpressionAttributeValues={
+                    ":status": "ended",
+                    ":ended": ended_at.isoformat(),
+                    ":ttl": ttl,
+                    ":upd": ended_at.isoformat(),
+                },
                 ExpressionAttributeNames={"#st": "status", "#ttl": "ttl"},
-            )
-        else:
-            self.table.update_item(
-                Key={"user_id": user_id, "session_id": session_id},
-                UpdateExpression=update_expr,
-                ExpressionAttributeValues=expr_values,
             )
 
         return SendMessageResponse(

@@ -261,6 +261,75 @@ class TestSendMessage:
         with pytest.raises(SessionEndedError):
             tutor_service.send_message("test-user", session.session_id, "hello")
 
+    def test_concurrent_send_raises_concurrent_send_error(
+        self, tutor_service, dynamodb_tables, mock_ai_service
+    ):
+        """並行送信のシミュレーション: send_message が _get_session_item で count を読んだ
+        直後に第三者が同じセッションを更新すると、後発の送信は ConcurrentSendError
+        で弾かれ、Bedrock を呼ばずに返る。"""
+        from services.tutor_service import ConcurrentSendError
+
+        _seed_deck(dynamodb_tables)
+        session = tutor_service.start_session(
+            user_id="test-user", deck_id="deck_001", mode="free_talk"
+        )
+
+        # AI 呼び出しが行われないことを後で確認するためにカウンタをリセット
+        mock_ai_service.generate_response.reset_mock()
+
+        # 競合を発生させる: _get_session_item で読んだ直後に
+        # 第三者が message_count を更に進めるシナリオを擬似再現
+        sessions_table = tutor_service.table
+        original_get = tutor_service._get_session_item
+
+        def get_then_race(user_id, sid):
+            item = original_get(user_id, sid)
+            sessions_table.update_item(
+                Key={"user_id": user_id, "session_id": sid},
+                UpdateExpression="SET message_count = message_count + :one",
+                ExpressionAttributeValues={":one": 1},
+            )
+            return item
+
+        tutor_service._get_session_item = get_then_race
+        try:
+            with pytest.raises(ConcurrentSendError):
+                tutor_service.send_message(
+                    "test-user", session.session_id, "q-conflict"
+                )
+        finally:
+            tutor_service._get_session_item = original_get
+
+        # 楽観ロック失敗時は AI が呼ばれない (Bedrock 課金が発生しない)
+        mock_ai_service.generate_response.assert_not_called()
+
+    def test_send_message_rolls_back_count_on_ai_error(
+        self, tutor_service, dynamodb_tables, mock_ai_service
+    ):
+        """AI 呼び出しが失敗した場合、pre-increment した message_count をロールバックする。"""
+        _seed_deck(dynamodb_tables)
+        session = tutor_service.start_session(
+            user_id="test-user", deck_id="deck_001", mode="free_talk"
+        )
+
+        # AI 呼び出しを失敗させる
+        from services.tutor_ai_service import TutorAIServiceError
+
+        mock_ai_service.generate_response.side_effect = TutorAIServiceError(
+            "Bedrock down"
+        )
+
+        with pytest.raises(TutorAIServiceError):
+            tutor_service.send_message(
+                "test-user", session.session_id, "q-fail"
+            )
+
+        # ロールバック後、message_count は 0 のままであること
+        item = tutor_service.table.get_item(
+            Key={"user_id": "test-user", "session_id": session.session_id}
+        )["Item"]
+        assert int(item["message_count"]) == 0
+
 
 class TestEndSession:
     """Tests for TutorService.end_session."""
