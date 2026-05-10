@@ -821,6 +821,8 @@ Resources:
             #   - Browser session API は Start/Get/Stop/Invoke/List BrowserSession(s)
             #   - Browser リソース ARN は ${Partition}:bedrock-agentcore:${Region}:aws:browser/*
             #     (アカウント部分は AWS 管理リソースを示す `aws` 固定)
+            #   - profile_id 指定で StartBrowserSession を呼ぶと、認証情報を保持する
+            #     ユーザーリソース browser-profile も IAM 上必要になる
             - Effect: Allow
               Action:
                 - bedrock-agentcore:StartBrowserSession
@@ -830,6 +832,7 @@ Resources:
                 - bedrock-agentcore:ListBrowserSessions
               Resource:
                 - !Sub arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:aws:browser/*
+                - !Sub arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:browser-profile/*
       Environment:
         Variables:
           OIDC_ISSUER: !Ref OidcIssuer
