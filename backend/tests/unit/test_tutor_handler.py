@@ -4,9 +4,8 @@ Tests all tutor endpoints, error responses including 409 for ended sessions, aut
 """
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
 
 from models.tutor import TutorMessage, TutorSessionResponse, SendMessageResponse
 
@@ -99,6 +98,36 @@ class TestCreateSession:
         response = handler(event, lambda_context)
         assert response["statusCode"] == 400
 
+    def test_create_session_503_when_tutor_ai_unavailable(
+        self, api_gateway_event, lambda_context
+    ):
+        """USE_STRANDS=false 等で TutorAIService が利用不可なら 503 (N-1)。
+
+        BedrockTutorAIService は SessionManager 非対応のため TutorAIServiceError
+        を投げる。これは TutorServiceError の継承外なので、明示的に 503 へマップ
+        しないと原因不明の 500 になる。
+        """
+        event = api_gateway_event(
+            method="POST",
+            path="/tutor/sessions",
+            body={"deck_id": "deck_001", "mode": "free_talk"},
+        )
+
+        with patch("api.handlers.tutor_handler.tutor_service") as mock_svc:
+            from services.tutor_ai_service import TutorAIServiceError
+
+            mock_svc.start_session.side_effect = TutorAIServiceError(
+                "BedrockTutorAIService does not support SessionManager. "
+                "Set USE_STRANDS=true to enable tutor multi-turn sessions."
+            )
+            from api.handler import handler
+
+            response = handler(event, lambda_context)
+
+        assert response["statusCode"] == 503
+        body = json.loads(response["body"])
+        assert body["code"] == "tutor_unavailable"
+
 
 class TestSendMessage:
     """POST /tutor/sessions/{sessionId}/messages endpoint tests."""
@@ -154,6 +183,31 @@ class TestSendMessage:
 
         response = handler(event, lambda_context)
         assert response["statusCode"] == 400
+
+    def test_send_message_503_when_tutor_ai_unavailable(
+        self, api_gateway_event, lambda_context
+    ):
+        """TutorAIService 利用不可 (例: USE_STRANDS=false) のとき 503 (N-1)。"""
+        event = api_gateway_event(
+            method="POST",
+            path="/tutor/sessions/tutor_test-id/messages",
+            body={"content": "hello"},
+            path_parameters={"sessionId": "tutor_test-id"},
+        )
+
+        with patch("api.handlers.tutor_handler.tutor_service") as mock_svc:
+            from services.tutor_ai_service import TutorAIServiceError
+
+            mock_svc.send_message.side_effect = TutorAIServiceError(
+                "BedrockTutorAIService does not support SessionManager."
+            )
+            from api.handler import handler
+
+            response = handler(event, lambda_context)
+
+        assert response["statusCode"] == 503
+        body = json.loads(response["body"])
+        assert body["code"] == "tutor_unavailable"
 
 
 class TestEndSession:

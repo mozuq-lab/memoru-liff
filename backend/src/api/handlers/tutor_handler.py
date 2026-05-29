@@ -24,7 +24,7 @@ from services.tutor_service import (
     TutorService,
     TutorServiceError,
 )
-from services.tutor_ai_service import TutorAITimeoutError
+from services.tutor_ai_service import TutorAITimeoutError, TutorAIServiceError
 
 logger = Logger()
 tracer = Tracer()
@@ -87,6 +87,21 @@ def create_session():
             status_code=504,
             content_type=content_types.APPLICATION_JSON,
             body=json.dumps({"error": "AI応答がタイムアウトしました。もう一度お試しください。"}),
+        )
+    except TutorAIServiceError as e:
+        # USE_STRANDS=false 等で BedrockTutorAIService が SessionManager を拒否する等、
+        # AI サービスの構成不備/利用不可。原因不明の 500 ではなく 503 で明示する (N-1)。
+        logger.error(
+            "Tutor AI service unavailable during session creation "
+            "(check USE_STRANDS / model configuration)",
+            extra={"error": str(e)},
+        )
+        return Response(
+            status_code=503,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps(
+                {"error": "チューター機能が現在利用できません。", "code": "tutor_unavailable"}
+            ),
         )
     except TutorServiceError as e:
         logger.error("Failed to start tutor session", extra={"error": str(e)})
@@ -155,6 +170,20 @@ def send_message(session_id: str):
             status_code=504,
             content_type=content_types.APPLICATION_JSON,
             body=json.dumps({"error": "AI応答がタイムアウトしました。もう一度お試しください。"}),
+        )
+    except TutorAIServiceError as e:
+        # AI サービスの構成不備/利用不可 (例: USE_STRANDS=false)。503 で明示する (N-1)。
+        logger.error(
+            "Tutor AI service unavailable while sending message "
+            "(check USE_STRANDS / model configuration)",
+            extra={"error": str(e), "session_id": session_id},
+        )
+        return Response(
+            status_code=503,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps(
+                {"error": "チューター機能が現在利用できません。", "code": "tutor_unavailable"}
+            ),
         )
     except TutorServiceError as e:
         logger.error("Failed to send message", extra={"error": str(e), "session_id": session_id})
