@@ -62,13 +62,18 @@ Parameters:
     Default: ""
     Description: LINE Login Channel ID for ID token verification
 
+  # NOTE: Tutor 機能 (TutorService) は SessionManager 経由のマルチターン会話を使うため
+  # USE_STRANDS=true が必須。false のままだと start_session / send_message が 503
+  # (code=tutor_unavailable) を返す — BedrockTutorAIService は SessionManager 非対応のため。
+  # 本番 (ENVIRONMENT=prod) では true で運用すること。dev スタックで true にする場合は
+  # StrandsTutorAIService が Ollama を要求する点に注意 (ローカル開発用)。
   UseStrands:
     Type: String
     Default: "false"
     AllowedValues:
       - "true"
       - "false"
-    Description: Enable Strands Agents SDK for AI services
+    Description: Enable Strands Agents SDK for AI services (Tutor requires "true"; otherwise tutor endpoints return 503 tutor_unavailable)
 
   TutorSessionBackend:
     Type: String
