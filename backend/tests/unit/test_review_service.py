@@ -11,6 +11,7 @@ from services.review_service import (
     ReviewService,
     InvalidGradeError,
     NoReviewHistoryError,
+    ConcurrentReviewError,
 )
 from services.card_service import CardNotFoundError
 
@@ -120,6 +121,40 @@ class TestSubmitReview:
         assert response.updated.interval == 1  # First review interval
         assert response.updated.ease_factor == 2.5  # Grade 4 doesn't change EF much
         assert response.reviewed_at is not None
+
+    def test_submit_review_optimistic_lock_blocks_stale_update(self, review_service, sample_card):
+        """Concurrent update from a stale base raises ConcurrentReviewError (C-1)."""
+        from services.srs import SM2Result
+
+        result = SM2Result(
+            repetitions=1,
+            ease_factor=2.5,
+            interval=1,
+            next_review_at=datetime.now(timezone.utc) + timedelta(days=1),
+        )
+        # First update from the read state (repetitions=0) succeeds.
+        review_service._update_card_review_data(
+            user_id="test-user-id",
+            card_id="test-card-id",
+            result=result,
+            grade=4,
+            previous_ease_factor=2.5,
+            previous_interval=1,
+            previous_repetitions=0,
+            previous_next_review_at=None,
+        )
+        # Second update from the SAME stale base must fail — card is now repetitions=1.
+        with pytest.raises(ConcurrentReviewError):
+            review_service._update_card_review_data(
+                user_id="test-user-id",
+                card_id="test-card-id",
+                result=result,
+                grade=4,
+                previous_ease_factor=2.5,
+                previous_interval=1,
+                previous_repetitions=0,
+                previous_next_review_at=None,
+            )
 
     def test_submit_review_grade_5(self, review_service, sample_card):
         """Test perfect review increases ease factor."""

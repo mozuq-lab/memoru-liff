@@ -45,6 +45,12 @@ class NoReviewHistoryError(ReviewServiceError):
     pass
 
 
+class ConcurrentReviewError(ReviewServiceError):
+    """Raised when a concurrent review update is detected (optimistic lock failed)."""
+
+    pass
+
+
 class ReviewService:
     """Service for managing card reviews and SRS calculations."""
 
@@ -344,6 +350,16 @@ class ReviewService:
                     "updated_at = :updated_at, "
                     "review_history = list_append(if_not_exists(review_history, :empty_list), :new_entry)"
                 ),
+                # Optimistic lock (C-1): apply only if the card's SRS state still
+                # matches what we read before computing the new values. Prevents
+                # lost updates from concurrent submit_review calls (double-click /
+                # webhook redelivery) where review_history grows but repetitions /
+                # ease_factor would otherwise be overwritten from a stale base.
+                ConditionExpression=(
+                    "ease_factor = :prev_ease "
+                    "AND #interval = :prev_interval "
+                    "AND repetitions = :prev_reps"
+                ),
                 ExpressionAttributeNames={"#interval": "interval"},
                 ExpressionAttributeValues={
                     ":next_review": result.next_review_at.isoformat(),
@@ -353,9 +369,20 @@ class ReviewService:
                     ":updated_at": now.isoformat(),
                     ":empty_list": [],
                     ":new_entry": [entry_dict],
+                    ":prev_ease": str(previous_ease_factor),
+                    ":prev_interval": previous_interval,
+                    ":prev_reps": previous_repetitions,
                 },
             )
         except ClientError as e:
+            if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                logger.warning(
+                    "Concurrent review update detected (optimistic lock failed)",
+                    extra={"user_id": user_id, "card_id": card_id},
+                )
+                raise ConcurrentReviewError(
+                    "Review update conflict: the card was modified concurrently. Please retry."
+                ) from e
             raise CardServiceError(f"Failed to update card review data: {e}")
 
     def _record_review(
