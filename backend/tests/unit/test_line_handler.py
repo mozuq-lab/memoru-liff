@@ -370,3 +370,36 @@ class TestHandlerIdempotency:
 
         assert response["statusCode"] == 200
         mock_handle_postback.assert_called_once()
+        mock_idem.mark_processed.assert_called_once_with("evt-new")
+        mock_idem.release.assert_not_called()
+
+    @patch("webhook.line_handler.handle_postback")
+    @patch("webhook.line_handler.idempotency_service")
+    @patch("webhook.line_handler.line_service")
+    def test_failed_event_is_released(
+        self, mock_line_service, mock_idem, mock_handle_postback
+    ):
+        """If handling raises, the claim is released so LINE redelivery can retry."""
+        from webhook.line_handler import handler
+
+        mock_line_service.verify_request.return_value = True
+        mock_line_service.parse_events.return_value = [
+            LineEvent(
+                event_type="postback",
+                source_user_id="U1",
+                reply_token="rt",
+                postback_data="action=start",
+                timestamp=0,
+                webhook_event_id="evt-fail",
+            )
+        ]
+        mock_idem.try_acquire.return_value = True
+        mock_handle_postback.side_effect = RuntimeError("boom")
+
+        response = handler(
+            {"body": "{}", "headers": {"x-line-signature": "sig"}}, MagicMock()
+        )
+
+        assert response["statusCode"] == 200  # LINE always receives 200
+        mock_idem.release.assert_called_once_with("evt-fail")
+        mock_idem.mark_processed.assert_not_called()

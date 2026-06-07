@@ -561,30 +561,27 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
     events = line_service.parse_events(body)
 
     for line_event in events:
+        event_id = line_event.webhook_event_id
         # Idempotency guard (N-6): LINE delivers at-least-once and may redeliver
-        # events. Skip ones we've already processed to avoid duplicate side
-        # effects (e.g. double-recording a review on postback redelivery).
-        if not idempotency_service.try_acquire(line_event.webhook_event_id):
-            logger.info(
-                "Skipping duplicate webhook event",
-                extra={"event_id": line_event.webhook_event_id},
-            )
+        # events (incl. after a failed attempt). Claim before processing, confirm
+        # `processed` only on success, and release the claim on failure so LINE's
+        # redelivery can retry instead of being silently skipped.
+        if not idempotency_service.try_acquire(event_id):
+            logger.info("Skipping duplicate webhook event", extra={"event_id": event_id})
             continue
 
         logger.info(f"Processing event: {line_event.event_type}")
-
-        if line_event.event_type == "postback":
-            try:
+        try:
+            if line_event.event_type == "postback":
                 handle_postback(line_event)
-            except Exception as e:
-                logger.error(f"Error handling postback: {e}")
-        elif line_event.event_type == "message":
-            try:
+            elif line_event.event_type == "message":
                 handle_message(line_event)
-            except Exception as e:
-                logger.error(f"Error handling message: {e}")
-        else:
-            logger.info(f"Ignoring event type: {line_event.event_type}")
+            else:
+                logger.info(f"Ignoring event type: {line_event.event_type}")
+            idempotency_service.mark_processed(event_id)
+        except Exception as e:
+            logger.error(f"Error handling event: {e}")
+            idempotency_service.release(event_id)
 
     # LINE expects 200 response
     return {
