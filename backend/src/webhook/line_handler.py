@@ -32,6 +32,7 @@ from services.review_service import ReviewService
 from services.url_content_service import UrlContentService, ContentFetchError
 from services.content_chunker import chunk_content
 from services.ai_service import create_ai_service, AIServiceError
+from services.webhook_idempotency import WebhookIdempotencyService
 from utils.url_validator import validate_url, UrlValidationError
 
 logger = Logger()
@@ -41,6 +42,7 @@ tracer = Tracer()
 line_service = LineService()
 card_service = CardService()
 review_service = ReviewService()
+idempotency_service = WebhookIdempotencyService()
 
 # LIFF URL for account linking
 LIFF_URL = os.environ.get("LIFF_URL", "https://liff.line.me/your-liff-id")
@@ -559,6 +561,16 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
     events = line_service.parse_events(body)
 
     for line_event in events:
+        # Idempotency guard (N-6): LINE delivers at-least-once and may redeliver
+        # events. Skip ones we've already processed to avoid duplicate side
+        # effects (e.g. double-recording a review on postback redelivery).
+        if not idempotency_service.try_acquire(line_event.webhook_event_id):
+            logger.info(
+                "Skipping duplicate webhook event",
+                extra={"event_id": line_event.webhook_event_id},
+            )
+            continue
+
         logger.info(f"Processing event: {line_event.event_type}")
 
         if line_event.event_type == "postback":
