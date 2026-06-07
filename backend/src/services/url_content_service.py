@@ -11,7 +11,7 @@ import httpx
 from aws_lambda_powertools import Logger
 from bs4 import BeautifulSoup
 
-from utils.url_validator import UrlValidationError, validate_url, _is_private_ip
+from utils.url_validator import UrlValidationError, validate_url
 
 logger = Logger(child=True)
 
@@ -23,6 +23,9 @@ _HTTP_TIMEOUT = 30
 
 # Maximum number of redirects to follow manually
 _MAX_REDIRECTS = 10
+
+# Maximum response body size to download in bytes — prevents memory exhaustion (N-7)
+_MAX_CONTENT_BYTES = 10 * 1024 * 1024  # 10 MB
 
 # Minimum text length to consider page has meaningful content
 _MIN_TEXT_LENGTH = 50
@@ -118,49 +121,73 @@ class UrlContentService:
             ) as client:
                 current_url = url
                 for _ in range(_MAX_REDIRECTS):
-                    response = client.get(current_url)
+                    # Stream the response so the body can be size-capped *before*
+                    # being fully loaded into memory (N-7: prevent memory exhaustion).
+                    with client.stream("GET", current_url) as response:
+                        if response.is_redirect:
+                            redirect_url = str(response.next_request.url) if response.next_request else None
+                            if not redirect_url:
+                                raise ContentFetchError("Redirect without Location header")
+                            # Validate redirect target against SSRF
+                            try:
+                                redirect_url = validate_url(redirect_url)
+                            except UrlValidationError as e:
+                                raise ContentFetchError(
+                                    f"Redirect target blocked by SSRF protection: {e}"
+                                ) from e
+                            current_url = redirect_url
+                            continue
 
-                    if response.is_redirect:
-                        redirect_url = str(response.next_request.url) if response.next_request else None
-                        if not redirect_url:
-                            raise ContentFetchError("Redirect without Location header")
-                        # Validate redirect target against SSRF
-                        try:
-                            redirect_url = validate_url(redirect_url)
-                        except UrlValidationError as e:
+                        # Non-redirect response
+                        if response.status_code >= 400:
+                            response.raise_for_status()
+
+                        content_type = response.headers.get("content-type", "")
+                        ct_lower = content_type.lower()
+
+                        # Reject PDF files
+                        if "application/pdf" in ct_lower:
                             raise ContentFetchError(
-                                f"Redirect target blocked by SSRF protection: {e}"
-                            ) from e
-                        current_url = redirect_url
-                        continue
+                                "PDF files are not supported. Please paste the text content directly."
+                            )
 
-                    # Non-redirect response
-                    if response.status_code >= 400:
-                        response.raise_for_status()
+                        # Reject image responses
+                        if ct_lower.startswith("image/"):
+                            raise ContentFetchError(
+                                "Image URLs are not supported. Please provide a web page URL."
+                            )
 
-                    content_type = response.headers.get("content-type", "")
-                    ct_lower = content_type.lower()
+                        if "text/html" not in ct_lower:
+                            raise ContentFetchError(
+                                f"Only HTML pages are supported. Got content-type: {content_type}"
+                            )
 
-                    # Reject PDF files
-                    if "application/pdf" in ct_lower:
-                        raise ContentFetchError(
-                            "PDF files are not supported. Please paste the text content directly."
-                        )
+                        # Reject oversized responses early via declared Content-Length (N-7)
+                        declared = response.headers.get("content-length")
+                        if declared is not None:
+                            try:
+                                if int(declared) > _MAX_CONTENT_BYTES:
+                                    raise ContentFetchError(
+                                        "Content too large. The page exceeds the maximum "
+                                        f"supported size ({_MAX_CONTENT_BYTES // (1024 * 1024)} MB)."
+                                    )
+                            except ValueError:
+                                pass  # Malformed header — rely on the streaming cap below
 
-                    # Reject image responses
-                    if ct_lower.startswith("image/"):
-                        raise ContentFetchError(
-                            "Image URLs are not supported. Please provide a web page URL."
-                        )
+                        # Stream the body with a hard cap to bound memory usage (N-7).
+                        # Covers chunked / spoofed Content-Length where the header lies.
+                        buf = bytearray()
+                        for chunk in response.iter_bytes():
+                            buf.extend(chunk)
+                            if len(buf) > _MAX_CONTENT_BYTES:
+                                raise ContentFetchError(
+                                    "Content too large. The page exceeds the maximum "
+                                    f"supported size ({_MAX_CONTENT_BYTES // (1024 * 1024)} MB)."
+                                )
 
-                    if "text/html" not in ct_lower:
-                        raise ContentFetchError(
-                            f"Only HTML pages are supported. Got content-type: {content_type}"
-                        )
-
-                    html = response.text
-                    final_url = str(response.url)
-                    break
+                        html = buf.decode(response.encoding or "utf-8", errors="replace")
+                        final_url = str(response.url)
+                        break
                 else:
                     raise ContentFetchError(
                         "Too many redirects. The URL may be invalid or require authentication."

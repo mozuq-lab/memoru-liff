@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from models.url_generate import GenerateFromUrlRequest, GenerateFromUrlResponse
+from models.url_generate import GenerateFromUrlRequest
 
 
 class TestGenerateFromUrlRequest:
@@ -62,23 +62,29 @@ class TestGenerateFromUrlApiFlow:
     ) -> None:
         """Full flow: URL → fetch → chunk → generate → response."""
         from services.ai_service import GeneratedCard, GenerationResult
-        from services.url_content_service import UrlContentService, PageContent
+        from services.url_content_service import UrlContentService
 
-        # Mock HTTP response
+        # Mock HTTP response (streamed — matches UrlContentService.client.stream usage)
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.is_redirect = False
         mock_response.headers = {"content-type": "text/html"}
-        mock_response.text = """
+        mock_response.encoding = "utf-8"
+        mock_response.iter_bytes.return_value = [
+            b"""
         <html><head><title>Test Article</title></head>
         <body><h1>Introduction</h1><p>This is test content about programming.</p></body>
         </html>
         """
+        ]
         mock_response.url = "https://example.com/article"
+        mock_stream_cm = MagicMock()
+        mock_stream_cm.__enter__ = MagicMock(return_value=mock_response)
+        mock_stream_cm.__exit__ = MagicMock(return_value=False)
         mock_client = MagicMock()
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client.get.return_value = mock_response
+        mock_client.stream.return_value = mock_stream_cm
         mock_client_cls.return_value = mock_client
 
         # Mock AI service

@@ -8,6 +8,52 @@ import pytest
 from services.url_content_service import UrlContentService, PageContent, ContentFetchError
 
 
+def _setup_stream_client(
+    mock_client_cls,
+    *,
+    text=None,
+    status_code=200,
+    is_redirect=False,
+    headers=None,
+    url="https://example.com",
+    next_url=None,
+    raise_for_status=None,
+    iter_bytes_side_effect=None,
+):
+    """Configure a mocked httpx.Client whose .stream() yields a streamed response.
+
+    Mirrors the production usage `with client.stream("GET", ...) as response:`.
+    """
+    resp = MagicMock()
+    resp.status_code = status_code
+    resp.is_redirect = is_redirect
+    resp.headers = headers if headers is not None else {"content-type": "text/html; charset=utf-8"}
+    resp.encoding = "utf-8"
+    resp.url = url
+    if iter_bytes_side_effect is not None:
+        resp.iter_bytes.side_effect = iter_bytes_side_effect
+    else:
+        resp.iter_bytes.return_value = [text.encode("utf-8")] if text is not None else []
+    if next_url is not None:
+        resp.next_request = MagicMock()
+        resp.next_request.url = next_url
+    else:
+        resp.next_request = None
+    if raise_for_status is not None:
+        resp.raise_for_status.side_effect = raise_for_status
+
+    stream_cm = MagicMock()
+    stream_cm.__enter__ = MagicMock(return_value=resp)
+    stream_cm.__exit__ = MagicMock(return_value=False)
+
+    mock_client = MagicMock()
+    mock_client.__enter__ = MagicMock(return_value=mock_client)
+    mock_client.__exit__ = MagicMock(return_value=False)
+    mock_client.stream.return_value = stream_cm
+    mock_client_cls.return_value = mock_client
+    return mock_client, resp
+
+
 class TestUrlContentService:
     """Tests for UrlContentService."""
 
@@ -31,11 +77,7 @@ class TestUrlContentService:
     @patch("services.url_content_service.httpx.Client")
     def test_fetch_http_success(self, mock_client_cls: MagicMock) -> None:
         """Successful HTTP fetch returns PageContent with text extracted."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.is_redirect = False
-        mock_response.headers = {"content-type": "text/html; charset=utf-8"}
-        mock_response.text = """
+        html = """
         <html>
         <head><title>Test Page</title></head>
         <body>
@@ -44,12 +86,11 @@ class TestUrlContentService:
         </body>
         </html>
         """
-        mock_response.url = "https://example.com/article"
-        mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client.get.return_value = mock_response
-        mock_client_cls.return_value = mock_client
+        _setup_stream_client(
+            mock_client_cls,
+            text=html,
+            url="https://example.com/article",
+        )
 
         result = self.service.fetch_content("https://example.com/article")
 
@@ -61,15 +102,10 @@ class TestUrlContentService:
     @patch("services.url_content_service.httpx.Client")
     def test_fetch_http_non_html_raises(self, mock_client_cls: MagicMock) -> None:
         """Non-HTML content type raises ContentFetchError."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.is_redirect = False
-        mock_response.headers = {"content-type": "application/pdf"}
-        mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client.get.return_value = mock_response
-        mock_client_cls.return_value = mock_client
+        _setup_stream_client(
+            mock_client_cls,
+            headers={"content-type": "application/pdf"},
+        )
 
         with pytest.raises(ContentFetchError, match="[Ss]upported|HTML"):
             self.service.fetch_content("https://example.com/doc.pdf")
@@ -77,17 +113,13 @@ class TestUrlContentService:
     @patch("services.url_content_service.httpx.Client")
     def test_fetch_http_404_raises(self, mock_client_cls: MagicMock) -> None:
         """HTTP 404 raises ContentFetchError."""
-        mock_response = MagicMock()
-        mock_response.status_code = 404
-        mock_response.is_redirect = False
-        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "404", request=MagicMock(), response=mock_response
+        _setup_stream_client(
+            mock_client_cls,
+            status_code=404,
+            raise_for_status=httpx.HTTPStatusError(
+                "404", request=MagicMock(), response=MagicMock()
+            ),
         )
-        mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client.get.return_value = mock_response
-        mock_client_cls.return_value = mock_client
 
         with pytest.raises(ContentFetchError):
             self.service.fetch_content("https://example.com/not-found")
@@ -98,11 +130,41 @@ class TestUrlContentService:
         mock_client = MagicMock()
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client.get.side_effect = httpx.TimeoutException("timeout")
+        mock_client.stream.side_effect = httpx.TimeoutException("timeout")
         mock_client_cls.return_value = mock_client
 
         with pytest.raises(ContentFetchError, match="[Tt]imeout"):
             self.service.fetch_content("https://slow-site.example.com")
+
+    @patch("services.url_content_service.httpx.Client")
+    def test_fetch_rejects_large_declared_content_length(self, mock_client_cls: MagicMock) -> None:
+        """Declared Content-Length over the cap is rejected before reading body (N-7)."""
+        _setup_stream_client(
+            mock_client_cls,
+            text="<html><body>small</body></html>",
+            headers={
+                "content-type": "text/html; charset=utf-8",
+                "content-length": str(20 * 1024 * 1024),  # 20 MB > 10 MB cap
+            },
+            url="https://huge.example.com",
+        )
+
+        with pytest.raises(ContentFetchError, match="too large|exceeds"):
+            self.service.fetch_content("https://huge.example.com")
+
+    @patch("services.url_content_service.httpx.Client")
+    def test_fetch_rejects_body_exceeding_cap_when_streaming(self, mock_client_cls: MagicMock) -> None:
+        """Body exceeding the cap during streaming is rejected even w/o Content-Length (N-7)."""
+        chunk = b"x" * (6 * 1024 * 1024)  # two 6 MB chunks exceed the 10 MB cap
+        _setup_stream_client(
+            mock_client_cls,
+            headers={"content-type": "text/html; charset=utf-8"},
+            url="https://chunked.example.com",
+            iter_bytes_side_effect=lambda: iter([chunk, chunk]),
+        )
+
+        with pytest.raises(ContentFetchError, match="too large|exceeds"):
+            self.service.fetch_content("https://chunked.example.com")
 
     def test_extract_text_strips_scripts_and_styles(self) -> None:
         """HTML text extraction removes script and style tags."""
@@ -260,17 +322,11 @@ class TestSpaDetection:
         </body>
         </html>
         """
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.is_redirect = False
-        mock_response.headers = {"content-type": "text/html; charset=utf-8"}
-        mock_response.text = spa_html
-        mock_response.url = "https://spa-example.com"
-        mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client.get.return_value = mock_response
-        mock_client_cls.return_value = mock_client
+        _setup_stream_client(
+            mock_client_cls,
+            text=spa_html,
+            url="https://spa-example.com",
+        )
 
         service = UrlContentService()
         # Without browser service, SPA detection should raise ContentFetchError
@@ -289,17 +345,11 @@ class TestSpaDetection:
         </body>
         </html>
         """
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.is_redirect = False
-        mock_response.headers = {"content-type": "text/html; charset=utf-8"}
-        mock_response.text = spa_html
-        mock_response.url = "https://spa-example.com"
-        mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client.get.return_value = mock_response
-        mock_client_cls.return_value = mock_client
+        _setup_stream_client(
+            mock_client_cls,
+            text=spa_html,
+            url="https://spa-example.com",
+        )
 
         # Create mock browser service
         mock_browser = MagicMock()
