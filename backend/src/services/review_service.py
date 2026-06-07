@@ -355,10 +355,16 @@ class ReviewService:
                 # lost updates from concurrent submit_review calls (double-click /
                 # webhook redelivery) where review_history grows but repetitions /
                 # ease_factor would otherwise be overwritten from a stale base.
+                # Tolerate legacy items missing these attributes (#37 follow-up):
+                # Card.from_dynamodb_item back-fills defaults on read, but a real
+                # missing attribute in DynamoDB would fail a plain equality check
+                # and raise a spurious ConcurrentReviewError on a legitimate first
+                # review. attribute_not_exists(...) lets such items through; once
+                # written, subsequent updates are guarded normally.
                 ConditionExpression=(
-                    "ease_factor = :prev_ease "
-                    "AND #interval = :prev_interval "
-                    "AND repetitions = :prev_reps"
+                    "(attribute_not_exists(ease_factor) OR ease_factor = :prev_ease) "
+                    "AND (attribute_not_exists(#interval) OR #interval = :prev_interval) "
+                    "AND (attribute_not_exists(repetitions) OR repetitions = :prev_reps)"
                 ),
                 ExpressionAttributeNames={"#interval": "interval"},
                 ExpressionAttributeValues={
