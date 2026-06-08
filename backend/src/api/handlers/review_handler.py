@@ -15,6 +15,7 @@ from services.review_service import (
     ReviewService,
     InvalidGradeError,
     NoReviewHistoryError,
+    ConcurrentReviewError,
 )
 from services.user_service import UserService
 
@@ -99,6 +100,16 @@ def submit_review(card_id: str):
             status_code=400,
             content_type=content_types.APPLICATION_JSON,
             body=json.dumps({"error": str(e)}),
+        )
+    except ConcurrentReviewError:
+        # Optimistic lock failed — concurrent submit for the same card (C-1).
+        logger.warning("Concurrent review detected", extra={"card_id": card_id, "user_id": user_id})
+        return Response(
+            status_code=409,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps(
+                {"error": "レビューが他の操作と競合しました。もう一度お試しください。", "code": "review_conflict"}
+            ),
         )
     except Exception as e:
         logger.error("Error submitting review", extra={"card_id": card_id, "error": str(e)})
