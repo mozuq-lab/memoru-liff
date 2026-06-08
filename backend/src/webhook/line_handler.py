@@ -32,6 +32,7 @@ from services.review_service import ReviewService
 from services.url_content_service import UrlContentService, ContentFetchError
 from services.content_chunker import chunk_content
 from services.ai_service import create_ai_service, AIServiceError
+from services.webhook_idempotency import WebhookIdempotencyService
 from utils.url_validator import validate_url, UrlValidationError
 
 logger = Logger()
@@ -41,6 +42,7 @@ tracer = Tracer()
 line_service = LineService()
 card_service = CardService()
 review_service = ReviewService()
+idempotency_service = WebhookIdempotencyService()
 
 # LIFF URL for account linking
 LIFF_URL = os.environ.get("LIFF_URL", "https://liff.line.me/your-liff-id")
@@ -559,20 +561,27 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
     events = line_service.parse_events(body)
 
     for line_event in events:
-        logger.info(f"Processing event: {line_event.event_type}")
+        event_id = line_event.webhook_event_id
+        # Idempotency guard (N-6): LINE delivers at-least-once and may redeliver
+        # events (incl. after a failed attempt). Claim before processing, confirm
+        # `processed` only on success, and release the claim on failure so LINE's
+        # redelivery can retry instead of being silently skipped.
+        if not idempotency_service.try_acquire(event_id):
+            logger.info("Skipping duplicate webhook event", extra={"event_id": event_id})
+            continue
 
-        if line_event.event_type == "postback":
-            try:
+        logger.info(f"Processing event: {line_event.event_type}")
+        try:
+            if line_event.event_type == "postback":
                 handle_postback(line_event)
-            except Exception as e:
-                logger.error(f"Error handling postback: {e}")
-        elif line_event.event_type == "message":
-            try:
+            elif line_event.event_type == "message":
                 handle_message(line_event)
-            except Exception as e:
-                logger.error(f"Error handling message: {e}")
-        else:
-            logger.info(f"Ignoring event type: {line_event.event_type}")
+            else:
+                logger.info(f"Ignoring event type: {line_event.event_type}")
+            idempotency_service.mark_processed(event_id)
+        except Exception as e:
+            logger.error(f"Error handling event: {e}")
+            idempotency_service.release(event_id)
 
     # LINE expects 200 response
     return {

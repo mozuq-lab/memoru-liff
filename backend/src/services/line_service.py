@@ -54,6 +54,7 @@ class LineEvent:
     postback_data: Optional[str]
     timestamp: int
     message_text: Optional[str] = None
+    webhook_event_id: Optional[str] = None
 
 
 def verify_signature(body: str, signature: str | None, channel_secret: str) -> bool:
@@ -184,6 +185,7 @@ class LineService:
                         postback_data=postback_data,
                         timestamp=event_data.get("timestamp", 0),
                         message_text=message_text,
+                        webhook_event_id=event_data.get("webhookEventId"),
                     )
                 )
 

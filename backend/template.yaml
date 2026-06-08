@@ -322,6 +322,33 @@ Resources:
         - Key: Application
           Value: memoru
 
+  # Processed webhook events table — idempotency for LINE webhook redelivery (N-6)
+  ProcessedEventsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub memoru-processed-events-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: webhook_event_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: webhook_event_id
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expires_at
+        Enabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+      DeletionProtectionEnabled: !If [IsProd, true, false]
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: memoru
+
   #============================================================
   # API Gateway (HTTP API)
   #============================================================
@@ -637,6 +664,8 @@ Resources:
             TableName: !Ref CardsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref ReviewsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProcessedEventsTable
         - Version: "2012-10-17"
           Statement:
             - Effect: Allow
@@ -655,6 +684,7 @@ Resources:
         Variables:
           LINE_CHANNEL_SECRET_ARN: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:memoru-${Environment}-line-credentials
           BEDROCK_MODEL_ID: !Ref BedrockModelId
+          PROCESSED_EVENTS_TABLE: !Ref ProcessedEventsTable
       Events:
         LineWebhook:
           Type: HttpApi
