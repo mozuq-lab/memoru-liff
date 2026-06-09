@@ -284,7 +284,10 @@ class LineService:
             response = httpx.post(url, headers=headers, json=payload, timeout=10)
             response.raise_for_status()
             return True
-        except httpx.RequestError as e:
+        except httpx.HTTPError as e:
+            # httpx.HTTPError is the common parent of RequestError (connect/timeout)
+            # and HTTPStatusError (raised by raise_for_status for 4xx/5xx). Catching
+            # only RequestError would let HTTP status errors escape unwrapped (B-1).
             raise LineApiError(f"Failed to send reply: {e}") from e
 
     def push_message(
@@ -321,5 +324,8 @@ class LineService:
             response = httpx.post(url, headers=headers, json=payload, timeout=10)
             response.raise_for_status()
             return True
-        except httpx.RequestError as e:
+        except httpx.HTTPError as e:
+            # httpx.HTTPError is the common parent of RequestError (connect/timeout)
+            # and HTTPStatusError (raised by raise_for_status for 4xx/5xx). Catching
+            # only RequestError would let HTTP status errors escape unwrapped (B-1).
             raise LineApiError(f"Failed to send push: {e}") from e

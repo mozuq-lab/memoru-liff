@@ -394,6 +394,68 @@ class TestLineServiceApi:
         with pytest.raises(LineApiError):
             service.reply_message("token", [{"type": "text", "text": "test"}])
 
+    # B-1: HTTP 4xx/5xx from raise_for_status() must be wrapped in LineApiError.
+    # httpx.HTTPStatusError is NOT a subclass of httpx.RequestError, so the old
+    # `except httpx.RequestError` would let it escape unwrapped.
+
+    @patch("services.line_service.httpx.post")
+    def test_reply_message_http_status_error_wrapped(self, mock_post, line_service):
+        """4xx/5xx response on reply raises LineApiError (B-1)."""
+        import httpx
+
+        request = httpx.Request("POST", "https://api.line.me/v2/bot/message/reply")
+        response = httpx.Response(400, request=request)
+        mock_post.return_value = response
+
+        with pytest.raises(LineApiError):
+            line_service.reply_message(
+                "reply-token",
+                [{"type": "text", "text": "Hello"}],
+            )
+
+    @patch("services.line_service.httpx.post")
+    def test_push_message_http_status_error_wrapped(self, mock_post, line_service):
+        """4xx/5xx response on push raises LineApiError (B-1)."""
+        import httpx
+
+        request = httpx.Request("POST", "https://api.line.me/v2/bot/message/push")
+        response = httpx.Response(403, request=request)
+        mock_post.return_value = response
+
+        with pytest.raises(LineApiError):
+            line_service.push_message(
+                "U1234567890",
+                [{"type": "text", "text": "Hello"}],
+            )
+
+    @patch("services.line_service.httpx.post")
+    def test_push_message_server_error_wrapped(self, mock_post, line_service):
+        """5xx response on push raises LineApiError (B-1)."""
+        import httpx
+
+        request = httpx.Request("POST", "https://api.line.me/v2/bot/message/push")
+        response = httpx.Response(500, request=request)
+        mock_post.return_value = response
+
+        with pytest.raises(LineApiError):
+            line_service.push_message(
+                "U1234567890",
+                [{"type": "text", "text": "Hello"}],
+            )
+
+    @patch("services.line_service.httpx.post")
+    def test_reply_message_request_error_still_wrapped(self, mock_post, line_service):
+        """Connect/timeout errors on reply still raise LineApiError (B-1 regression)."""
+        import httpx
+
+        mock_post.side_effect = httpx.ConnectError("connection failed")
+
+        with pytest.raises(LineApiError):
+            line_service.reply_message(
+                "reply-token",
+                [{"type": "text", "text": "Hello"}],
+            )
+
 
 class TestFlexMessages:
     """Tests for Flex Message generation."""
