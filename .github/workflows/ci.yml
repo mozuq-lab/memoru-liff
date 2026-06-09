@@ -29,13 +29,13 @@ jobs:
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
 
-      # NOTE (review I-5): backend lint を CI に追加する予定だが、現状 `ruff check src`
-      # が 20 件（F401 9 / E402 6 / F841 5）の違反で失敗するため、CI を即赤化しないよう
-      # ここでは保留している。src の違反解消後に以下のステップを有効化すること。
-      # `make lint` の mypy 部分は既知の設定不備（import-not-found 114 件, N-9）が
-      # あるため、N-9 解消までは ruff のみとし mypy は追加しない。
-      # - name: Run ruff (lint)
-      #   run: ruff check src
+      # review I-5: ruff 違反解消・mypy 設定整備 (N-9, pyproject.toml) 済みのため
+      # make lint と同等の lint を CI でも実行する
+      - name: Run ruff (lint)
+        run: ruff check src/ tests/
+
+      - name: Run mypy (type check)
+        run: mypy src/
 
       - name: Run tests with coverage
         run: |
