@@ -36,7 +36,9 @@ def get_due_cards():
 
     params = router.current_event.query_string_parameters or {}
     try:
-        limit = min(int(params.get("limit", 20)), 100)
+        # Clamp to [1, 100]: a limit <= 0 would reach DynamoDB's Limit and raise a
+        # ValidationException -> 500. max(1, ...) keeps the lower bound safe (B-3).
+        limit = max(1, min(int(params.get("limit", 20)), 100))
     except (ValueError, TypeError):
         return Response(
             status_code=400,
