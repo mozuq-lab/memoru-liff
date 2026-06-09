@@ -188,7 +188,7 @@ except httpx.HTTPError as e:   # RequestError と HTTPStatusError の共通親
 | F-4 | ✅ 修正済み | 保存成功分を選択集合から除去、部分保存メッセージ表示 |
 | F-5 | ✅ 修正済み | モジュールレベルキャッシュ + in-flight Promise 共有 |
 | I-3 | ✅ 修正済み | DuePushJob に SQS DLQ（KMS 暗号化・14日保持）を追加 |
-| I-5 | ⏳ 一部対応 | CI への ruff 追加は src の既存違反 20 件（F401/E402/F841）解消まで保留（コメントアウトで準備済み）。mypy は N-9 解消後 |
+| I-5 | ✅ 修正済み | ruff 違反 112 件（src 16 + tests 96）を解消し、CI に ruff + mypy を有効化。N-9 も同時解消（pyproject.toml に mypy 設定、実型エラー 44 件修正）。副産物として tutor SessionManager 復元の timestamp ValidationError（潜在バグ）を発見・修正 |
 | I-6 | ✅ 修正済み | ci.yml に infrastructure-test job（build + test + cdk synth）を追加 |
 | I-1 / I-2 | ⬜ 要ユーザー対応 | prod samconfig への実値設定が必要: `LineChannelId`（LINE Developer Console の値）、実ドメインの `OidcIssuer`、`OidcAudience`、Tutor 提供時は `UseStrands=true`（+ AgentCore 利用なら `TutorSessionBackend`/`AgentCoreMemoryId`）。コードでは対応不可のため運用設定で対応 |
 | F-6〜F-9 / I-4 / I-7〜I-11 | ⬜ 未対応 | Low 群。別途フォローアップ |
