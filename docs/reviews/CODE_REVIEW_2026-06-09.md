@@ -169,3 +169,26 @@ except httpx.HTTPError as e:   # RequestError と HTTPStatusError の共通親
 直近のフォローアップ 4 件はいずれも正しく実装されており、レビュー → 修正のサイクルは機能している。コードベース全体としても、冪等ガード・楽観ロック・SSRF 再検証・ストリーミングサイズ上限・DynamoDB の PITR/KMS など防御的な作り込みは着実に積み上がっている。一方で今回の新規発見は「**例外型の取りこぼし（B-1）が直近の保護機構を迂回する**」「**prod のデプロイ構成が実は未完成（I-1/I-2）**」という、個々のコード品質ではなく**境界（例外階層・環境設定・CI ゲート）の検証漏れ**に集中している。既知の High（CDK H-1/H-2、フロント S-1/S-2）が 2 レビュー連続で未着手な点も含め、次のスプリントは新機能よりフォローアップ消化を優先することを推奨する。
 
 > 本レビューはコードを変更していない（read-only）。
+
+---
+
+## 8. 対応状況（2026-06-09 追記）
+
+レビュー当日に以下を修正済み（各タスク個別コミット、全テスト成功を確認: backend 1455 passed / カバレッジ 84%、frontend 785 passed / type-check 成功）。
+
+| ID | 状態 | 対応内容 |
+|---|---|---|
+| B-1 | ✅ 修正済み | `except httpx.HTTPError` へ拡大し `LineApiError` 変換を回復 |
+| B-2 | ✅ 修正済み | `undo_review` を submit と同パターンで CAS 化、競合時 409 |
+| B-3 | ✅ 修正済み | `limit` を [1, 100] にクランプ |
+| B-4 | ✅ 実質解消 | B-1 修正により reply 失敗時の挙動が「processed 扱い」に統一 |
+| F-1 | ✅ 修正済み | `useAuthContext()` に統一 |
+| F-2 | ✅ 修正済み | 直前モードを保持し再試行で `startSession` 再実行 |
+| F-3 | ✅ 修正済み | signal を fetch まで伝播 + リクエスト ID で古い結果を破棄 |
+| F-4 | ✅ 修正済み | 保存成功分を選択集合から除去、部分保存メッセージ表示 |
+| F-5 | ✅ 修正済み | モジュールレベルキャッシュ + in-flight Promise 共有 |
+| I-3 | ✅ 修正済み | DuePushJob に SQS DLQ（KMS 暗号化・14日保持）を追加 |
+| I-5 | ⏳ 一部対応 | CI への ruff 追加は src の既存違反 20 件（F401/E402/F841）解消まで保留（コメントアウトで準備済み）。mypy は N-9 解消後 |
+| I-6 | ✅ 修正済み | ci.yml に infrastructure-test job（build + test + cdk synth）を追加 |
+| I-1 / I-2 | ⬜ 要ユーザー対応 | prod samconfig への実値設定が必要: `LineChannelId`（LINE Developer Console の値）、実ドメインの `OidcIssuer`、`OidcAudience`、Tutor 提供時は `UseStrands=true`（+ AgentCore 利用なら `TutorSessionBackend`/`AgentCoreMemoryId`）。コードでは対応不可のため運用設定で対応 |
+| F-6〜F-9 / I-4 / I-7〜I-11 | ⬜ 未対応 | Low 群。別途フォローアップ |
