@@ -283,9 +283,12 @@ class UrlContentService:
         spa_patterns = re.compile(
             r"(bundle|chunk|main\.[a-f0-9]+)\.(js|mjs)", re.IGNORECASE
         )
+        # BeautifulSoup attribute values may be lists (AttributeValueList);
+        # only count plain string src attributes.
+        script_srcs = (tag.get("src") for tag in script_tags)
         spa_script_count = sum(
-            1 for tag in script_tags
-            if spa_patterns.search(tag.get("src", ""))
+            1 for src in script_srcs
+            if isinstance(src, str) and spa_patterns.search(src)
         )
         if spa_script_count >= 2:
             return True

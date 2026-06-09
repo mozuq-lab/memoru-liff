@@ -132,6 +132,12 @@ class NotificationService:
             result.processed += 1
 
             try:
+                # LINE 未連携ユーザーには push できない（クエリ前提だが防御的にガード）
+                if not user.line_user_id:
+                    logger.warning(f"User {user.user_id} has no line_user_id; skipping")
+                    result.skipped += 1
+                    continue
+
                 # Check if already notified today
                 if user.last_notified_date == today_str:
                     logger.debug(f"User {user.user_id} already notified today")

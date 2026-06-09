@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import sys
+from typing import Any
 
 import boto3
 from aws_lambda_powertools import Logger
@@ -19,10 +20,10 @@ _agentcore_boto_session = None
 
 # These will be populated by lazy imports or overridden by test patches (create=True).
 # Using module-level names so unittest.mock.patch can intercept them.
-MemoryClient = None
-AgentCoreMemorySessionManager = None
-AgentCoreMemoryConfig = None
-DynamoDBSessionManager = None
+MemoryClient: Any = None
+AgentCoreMemorySessionManager: Any = None
+AgentCoreMemoryConfig: Any = None
+DynamoDBSessionManager: Any = None
 
 
 def _ensure_agentcore_imports():

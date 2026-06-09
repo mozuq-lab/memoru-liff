@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from typing import Generator, List
 
 from strands import Agent
-from strands.models import BedrockModel
+from strands.models import BedrockModel, Model
 
 # OllamaModel: オプション依存（ollama パッケージが必要）。
 # 未インストール環境でもモジュール import が成功するよう try/except でラップする。
@@ -115,7 +115,7 @@ class StrandsAIService:
         self.environment = environment
         self.model, self.model_used = self._create_model()
 
-    def _create_model(self) -> tuple[object, str]:
+    def _create_model(self) -> tuple[Model, str]:
         """環境変数に基づいてモデルプロバイダーを選択・初期化する.
 
         Returns:
@@ -124,7 +124,7 @@ class StrandsAIService:
         if self.environment == "dev":
             ollama_host = os.getenv("OLLAMA_HOST", _DEFAULT_OLLAMA_HOST)
             ollama_model = os.getenv("OLLAMA_MODEL", _DEFAULT_OLLAMA_MODEL)
-            model = OllamaModel(
+            model: Model = OllamaModel(
                 host=ollama_host,
                 model_id=ollama_model,
             )

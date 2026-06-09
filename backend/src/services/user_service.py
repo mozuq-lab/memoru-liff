@@ -3,7 +3,7 @@
 import os
 from datetime import datetime
 from datetime import timezone as dt_timezone
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import boto3
 from botocore.exceptions import ClientError
@@ -293,7 +293,7 @@ class UserService:
 
         # Build update expression
         update_parts = []
-        expression_values = {}
+        expression_values: Dict[str, Any] = {}
         expression_names = {}
 
         if notification_time is not None:

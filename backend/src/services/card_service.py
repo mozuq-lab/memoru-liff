@@ -2,7 +2,7 @@
 
 import os
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import boto3
 from aws_lambda_powertools import Logger
@@ -259,7 +259,7 @@ class CardService:
         # Build update expression
         update_parts = []
         remove_parts = []
-        expression_values = {}
+        expression_values: Dict[str, Any] = {}
         expression_names = {}
 
         if front is not None:
@@ -509,7 +509,7 @@ class CardService:
             Tuple of (list of cards, next cursor).
         """
         try:
-            query_kwargs = {
+            query_kwargs: Dict[str, Any] = {
                 "KeyConditionExpression": "user_id = :user_id",
                 "ExpressionAttributeValues": {":user_id": user_id},
                 "Limit": limit,
