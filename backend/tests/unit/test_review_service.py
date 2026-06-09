@@ -1618,6 +1618,76 @@ class TestUndoReview:
         response = reviews_table.scan()
         assert len(response["Items"]) >= 1
 
+    def test_undo_review_optimistic_lock_blocks_concurrent_update(
+        self, review_service, sample_card
+    ):
+        """Concurrent modification during undo raises ConcurrentReviewError (B-2).
+
+        Simulates the SRS state / history changing between the service's read and
+        the conditional UpdateItem (e.g. a concurrent submit/undo or double-click).
+        The CAS ConditionExpression fails -> ConditionalCheckFailedException ->
+        ConcurrentReviewError, mirroring submit_review's optimistic lock (C-1).
+        """
+        from botocore.exceptions import ClientError
+
+        # Create review history so undo proceeds to the conditional update.
+        review_service.submit_review(
+            user_id="test-user-id",
+            card_id="test-card-id",
+            grade=4,
+        )
+
+        conditional_failure = ClientError(
+            {"Error": {"Code": "ConditionalCheckFailedException", "Message": "stale"}},
+            "UpdateItem",
+        )
+
+        with patch.object(
+            review_service.cards_table, "update_item", side_effect=conditional_failure
+        ):
+            with pytest.raises(ConcurrentReviewError):
+                review_service.undo_review(
+                    user_id="test-user-id",
+                    card_id="test-card-id",
+                )
+
+    def test_undo_review_concurrent_history_growth_blocks(self, review_service, sample_card):
+        """If review_history grows after the read, the CAS guard rejects the undo (B-2).
+
+        Reproduces a real lost-update race end-to-end (no mocking of update_item):
+        a concurrent submit appends a history entry and bumps repetitions between
+        the moment undo snapshots the card and the conditional write.
+        """
+        # One review -> history length 1, repetitions 1.
+        review_service.submit_review(
+            user_id="test-user-id",
+            card_id="test-card-id",
+            grade=4,
+        )
+
+        table = review_service.cards_table
+        real_get_item = table.get_item
+
+        def get_item_then_concurrent_submit(*args, **kwargs):
+            # Return the history as undo expects, then simulate a concurrent submit
+            # that mutates the card AFTER undo has taken its snapshot.
+            result = real_get_item(*args, **kwargs)
+            review_service.submit_review(
+                user_id="test-user-id",
+                card_id="test-card-id",
+                grade=5,
+            )
+            return result
+
+        with patch.object(
+            table, "get_item", side_effect=get_item_then_concurrent_submit
+        ):
+            with pytest.raises(ConcurrentReviewError):
+                review_service.undo_review(
+                    user_id="test-user-id",
+                    card_id="test-card-id",
+                )
+
 
 class TestGetNextDueDateFutureFilter:
     """Tests for _get_next_due_date filtering future dates only (TASK-0110)."""

@@ -231,6 +231,16 @@ class ReviewService:
         if not review_history:
             raise NoReviewHistoryError("No review history to undo")
 
+        # Snapshot the current SRS state we are about to roll back. These values
+        # form the optimistic-lock baseline (B-2): the conditional UpdateItem below
+        # only applies if the card still matches this read, mirroring the CAS used
+        # by submit_review (C-1). Prevents lost updates / history corruption when an
+        # undo races with a concurrent submit/undo (double-click, webhook redelivery).
+        expected_ease_factor = card.ease_factor
+        expected_interval = card.interval
+        expected_repetitions = card.repetitions
+        expected_history_len = len(review_history)
+
         # Get latest entry
         latest_entry = review_history[-1]
 
@@ -262,6 +272,21 @@ class ReviewService:
                     "updated_at = :updated_at, "
                     "review_history = :review_history"
                 ),
+                # Optimistic lock (B-2): apply only if the card's SRS state and
+                # review_history length still match what we read above. Mirrors the
+                # CAS in submit_review (C-1) to prevent lost updates / history
+                # corruption when an undo races with a concurrent submit/undo
+                # (double-click, webhook redelivery). The history-length guard also
+                # rejects the case where SRS fields happen to coincide but the list
+                # has already been mutated by a concurrent operation.
+                # attribute_not_exists(...) tolerates legacy items missing these
+                # attributes (#37 follow-up), matching submit_review's behavior.
+                ConditionExpression=(
+                    "(attribute_not_exists(ease_factor) OR ease_factor = :expected_ease) "
+                    "AND (attribute_not_exists(#interval) OR #interval = :expected_interval) "
+                    "AND (attribute_not_exists(repetitions) OR repetitions = :expected_reps) "
+                    "AND size(review_history) = :expected_history_len"
+                ),
                 ExpressionAttributeNames={"#interval": "interval"},
                 ExpressionAttributeValues={
                     ":next_review": restored_next_review_at,
@@ -270,9 +295,21 @@ class ReviewService:
                     ":repetitions": restored_repetitions,
                     ":updated_at": now.isoformat(),
                     ":review_history": updated_history,
+                    ":expected_ease": str(expected_ease_factor),
+                    ":expected_interval": expected_interval,
+                    ":expected_reps": expected_repetitions,
+                    ":expected_history_len": expected_history_len,
                 },
             )
         except ClientError as e:
+            if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                logger.warning(
+                    "Concurrent undo update detected (optimistic lock failed)",
+                    extra={"user_id": user_id, "card_id": card_id},
+                )
+                raise ConcurrentReviewError(
+                    "Undo conflict: the card was modified concurrently. Please retry."
+                ) from e
             raise CardServiceError(f"Failed to undo review: {e}")
 
         # Parse due_date from restored_next_review_at
