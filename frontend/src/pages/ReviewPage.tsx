@@ -10,7 +10,7 @@ import { Error } from "@/components/common/Error";
 import { cardsApi, reviewsApi } from "@/services/api";
 import { useSpeech } from "@/hooks/useSpeech";
 import { useSpeechSettings } from "@/hooks/useSpeechSettings";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuthContext } from "@/contexts/AuthContext";
 import type { DueCard, SessionCardResult, ReconfirmCard } from "@/types";
 
 /**
@@ -57,7 +57,7 @@ export const ReviewPage = () => {
   const [isReconfirmMode, setIsReconfirmMode] = useState(false);
 
   // 読み上げ機能 (US1: 手動読み上げ、US2: 自動読み上げ、US3: 速度設定)
-  const { user: authUser } = useAuth();
+  const { user: authUser } = useAuthContext();
   const userId = authUser?.profile?.sub;
   const { settings } = useSpeechSettings(userId);
   const { isSpeaking, isSupported, speak, cancel } = useSpeech({

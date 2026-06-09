@@ -10,7 +10,7 @@ import { Navigation } from '@/components/Navigation';
 import { Loading } from '@/components/common/Loading';
 import { Error } from '@/components/common/Error';
 import { usersApi } from '@/services/api';
-import { useAuth } from '@/hooks/useAuth';
+import { useAuthContext } from '@/contexts/AuthContext';
 import { useSpeechSettings } from '@/hooks/useSpeechSettings';
 import type { User } from '@/types';
 import type { SpeechRate } from '@/types/speech';
@@ -39,7 +39,7 @@ const DAY_START_HOURS = Array.from({ length: 24 }, (_, i) => ({
  */
 export const SettingsPage = () => {
   const navigate = useNavigate();
-  const { logout, user: authUser } = useAuth();
+  const { logout, user: authUser } = useAuthContext();
   const [user, setUser] = useState<User | null>(null);
   const [selectedTime, setSelectedTime] = useState<string>('09:00');
   const [selectedDayStartHour, setSelectedDayStartHour] = useState<number>(4);

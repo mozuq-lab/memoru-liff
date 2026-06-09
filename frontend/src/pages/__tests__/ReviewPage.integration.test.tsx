@@ -54,6 +54,15 @@ vi.mock('@/services/api', () => ({
   },
 }));
 
+/** 【F-1】: useAuthContext をモックして AuthProvider なしでも userId を提供する */
+vi.mock('@/contexts/AuthContext', () => ({
+  useAuthContext: () => ({
+    user: {
+      profile: { sub: 'test-user' },
+    },
+  }),
+}));
+
 // ============================================================
 // テストデータ定義
 // 🔵 既存テスト実装パターン（ReviewPage.test.tsx 32-36行目）より
