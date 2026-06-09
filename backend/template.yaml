@@ -698,6 +698,29 @@ Resources:
         Environment: !Ref Environment
         Application: memoru
 
+  # Dead Letter Queue for the scheduled DuePushJobFunction.
+  # Captures failed asynchronous (Schedule) invocations so reminder
+  # delivery failures are not silently lost.
+  # NOTE: A CloudWatch Alarm on ApproximateNumberOfMessagesVisible is
+  # out of scope for this change (see review I-3) and should be added
+  # in a follow-up to surface failures operationally.
+  DuePushJobDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub memoru-due-push-dlq-${Environment}
+      # 14 days (in seconds) — maximum retention to allow ample time to
+      # inspect/replay failed reminder invocations.
+      MessageRetentionPeriod: 1209600
+      # Encrypt with the AWS-managed KMS key for SQS, consistent with the
+      # KMS-encrypted DynamoDB tables (SSEType: KMS) used elsewhere.
+      SqsManagedSseEnabled: false
+      KmsMasterKeyId: alias/aws/sqs
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: memoru
+
   # Due Push Job Function (Scheduled)
   DuePushJobFunction:
     Type: AWS::Serverless::Function
@@ -708,6 +731,13 @@ Resources:
       Description: Scheduled job to send review reminders via LINE
       Timeout: 300
       ReservedConcurrentExecutions: 5
+      # Route failed async (Schedule) invocations to the DLQ so reminder
+      # failures are retained instead of being dropped.
+      EventInvokeConfig:
+        DestinationConfig:
+          OnFailure:
+            Type: SQS
+            Destination: !GetAtt DuePushJobDLQ.Arn
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref UsersTable
@@ -725,6 +755,14 @@ Resources:
               Action:
                 - secretsmanager:GetSecretValue
               Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:memoru-${Environment}-line-credentials-*
+        # Allow the function's execution role to deliver failed-invocation
+        # records to the DLQ.
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - sqs:SendMessage
+              Resource: !GetAtt DuePushJobDLQ.Arn
       Environment:
         Variables:
           LINE_CHANNEL_SECRET_ARN: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:memoru-${Environment}-line-credentials
