@@ -83,11 +83,15 @@ export const CardsPage = () => {
   // 【TASK-0091】: deckId を依存配列に追加、fetchCards/fetchDueCards に deckId を渡す
   // 🔵 青信号: architecture.md セクション6 の useEffect 実装概要に基づく
   useEffect(() => {
+    // F-3: タブ/デッキ切替時に前回の fetch を中断し、古いレスポンスが
+    //      新しい結果を上書きしないようにする
+    const controller = new AbortController();
     if (activeTab === "due") {
-      fetchDueCards(deckId);
+      fetchDueCards(deckId, { signal: controller.signal });
     } else {
-      fetchCards(deckId);
+      fetchCards(deckId, { signal: controller.signal });
     }
+    return () => controller.abort();
   }, [activeTab, deckId, fetchCards, fetchDueCards]);
 
   // 【成功メッセージの自動非表示】

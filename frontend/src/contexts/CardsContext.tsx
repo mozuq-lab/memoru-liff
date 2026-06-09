@@ -1,6 +1,10 @@
-import { createContext, useContext, useState, useCallback, useMemo, type ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useMemo, useRef, type ReactNode } from 'react';
 import type { Card, DueCard } from '@/types';
 import { cardsApi } from '@/services/api';
+
+// F-3: AbortError 判定ヘルパー — 中断起因のエラーは error state に入れない
+const isAbortError = (err: unknown): boolean =>
+  err instanceof DOMException && err.name === 'AbortError';
 
 interface CardsContextType {
   cards: Card[];
@@ -44,6 +48,9 @@ export const CardsProvider = ({ children }: CardsProviderProps) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [dueCount, setDueCount] = useState(0);
+  // F-3: 最新リクエスト ID を保持し、古い fetch の結果（タブ/デッキ連続切替時）を破棄する
+  const cardsRequestIdRef = useRef(0);
+  const dueCardsRequestIdRef = useRef(0);
 
   /**
    * 【機能概要】: カード一覧を取得してStateを更新する
@@ -53,20 +60,24 @@ export const CardsProvider = ({ children }: CardsProviderProps) => {
    * @param deckId - フィルタするデッキID（省略時は全カード取得）
    */
   const fetchCards = useCallback(async (deckId?: string, options?: { signal?: AbortSignal }) => {
+    // F-3: このリクエストの ID を採番。完了時に最新でなければ結果を破棄する
+    const requestId = ++cardsRequestIdRef.current;
     setIsLoading(true);
     setError(null);
     try {
       // 【API呼び出し】: deckId を API レイヤーに伝搬（undefined の場合は全カード取得）
-      const data = await cardsApi.getCards(deckId);
-      // 【C-3修正】: AbortController による中断時は setState をスキップ
-      if (options?.signal?.aborted) return;
+      // F-3: signal を fetch まで伝播し、古いリクエストを実際にキャンセルする
+      const data = await cardsApi.getCards(deckId, { signal: options?.signal });
+      // F-3: 中断済み or 後発リクエストが走っている場合は古い結果を破棄
+      if (options?.signal?.aborted || requestId !== cardsRequestIdRef.current) return;
       setCards(data);
     } catch (err) {
-      if (options?.signal?.aborted) return;
+      if (options?.signal?.aborted || isAbortError(err) || requestId !== cardsRequestIdRef.current) return;
       // 【W-30修正】: 型安全なエラーラッピング
       setError(err instanceof Error ? err : new Error(String(err)));
     } finally {
-      if (!options?.signal?.aborted) {
+      // F-3: 最新リクエストかつ未中断のときのみローディング解除
+      if (!options?.signal?.aborted && requestId === cardsRequestIdRef.current) {
         setIsLoading(false);
       }
     }
@@ -80,21 +91,25 @@ export const CardsProvider = ({ children }: CardsProviderProps) => {
    * @param deckId - フィルタするデッキID（省略時は全復習対象カード取得）
    */
   const fetchDueCards = useCallback(async (deckId?: string, options?: { signal?: AbortSignal }) => {
+    // F-3: このリクエストの ID を採番。完了時に最新でなければ結果を破棄する
+    const requestId = ++dueCardsRequestIdRef.current;
     setIsLoading(true);
     setError(null);
     try {
       // 【API呼び出し】: limit は undefined、deckId を第2引数として伝搬
-      const response = await cardsApi.getDueCards(undefined, deckId);
-      // 【C-3修正】: AbortController による中断時は setState をスキップ
-      if (options?.signal?.aborted) return;
+      // F-3: signal を fetch まで伝播し、古いリクエストを実際にキャンセルする
+      const response = await cardsApi.getDueCards(undefined, deckId, { signal: options?.signal });
+      // F-3: 中断済み or 後発リクエストが走っている場合は古い結果を破棄
+      if (options?.signal?.aborted || requestId !== dueCardsRequestIdRef.current) return;
       setDueCards(response.due_cards.map(dueCardToCard));
       setDueCount(response.total_due_count);
     } catch (err) {
-      if (options?.signal?.aborted) return;
+      if (options?.signal?.aborted || isAbortError(err) || requestId !== dueCardsRequestIdRef.current) return;
       // 【W-30修正】: 型安全なエラーラッピング
       setError(err instanceof Error ? err : new Error(String(err)));
     } finally {
-      if (!options?.signal?.aborted) {
+      // F-3: 最新リクエストかつ未中断のときのみローディング解除
+      if (!options?.signal?.aborted && requestId === dueCardsRequestIdRef.current) {
         setIsLoading(false);
       }
     }
