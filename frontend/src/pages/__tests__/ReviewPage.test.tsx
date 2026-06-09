@@ -33,10 +33,10 @@ vi.mock('@/hooks/useSpeech', () => ({
   }),
 }));
 
-// 【テスト前準備】: useAuth hook をモックして userId を提供
+// 【テスト前準備】: useAuthContext をモックして userId を提供
 // 🔵 青信号: SettingsPage.test.tsx の既存パターンより
-vi.mock('@/hooks/useAuth', () => ({
-  useAuth: () => ({
+vi.mock('@/contexts/AuthContext', () => ({
+  useAuthContext: () => ({
     user: {
       profile: { sub: 'test-user' },
     },

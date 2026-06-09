@@ -36,10 +36,10 @@ vi.mock('@/hooks/useSpeechSettings', () => ({
   }),
 }));
 
-// useAuth モック
+// useAuthContext モック
 const mockLogout = vi.fn();
-vi.mock('@/hooks/useAuth', () => ({
-  useAuth: () => ({
+vi.mock('@/contexts/AuthContext', () => ({
+  useAuthContext: () => ({
     logout: mockLogout,
     user: {
       access_token: 'test-token',

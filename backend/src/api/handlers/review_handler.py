@@ -36,7 +36,9 @@ def get_due_cards():
 
     params = router.current_event.query_string_parameters or {}
     try:
-        limit = min(int(params.get("limit", 20)), 100)
+        # Clamp to [1, 100]: a limit <= 0 would reach DynamoDB's Limit and raise a
+        # ValidationException -> 500. max(1, ...) keeps the lower bound safe (B-3).
+        limit = max(1, min(int(params.get("limit", 20)), 100))
     except (ValueError, TypeError):
         return Response(
             status_code=400,
@@ -136,6 +138,16 @@ def undo_review(card_id: str):
             status_code=400,
             content_type=content_types.APPLICATION_JSON,
             body=json.dumps({"error": str(e)}),
+        )
+    except ConcurrentReviewError:
+        # Optimistic lock failed — concurrent undo/submit for the same card (B-2).
+        logger.warning("Concurrent undo detected", extra={"card_id": card_id, "user_id": user_id})
+        return Response(
+            status_code=409,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps(
+                {"error": "レビューが他の操作と競合しました。もう一度お試しください。", "code": "review_conflict"}
+            ),
         )
     except Exception as e:
         logger.error("Error undoing review", extra={"card_id": card_id, "error": str(e)})

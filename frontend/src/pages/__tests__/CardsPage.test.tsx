@@ -395,7 +395,7 @@ describe('TASK-0091: CardsPage deck_id フィルタ対応', () => {
 
       // 【結果検証】: fetchCards が deckId 引数付きで呼ばれたことを確認
       // 【期待値確認】: mockFetchCards が 'deck-abc-123' を引数として呼び出される
-      expect(mockFetchCards).toHaveBeenCalledWith('deck-abc-123'); // 【確認内容】: URL パラメータから Context への deckId 伝搬の正確性を保証 🔵
+      expect(mockFetchCards).toHaveBeenCalledWith('deck-abc-123', expect.objectContaining({ signal: expect.any(AbortSignal) })); // 【確認内容】: URL パラメータから Context への deckId 伝搬の正確性を保証 🔵
     });
 
     it('TC-091-006: URL に deck_id がない場合に fetchCards() が引数なしで呼ばれる', () => {
@@ -413,7 +413,7 @@ describe('TASK-0091: CardsPage deck_id フィルタ対応', () => {
 
       // 【結果検証】: fetchCards が引数なし（undefined）で呼ばれたことを確認
       // 【期待値確認】: deck_id パラメータがない場合に全カード取得が行われること
-      expect(mockFetchCards).toHaveBeenCalledWith(undefined); // 【確認内容】: 引数なしの呼び出しで全カード取得 🔵
+      expect(mockFetchCards).toHaveBeenCalledWith(undefined, expect.objectContaining({ signal: expect.any(AbortSignal) })); // 【確認内容】: 引数なしの呼び出しで全カード取得 🔵
     });
   });
 
@@ -486,7 +486,7 @@ describe('TASK-0091: CardsPage deck_id フィルタ対応', () => {
 
       // 【結果検証】: fetchDueCards が deckId 引数付きで呼ばれたことを確認
       // 【期待値確認】: mockFetchDueCards が 'deck-abc-123' を引数として呼び出される
-      expect(mockFetchDueCards).toHaveBeenCalledWith('deck-abc-123'); // 【確認内容】: タブ切り替え時に deck_id が失われていないこと 🟡
+      expect(mockFetchDueCards).toHaveBeenCalledWith('deck-abc-123', expect.objectContaining({ signal: expect.any(AbortSignal) })); // 【確認内容】: タブ切り替え時に deck_id が失われていないこと 🟡
     });
 
     it('TC-091-B02: deck_id と tab=due の両方が指定された場合に正しくフィルタされる', () => {
@@ -503,7 +503,7 @@ describe('TASK-0091: CardsPage deck_id フィルタ対応', () => {
       );
 
       // 【結果検証1】: fetchDueCards が deckId 引数付きで呼ばれたことを確認
-      expect(mockFetchDueCards).toHaveBeenCalledWith('deck-abc-123'); // 【確認内容】: deck_id が getDueCards に伝搬している 🟡
+      expect(mockFetchDueCards).toHaveBeenCalledWith('deck-abc-123', expect.objectContaining({ signal: expect.any(AbortSignal) })); // 【確認内容】: deck_id が getDueCards に伝搬している 🟡
       // 【結果検証2】: fetchCards が呼ばれていないことを確認（tab=due のため）
       expect(mockFetchCards).not.toHaveBeenCalled(); // 【確認内容】: 復習対象タブでは fetchCards が呼ばれないこと 🟡
     });
@@ -527,7 +527,7 @@ describe('TASK-0091: CardsPage deck_id フィルタ対応', () => {
 
       // 【結果検証】: タブ切り替え後に fetchDueCards が deckId 引数付きで呼ばれたことを確認
       // 【期待値確認】: setSearchParams が deck_id を保持してタブを変更すること
-      expect(mockFetchDueCards).toHaveBeenCalledWith('deck-abc-123'); // 【確認内容】: タブ切り替え後も deck_id フィルタが維持されること 🟡
+      expect(mockFetchDueCards).toHaveBeenCalledWith('deck-abc-123', expect.objectContaining({ signal: expect.any(AbortSignal) })); // 【確認内容】: タブ切り替え後も deck_id フィルタが維持されること 🟡
     });
   });
 
@@ -649,7 +649,7 @@ describe('TASK-0091: CardsPage deck_id フィルタ対応', () => {
 
       // 【結果検証】: fetchCards が引数なし（undefined）で呼ばれたことを確認
       // 【期待値確認】: 空文字列を falsy として扱い、フィルタなしと同等に動作
-      expect(mockFetchCards).toHaveBeenCalledWith(undefined); // 【確認内容】: 空文字列の deck_id は undefined として扱われること 🟡
+      expect(mockFetchCards).toHaveBeenCalledWith(undefined, expect.objectContaining({ signal: expect.any(AbortSignal) })); // 【確認内容】: 空文字列の deck_id は undefined として扱われること 🟡
     });
   });
 });
