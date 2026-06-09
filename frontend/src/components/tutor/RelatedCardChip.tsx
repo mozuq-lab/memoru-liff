@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { cardsApi } from "@/services/api";
+import { fetchFrontText, getCachedFrontText } from "./relatedCardCache";
 
 interface RelatedCardChipProps {
   cardId: string;
@@ -8,23 +8,18 @@ interface RelatedCardChipProps {
 
 export const RelatedCardChip = ({ cardId }: RelatedCardChipProps) => {
   const navigate = useNavigate();
-  const [frontText, setFrontText] = useState<string | null>(null);
+  // F-5: キャッシュ済みなら初期描画から再フェッチ無しで表示
+  const [frontText, setFrontText] = useState<string | null>(
+    getCachedFrontText(cardId) ?? null,
+  );
 
   useEffect(() => {
     let cancelled = false;
-    cardsApi
-      .getCard(cardId)
-      .then((card) => {
-        if (!cancelled) {
-          setFrontText(card.front);
-        }
-      })
-      .catch(() => {
-        // Card may have been deleted; show ID as fallback
-        if (!cancelled) {
-          setFrontText(null);
-        }
-      });
+    fetchFrontText(cardId).then((text) => {
+      if (!cancelled) {
+        setFrontText(text);
+      }
+    });
     return () => {
       cancelled = true;
     };
