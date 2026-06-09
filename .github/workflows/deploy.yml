@@ -8,6 +8,10 @@ on:
       - 'backend/**'
       - 'frontend/**'
       - '.github/workflows/deploy.yml'
+      # NOTE (review I-6): CDK (infrastructure/**) の検証は ci.yml の
+      # infrastructure-test job (build + test + cdk synth) で実施する。
+      # このワークフローは backend/frontend のアプリデプロイ専用で CDK を
+      # デプロイしないため、infrastructure/** はトリガに含めない。
   workflow_dispatch:
     inputs:
       environment:

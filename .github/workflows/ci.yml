@@ -29,9 +29,46 @@ jobs:
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
 
+      # NOTE (review I-5): backend lint を CI に追加する予定だが、現状 `ruff check src`
+      # が 20 件（F401 9 / E402 6 / F841 5）の違反で失敗するため、CI を即赤化しないよう
+      # ここでは保留している。src の違反解消後に以下のステップを有効化すること。
+      # `make lint` の mypy 部分は既知の設定不備（import-not-found 114 件, N-9）が
+      # あるため、N-9 解消までは ruff のみとし mypy は追加しない。
+      # - name: Run ruff (lint)
+      #   run: ruff check src
+
       - name: Run tests with coverage
         run: |
           pytest tests/ -v --cov=src --cov-report=term-missing
+
+  infrastructure-test:
+    name: Infrastructure (CDK) Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infrastructure/cdk
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: infrastructure/cdk/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (tsc)
+        run: npm run build
+
+      - name: Run tests
+        run: npm test
+
+      # synth は AWS 認証情報なしでも通ることをローカル検証済み（dev / prod 両方）。
+      - name: CDK synth (all stacks)
+        run: npx cdk synth --all
 
   frontend-test:
     name: Frontend Tests
