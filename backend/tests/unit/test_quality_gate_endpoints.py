@@ -512,7 +512,7 @@ class TestHandlerCoveragePaths:
         }
 
         # The handler should prepend "/dev" to rawPath before resolving
-        response = handler(event, MagicMock())
+        handler(event, MagicMock())
         # rawPath should now have been modified by handler()
         assert event["rawPath"] == "/dev/cards/generate"
 
@@ -548,7 +548,6 @@ class TestHandlerCoveragePaths:
     @patch("api.handlers.ai_handler.create_ai_service")
     def test_generate_cards_generic_exception_raises(self, mock_factory):
         """generate_cards エンドポイントが非 AIServiceError 例外をログして re-raise する."""
-        import pytest
         from api.handler import handler
 
         mock_factory.side_effect = RuntimeError("unexpected infrastructure error")
@@ -560,7 +559,6 @@ class TestHandlerCoveragePaths:
 
     def test_generate_cards_request_whitespace_only_raises_validation_error(self):
         """GenerateCardsRequest が空白のみのテキストで ValueError を raise する."""
-        import pytest
         from pydantic import ValidationError
         from models.generate import GenerateCardsRequest
 

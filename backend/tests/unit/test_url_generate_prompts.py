@@ -1,6 +1,5 @@
 """Unit tests for URL card generation prompt variants (T027)."""
 
-import pytest
 
 from services.prompts.url_generate import (
     CARD_TYPE_INSTRUCTIONS,

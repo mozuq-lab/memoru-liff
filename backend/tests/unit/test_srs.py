@@ -3,14 +3,12 @@
 import pytest
 from datetime import datetime, timezone, timedelta
 from unittest.mock import patch
-from zoneinfo import ZoneInfo
 
 from services.srs import (
     calculate_sm2,
     calculate_next_review_boundary,
     add_review_history,
     ReviewHistoryEntry,
-    SM2Result,
     EASE_FACTOR_MINIMUM,
 )
 

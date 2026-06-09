@@ -19,7 +19,6 @@ from services.ai_service import (
     AIParseError,
     AIProviderError,
     AIRateLimitError,
-    AIServiceError,
     AITimeoutError,
     LearningAdvice,
     ReviewSummary,

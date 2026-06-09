@@ -366,7 +366,6 @@ class TestSubmitReviewDayBoundaryNormalization:
         # interval=1, reviewed at 10:00 JST (after boundary)
         # effective_date = 2024-06-15, target_date = 2024-06-16
         # next_review_at = 2024-06-16 04:00 JST = 2024-06-15 19:00 UTC
-        expected = datetime(2024, 6, 15, 19, 0, 0, tzinfo=timezone.utc)
         actual_due_date = response.updated.due_date
         # due_date is the UTC date portion of next_review_at (2024-06-15 19:00 UTC)
         assert actual_due_date == "2024-06-15"
@@ -976,7 +975,7 @@ class TestReviewIntegration:
     def test_review_updates_due_date(self, review_service, sample_card):
         """Test that reviewing a card updates due date."""
         # Submit a review
-        review_response = review_service.submit_review(
+        review_service.submit_review(
             user_id="test-user-id",
             card_id="test-card-id",
             grade=4,

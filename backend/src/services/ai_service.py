@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Dict, List, Literal, Optional, Protocol, runtime_checkable
+from typing import Dict, List, Literal, Protocol, runtime_checkable
 
 # Type aliases
 DifficultyLevel = Literal["easy", "medium", "hard"]

@@ -19,7 +19,6 @@ from services.ai_service import (
     LearningAdvice,
     ReviewSummary,
 )
-from services.bedrock import BedrockService
 
 
 # =============================================================================

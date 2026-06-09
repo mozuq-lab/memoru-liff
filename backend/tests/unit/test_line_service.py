@@ -9,7 +9,6 @@ from unittest.mock import MagicMock, patch
 
 from services.line_service import (
     LineService,
-    LineEvent,
     verify_signature,
     SignatureVerificationError,
     LineApiError,

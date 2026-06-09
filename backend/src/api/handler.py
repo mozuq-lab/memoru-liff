@@ -13,7 +13,7 @@ from aws_lambda_powertools.event_handler import APIGatewayHttpResolver
 from aws_lambda_powertools.logging import correlation_paths
 from aws_lambda_powertools.utilities.typing import LambdaContext
 
-from api.shared import get_user_id_from_context, get_user_id_from_event, map_ai_error_to_http, make_validation_error_response
+from api.shared import get_user_id_from_event, map_ai_error_to_http
 from api.handlers.user_handler import router as user_router
 from api.handlers.cards_handler import router as cards_router
 from api.handlers.decks_handler import router as decks_router

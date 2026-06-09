@@ -4,7 +4,6 @@ Tests mode-specific prompt generation, card context injection,
 and language-matching instruction.
 """
 
-import pytest
 
 
 class TestGetSystemPrompt:

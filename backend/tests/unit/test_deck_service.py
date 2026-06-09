@@ -9,7 +9,6 @@ from services.deck_service import (
     DeckService,
     DeckNotFoundError,
     DeckLimitExceededError,
-    DeckServiceError,
 )
 
 
@@ -116,8 +115,8 @@ class TestCreateDeck:
 
     def test_create_deck_different_users(self, deck_service):
         """異なるユーザーのデッキは独立."""
-        deck1 = deck_service.create_deck(user_id="user-1", name="ユーザー1のデッキ")
-        deck2 = deck_service.create_deck(user_id="user-2", name="ユーザー2のデッキ")
+        deck_service.create_deck(user_id="user-1", name="ユーザー1のデッキ")
+        deck_service.create_deck(user_id="user-2", name="ユーザー2のデッキ")
 
         decks_user1 = deck_service.list_decks("user-1")
         decks_user2 = deck_service.list_decks("user-2")
@@ -337,7 +336,6 @@ class TestGetDeckDueCounts:
     def test_due_counts_with_due_cards(self, deck_service, dynamodb_tables):
         """due カードが存在する場合は正しいカウント."""
         cards_table = dynamodb_tables.Table("memoru-cards-test")
-        now = datetime.now(timezone.utc)
         past = datetime(2024, 1, 1, tzinfo=timezone.utc)
 
         # deck-1: 1枚 due、deck-2: 0枚 due

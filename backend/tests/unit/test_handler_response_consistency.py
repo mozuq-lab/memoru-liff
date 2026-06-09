@@ -8,7 +8,6 @@ RED フェーズ: PUT /users/me/settings と POST /users/me/unlink-line の両�
 """
 
 import json
-import pytest
 from unittest.mock import patch, MagicMock
 
 

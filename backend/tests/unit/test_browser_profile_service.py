@@ -2,12 +2,10 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from services.browser_profile_service import (
     BrowserProfileService,
     BrowserProfile,
-    BrowserProfileError,
 )
 
 

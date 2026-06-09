@@ -5,9 +5,7 @@ TASK-0053: AIService Protocol + 共通型定義 + 例外階層
 import asyncio
 import inspect
 import os
-import sys
-from dataclasses import fields
-from typing import get_args, get_type_hints
+from typing import get_args
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -357,7 +355,7 @@ class TestCreateAIService:
         """TC-FACT-003: USE_STRANDS 未設定時はデフォルトで BedrockAIService."""
         os.environ.pop("USE_STRANDS", None)
         mock_bedrock_cls.return_value = MagicMock()
-        result = create_ai_service()
+        create_ai_service()
         mock_bedrock_cls.assert_called_once()
 
     @patch.dict("os.environ", {"USE_STRANDS": "true"})
@@ -365,7 +363,7 @@ class TestCreateAIService:
     def test_create_explicit_false_overrides_env(self, mock_bedrock_cls):
         """TC-FACT-004: use_strands=False 明示パラメータが環境変数をオーバーライド."""
         mock_bedrock_cls.return_value = MagicMock()
-        result = create_ai_service(use_strands=False)
+        create_ai_service(use_strands=False)
         mock_bedrock_cls.assert_called_once()
 
     def test_create_explicit_true_overrides_env(self):
@@ -376,7 +374,7 @@ class TestCreateAIService:
 
         with patch.dict("os.environ", {"USE_STRANDS": "false"}):
             with patch.dict("sys.modules", {"services.strands_service": mock_strands_module}):
-                result = create_ai_service(use_strands=True)
+                create_ai_service(use_strands=True)
                 mock_strands_cls.assert_called_once()
 
     @patch("services.bedrock.BedrockService", side_effect=RuntimeError("init failed"))
@@ -402,7 +400,7 @@ class TestCreateAIService:
 
         with patch.dict("os.environ", {"USE_STRANDS": env_value}):
             with patch.dict("sys.modules", {"services.strands_service": mock_strands_module}):
-                result = create_ai_service()
+                create_ai_service()
                 mock_strands_cls.assert_called_once()
 
 

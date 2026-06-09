@@ -13,13 +13,12 @@ TASK-0046: notification_service.py の should_notify メソッドと process_not
 """
 
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from models.user import User
-from services.notification_service import NotificationService, NotificationResult
-from services.line_service import LineApiError
+from services.notification_service import NotificationService
 
 
 # ---------------------------------------------------------------------------

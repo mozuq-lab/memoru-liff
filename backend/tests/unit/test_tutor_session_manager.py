@@ -565,14 +565,6 @@ class TestConstructor:
         mock_boto3.resource.assert_called_once_with("dynamodb")
 
 
-# ===================================================================
-# Round-trip conversion test
-# ===================================================================
-
-
-class TestRoundTripConversion:
-    """Test message round-trip: Strands -> DynamoDB -> Strands."""
-
 class TestReadMessages:
     """Tests for DynamoDBSessionManager.read_messages."""
 

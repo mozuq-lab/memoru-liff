@@ -1,18 +1,13 @@
 """Unit tests for LINE account unlink functionality."""
 
-import os
-from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
 from moto import mock_aws
 import boto3
-from botocore.exceptions import ClientError
 
 from services.user_service import (
     UserService,
-    UserNotFoundError,
-    UserServiceError,
     LineNotLinkedError,
 )
 
@@ -149,7 +144,6 @@ class TestUnlinkLineAPIHandler:
 
     def test_unlink_line_function_calls_service(self):
         """Test that unlink_line function calls user_service.unlink_line with correct user_id."""
-        from unittest.mock import patch, MagicMock
         from api.handlers.user_handler import unlink_line
 
         # Setup: mock dependencies
@@ -184,7 +178,6 @@ class TestUnlinkLineAPIHandler:
 
     def test_unlink_line_function_handles_not_linked_error(self):
         """Test that unlink_line function handles LineNotLinkedError with 400 response."""
-        from unittest.mock import patch
         from api.handlers.user_handler import unlink_line
         from services.user_service import LineNotLinkedError
         import json

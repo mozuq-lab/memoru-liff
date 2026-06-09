@@ -1,8 +1,5 @@
 """Unit tests for user service."""
 
-import os
-from datetime import datetime
-from unittest.mock import MagicMock, patch
 
 import pytest
 from moto import mock_aws

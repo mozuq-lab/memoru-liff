@@ -5,7 +5,7 @@ import os
 import random
 import re
 import time
-from typing import List, Literal, Optional
+from typing import List, Optional
 
 import boto3
 from botocore.config import Config

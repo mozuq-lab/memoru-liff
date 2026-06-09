@@ -1,7 +1,7 @@
 """Notification service for sending review reminders."""
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import List, Optional
 # 【インポート追加】: タイムゾーン変換に Python 3.9+ 標準ライブラリの zoneinfo を使用 🔵
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError

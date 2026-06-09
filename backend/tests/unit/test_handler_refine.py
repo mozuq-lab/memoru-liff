@@ -3,11 +3,9 @@
 import json
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from services.ai_service import (
     AIParseError,
-    AIServiceError,
     AITimeoutError,
     AIRateLimitError,
     AIProviderError,
