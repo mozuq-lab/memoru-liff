@@ -313,6 +313,68 @@ describe('GeneratePage', () => {
       });
     });
 
+    // F-4: 途中失敗で部分保存 + 再試行重複の防止
+    it('途中失敗時に部分保存メッセージを表示し、再試行では未保存分のみ送信する', async () => {
+      const user = userEvent.setup();
+      mockGenerateCards.mockResolvedValue({
+        generated_cards: [
+          { front: '質問1', back: '回答1', suggested_tags: [] },
+          { front: '質問2', back: '回答2', suggested_tags: [] },
+        ],
+        generation_info: { input_length: 10, model_used: 'test', processing_time_ms: 100 },
+      });
+      // 1枚目は成功、2枚目は失敗
+      mockCreateCard
+        .mockResolvedValueOnce({})
+        .mockRejectedValueOnce(new Error('Save Error'));
+
+      renderGeneratePage();
+
+      await user.type(screen.getByTestId('input-text'), 'テスト用のテキストです');
+      await user.click(screen.getByTestId('generate-button'));
+
+      await waitFor(() => {
+        expect(screen.getAllByLabelText('カードを選択')).toHaveLength(2);
+      });
+
+      // 両方のカードを選択
+      const toggles = screen.getAllByLabelText('カードを選択');
+      await user.click(toggles[0]);
+      await user.click(toggles[1]);
+
+      expect(screen.getByTestId('selected-count')).toHaveTextContent('2枚選択中');
+
+      await user.click(screen.getByTestId('save-button'));
+
+      // 【部分保存メッセージ】: 2枚中1枚保存
+      await waitFor(() => {
+        expect(
+          screen.getByText('2枚中1枚保存しました。残りを再試行してください。'),
+        ).toBeInTheDocument();
+      });
+      expect(mockNavigate).not.toHaveBeenCalled();
+
+      // 【保存済みカードの除去】: 成功した1枚目は一覧・選択集合から除かれる
+      expect(screen.getByTestId('selected-count')).toHaveTextContent('1枚選択中');
+      expect(screen.queryByText('質問1')).not.toBeInTheDocument();
+      expect(screen.getByText('質問2')).toBeInTheDocument();
+
+      // 【再試行】: 2回目の保存で残りの未保存カードのみ送信されることを検証
+      mockCreateCard.mockClear();
+      mockCreateCard.mockResolvedValue({});
+      await user.click(screen.getByTestId('save-button'));
+
+      await waitFor(() => {
+        expect(mockCreateCard).toHaveBeenCalledTimes(1);
+      });
+      expect(mockCreateCard).toHaveBeenCalledWith({
+        front: '質問2',
+        back: '回答2',
+        tags: [],
+      });
+      expect(mockNavigate).toHaveBeenCalledWith('/cards', expect.any(Object));
+    });
+
     it('選択がない場合は保存ボタンが無効', async () => {
       const user = userEvent.setup();
       mockGenerateCards.mockResolvedValue({

@@ -212,9 +212,13 @@ export const GeneratePage = () => {
     const cardsToSave = generatedCards.filter(c => selectedCards.has(c.tempId));
     if (cardsToSave.length === 0) return;
 
+    const totalCount = cardsToSave.length;
     setIsSaving(true);
     setError(null);
 
+    // F-4: 途中失敗時の部分保存・再試行による二重登録を防ぐため、
+    //      保存成功した tempId を逐次 selectedCards/generatedCards から除去する
+    let savedCount = 0;
     try {
       for (const card of cardsToSave) {
         const request: CreateCardRequest = {
@@ -227,10 +231,26 @@ export const GeneratePage = () => {
             : {}),
         };
         await cardsApi.createCard(request);
+        savedCount += 1;
+        // 【保存済みカードの除去】: 成功したカードは選択集合・一覧から取り除く
+        // → 再試行時は未保存分のみが送信される
+        setSelectedCards(prev => {
+          const next = new Set(prev);
+          next.delete(card.tempId);
+          return next;
+        });
+        setGeneratedCards(prev => prev.filter(c => c.tempId !== card.tempId));
       }
-      navigate('/cards', { state: { message: `${cardsToSave.length}枚のカードを保存しました` } });
+      navigate('/cards', { state: { message: `${totalCount}枚のカードを保存しました` } });
     } catch {
-      setError('カードの保存に失敗しました。もう一度お試しください。');
+      // F-4: 部分保存の状況を提示。残りは未保存のまま選択集合に残るため再試行で重複しない
+      if (savedCount > 0) {
+        setError(
+          `${totalCount}枚中${savedCount}枚保存しました。残りを再試行してください。`,
+        );
+      } else {
+        setError('カードの保存に失敗しました。もう一度お試しください。');
+      }
     } finally {
       setIsSaving(false);
     }
