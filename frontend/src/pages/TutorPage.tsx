@@ -34,6 +34,8 @@ export const TutorPage = () => {
   const [view, setView] = useState<PageView>("mode-select");
   const [showEndConfirm, setShowEndConfirm] = useState(false);
   const [resumeChecked, setResumeChecked] = useState(false);
+  // F-2: 直前に選択したモードを保持し、開始失敗時の「再試行」で再実行する
+  const [lastMode, setLastMode] = useState<LearningMode | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // T020: セッション継続ロジック — マウント時にアクティブセッションを確認
@@ -72,7 +74,18 @@ export const TutorPage = () => {
 
   const handleModeSelect = async (mode: LearningMode) => {
     setPendingModeSwitch(false);
+    setLastMode(mode);
     await startSession(deckId, mode);
+  };
+
+  // F-2: セッション開始失敗時の再試行 — 直前に選択したモードで startSession を再実行する
+  const handleRetryStart = async () => {
+    if (!lastMode) {
+      clearError();
+      return;
+    }
+    setPendingModeSwitch(false);
+    await startSession(deckId, lastMode);
   };
 
   const handleSendMessage = async (content: string) => {
@@ -177,7 +190,10 @@ export const TutorPage = () => {
           {isLoading && <Loading message="セッションを準備中..." />}
           {error && (
             <div className="mb-4">
-              <Error message={error} onRetry={clearError} />
+              <Error
+                message={error}
+                onRetry={lastMode ? handleRetryStart : clearError}
+              />
             </div>
           )}
           {/* T034: 空デッキメッセージ */}
