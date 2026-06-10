@@ -149,7 +149,8 @@ except httpx.HTTPError as e:   # RequestError と HTTPStatusError の共通親
 | N-7（URL fetch サイズ上限） | ✅ **対応済み**（77a32f5） |
 | N-5 / N-8 / C-2〜C-7 / #9〜#16 / N-9 | ⬜ 未対応のまま |
 | CDK H-1 / H-2 / M-1〜M-4 / L-1〜L-3 | ⬜ すべて未対応のまま |
-| フロント S-1 / S-2 / A-1〜A-3 / E-3 / Q-3 / #16 | ⬜ 未対応（E-1 のみ部分対応: `GeneratePage.tsx:175` と `TutorContext.tsx:119,167` に生メッセージ露出が残存） |
+| フロント S-1 / S-2 / A-1〜A-3 | ✅ **2026-06-10 対応済み**（下記「対応状況」参照）。⚠️ **S-1 は指摘自体を訂正**: oidc-client-ts の `userStore` 既定値は localStorage ではなく **sessionStorage**（旧 `oidc-client` との混同による誤指摘）。トークンは元々タブ単位の sessionStorage 保存だった。対応としては既定依存をやめ `userStore` を明示設定 |
+| フロント E-3 / Q-3 / #16 | ⬜ 未対応（E-1 のみ部分対応: `GeneratePage.tsx:175` と `TutorContext.tsx:119,167` に生メッセージ露出が残存） |
 
 ---
 
@@ -191,4 +192,5 @@ except httpx.HTTPError as e:   # RequestError と HTTPStatusError の共通親
 | I-5 | ✅ 修正済み | ruff 違反 112 件（src 16 + tests 96）を解消し、CI に ruff + mypy を有効化。N-9 も同時解消（pyproject.toml に mypy 設定、実型エラー 44 件修正）。副産物として tutor SessionManager 復元の timestamp ValidationError（潜在バグ）を発見・修正 |
 | I-6 | ✅ 修正済み | ci.yml に infrastructure-test job（build + test + cdk synth）を追加 |
 | I-1 / I-2 | ⬜ 要ユーザー対応 | prod samconfig への実値設定が必要: `LineChannelId`（LINE Developer Console の値）、実ドメインの `OidcIssuer`、`OidcAudience`、Tutor 提供時は `UseStrands=true`（+ AgentCore 利用なら `TutorSessionBackend`/`AgentCoreMemoryId`）。コードでは対応不可のため運用設定で対応 |
+| S-1 / S-2 / A-1〜A-3 | ✅ 対応済み (2026-06-10) | 認証基盤セット対応。**S-1 は誤指摘と判明**（oidc-client-ts 既定は sessionStorage）→ `userStore` を明示設定に変更。S-2: `/silent-renew` ルート + `signinSilentCallback` を実装。A-3: `onUserChanged`（userLoaded/userUnloaded/accessTokenExpired）を useAuth が購読しトークン更新・失効を状態へ反映。A-1: logout 失敗時に `removeUser()` でローカルトークンを必ず破棄。A-2: 手動 `addAccessTokenExpiring` リフレッシュを削除し、更新起点を automaticSilentRenew + API 401 リトライの 2 経路に集約 |
 | F-6〜F-9 / I-4 / I-7〜I-11 | ⬜ 未対応 | Low 群。別途フォローアップ |

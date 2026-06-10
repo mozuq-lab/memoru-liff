@@ -5,6 +5,7 @@
  * 🔵 青信号: 要件定義2.1入力パラメータに基づく
  */
 import type { UserManagerSettings } from 'oidc-client-ts';
+import { WebStorageStateStore } from 'oidc-client-ts';
 
 // 【定数定義】: 環境変数から取得する設定値
 // 🔵 青信号: 要件定義の環境変数仕様に基づく
@@ -69,6 +70,14 @@ export const oidcConfig: UserManagerSettings = {
   automaticSilentRenew: true,
 
   // 【silent_redirect_uri設定】: サイレントリフレッシュ用URL
-  // 🔵 青信号: oidc-client-ts標準設定
+  // refresh_token がある場合は iframe を使わず直接更新されるが、
+  // 無い場合の iframe フォールバック先として /silent-renew ルートを用意する (S-2)
   silent_redirect_uri: `${window.location.origin}/silent-renew`,
+
+  // 【userStore設定】: トークンの保存先を sessionStorage に明示固定 (S-1)
+  // oidc-client-ts の既定値も sessionStorage だが、ライブラリ更新で
+  // 暗黙の既定が変わるリスクを避けるため明示する。
+  // localStorage は使用しない（XSS 時の永続的なトークン窃取を避けるため、
+  // タブ単位・セッション単位の sessionStorage に留める）。
+  userStore: new WebStorageStateStore({ store: window.sessionStorage }),
 };

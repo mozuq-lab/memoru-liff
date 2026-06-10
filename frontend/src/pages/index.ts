@@ -6,6 +6,7 @@ export { CardDetailPage } from "./CardDetailPage";
 export { SettingsPage } from "./SettingsPage";
 export { LinkLinePage } from "./LinkLinePage";
 export { CallbackPage } from "./CallbackPage";
+export { SilentRenewPage } from "./SilentRenewPage";
 export { ReviewPage } from "./ReviewPage";
 export { StatsPage } from "./StatsPage";
 export { TutorPage } from "./TutorPage";
