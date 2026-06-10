@@ -215,6 +215,112 @@ class TestUserServiceLinkLine:
         assert user.line_user_id == "Uoriginal"
 
 
+class TestUserServiceLinkLineLock:
+    """C-6: Tests for the per-line_user_id lock-item uniqueness constraint."""
+
+    def _lock_id(self, line_user_id: str) -> str:
+        return f"LINELINK#{line_user_id}"
+
+    def test_link_creates_lock_item_without_line_user_id_attr(
+        self, user_service, dynamodb_table
+    ):
+        """link_line がロックアイテムを作成し、line_user_id 属性を持たないことを確認。"""
+        table = dynamodb_table.Table("memoru-users-test")
+        table.put_item(Item={"user_id": "user-1", "created_at": "2024-01-01T00:00:00"})
+
+        line_user_id = "U1234567890abcdef1234567890abcdef"
+        user_service.link_line("user-1", line_user_id)
+
+        lock = table.get_item(Key={"user_id": self._lock_id(line_user_id)})["Item"]
+        assert lock["linked_user_id"] == "user-1"
+        # get_linked_users の Scan FilterExpression に引っかからないこと
+        assert "line_user_id" not in lock
+
+    def test_lock_item_excluded_from_linked_users(self, user_service, dynamodb_table):
+        """ロックアイテムは get_linked_users の結果に含まれないことを確認。"""
+        table = dynamodb_table.Table("memoru-users-test")
+        table.put_item(Item={"user_id": "user-1", "created_at": "2024-01-01T00:00:00"})
+        line_user_id = "U1234567890abcdef1234567890abcdef"
+        user_service.link_line("user-1", line_user_id)
+
+        linked = user_service.get_linked_users()
+        ids = {u.user_id for u in linked}
+        assert ids == {"user-1"}
+
+    def test_concurrent_link_second_user_rejected_via_lock(
+        self, user_service, dynamodb_table
+    ):
+        """GSI 事前チェックをすり抜けても、ロックアイテムで 2 人目が弾かれることを確認。
+
+        GSI 事前チェックは「すり抜けた」状況をシミュレートするため、先にロックアイテム
+        だけを別ユーザー名義で直接書き込み（= user-1 が link 中で GSI にはまだ反映前の
+        レース状態を再現）、user-2 の link が transact 衝突で
+        LineUserIdAlreadyUsedError になることを検証する。
+        """
+        table = dynamodb_table.Table("memoru-users-test")
+        line_user_id = "U1234567890abcdef1234567890abcdef"
+        # user-1 が先にロックを取得済み（GSI にはまだ line_user_id が無い状態）
+        table.put_item(
+            Item={
+                "user_id": self._lock_id(line_user_id),
+                "linked_user_id": "user-1",
+                "created_at": "2024-01-01T00:00:00",
+            }
+        )
+        table.put_item(Item={"user_id": "user-2", "created_at": "2024-01-01T00:00:00"})
+
+        # GSI 事前チェックは通過する（line_user_id 属性を持つユーザーが存在しないため）が、
+        # ロックアイテムの ConditionExpression で transact がキャンセルされる
+        with pytest.raises(LineUserIdAlreadyUsedError):
+            user_service.link_line("user-2", line_user_id)
+
+    def test_relink_same_user_succeeds_with_lock(self, user_service, dynamodb_table):
+        """同一ユーザーの再リンクはロックアイテムがあっても成功することを確認。"""
+        table = dynamodb_table.Table("memoru-users-test")
+        table.put_item(Item={"user_id": "user-1", "created_at": "2024-01-01T00:00:00"})
+        line_user_id = "U1234567890abcdef1234567890abcdef"
+
+        user_service.link_line("user-1", line_user_id)
+        # 2 回目の同一リンク
+        user = user_service.link_line("user-1", line_user_id)
+        assert user.line_user_id == line_user_id
+
+    def test_unlink_allows_relink_by_another_user(self, user_service, dynamodb_table):
+        """unlink 後はロックが解放され、別ユーザーが同じ line_user_id を link 可能。"""
+        table = dynamodb_table.Table("memoru-users-test")
+        table.put_item(Item={"user_id": "user-1", "created_at": "2024-01-01T00:00:00"})
+        table.put_item(Item={"user_id": "user-2", "created_at": "2024-01-01T00:00:00"})
+        line_user_id = "U1234567890abcdef1234567890abcdef"
+
+        user_service.link_line("user-1", line_user_id)
+        user_service.unlink_line("user-1")
+
+        # ロックが解放されたので user-2 が link できる
+        user = user_service.link_line("user-2", line_user_id)
+        assert user.line_user_id == line_user_id
+        lock = table.get_item(Key={"user_id": self._lock_id(line_user_id)})["Item"]
+        assert lock["linked_user_id"] == "user-2"
+
+    def test_unlink_legacy_user_without_lock_item(self, user_service, dynamodb_table):
+        """レガシー（ロックアイテム無しで line_user_id だけ持つ）ユーザーの unlink が成功。"""
+        from services.user_service import LineNotLinkedError  # noqa: F401
+
+        table = dynamodb_table.Table("memoru-users-test")
+        line_user_id = "U1234567890abcdef1234567890abcdef"
+        table.put_item(
+            Item={
+                "user_id": "legacy-user",
+                "line_user_id": line_user_id,
+                "created_at": "2024-01-01T00:00:00",
+            }
+        )
+
+        # ロックアイテムは存在しないが Delete の ConditionExpression が
+        # attribute_not_exists を許容するため成功する
+        user = user_service.unlink_line("legacy-user")
+        assert user.line_user_id is None
+
+
 class TestUserServiceUpdateSettings:
     """Tests for UserService.update_settings method."""
 

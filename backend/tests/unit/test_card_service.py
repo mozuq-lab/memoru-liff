@@ -223,6 +223,14 @@ def card_service(dynamodb_table):
         return {}
 
     service._client.transact_write_items = mock_transact_write_items
+
+    # C-7: 既存テストは deck_id の実在検証を対象としないため、検証を素通しする
+    # スタブ DeckService を注入する（deck 検証専用テストは別フィクスチャで行う）。
+    from unittest.mock import MagicMock
+
+    stub_deck_service = MagicMock()
+    stub_deck_service.get_deck.return_value = MagicMock()
+    service._deck_service = stub_deck_service
     return service
 
 

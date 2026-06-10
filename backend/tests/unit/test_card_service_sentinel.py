@@ -62,6 +62,14 @@ def dynamodb_setup():
             reviews_table_name="test-reviews",
         )
 
+        # C-7: 本テストは deck_id の SET/REMOVE 式の組み立てが対象で、
+        # deck の実在検証は対象外のため、検証を素通しするスタブを注入する。
+        from unittest.mock import MagicMock
+
+        stub_deck_service = MagicMock()
+        stub_deck_service.get_deck.return_value = MagicMock()
+        service._deck_service = stub_deck_service
+
         # Create a test user with card_count
         users_table = dynamodb.Table("test-users")
         users_table.put_item(Item={"user_id": "user-1", "card_count": 1})

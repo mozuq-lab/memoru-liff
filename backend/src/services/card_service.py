@@ -60,6 +60,7 @@ class CardService:
         dynamodb_resource=None,
         users_table_name: Optional[str] = None,
         reviews_table_name: Optional[str] = None,
+        deck_service=None,
     ):
         """Initialize CardService.
 
@@ -99,6 +100,24 @@ class CardService:
         else:
             self._client = boto3.client("dynamodb")
 
+        # 【C-7: deck_id 存在・所有検証用】DeckService をオプション注入する。
+        # 未注入時は使用時に遅延生成してキャッシュする（同一 dynamodb_resource を共有）。
+        # 循環 import 回避: DeckService は CardService を import していないため
+        # トップレベル import で問題ないが、生成も使用時まで遅延させて副作用を最小化する。
+        self._deck_service = deck_service
+        self._dynamodb_resource_arg = dynamodb_resource
+
+    def _get_deck_service(self):
+        """Lazily construct (and cache) a DeckService for deck validation (C-7)."""
+        if self._deck_service is None:
+            from .deck_service import DeckService
+
+            self._deck_service = DeckService(
+                cards_table_name=self.table_name,
+                dynamodb_resource=self._dynamodb_resource_arg,
+            )
+        return self._deck_service
+
     def create_card(
         self,
         user_id: str,
@@ -123,7 +142,14 @@ class CardService:
 
         Raises:
             CardLimitExceededError: If user exceeds card limit.
+            DeckNotFoundError: If deck_id is given but does not exist / is not owned.
         """
+        # 【C-7: deck_id 存在・所有検証】指定された deck_id が実在し当該ユーザーの
+        # 所有であることを確認する。dangling reference（集計/Tutor 対象から漏れる
+        # カード）を防ぐ。DeckNotFoundError はそのまま呼び出し元へ伝播させる。
+        if deck_id is not None:
+            self._get_deck_service().get_deck(user_id, deck_id)
+
         now = datetime.now(timezone.utc)
         card = Card(
             user_id=user_id,
@@ -255,6 +281,11 @@ class CardService:
         """
         # Verify card exists
         card = self.get_card(user_id, card_id)
+
+        # 【C-7: deck_id 存在・所有検証】実デッキへの変更時のみ検証する。
+        # _UNSET（変更なし）と None（デッキ解除）は検証不要。
+        if deck_id is not _UNSET and deck_id is not None:
+            self._get_deck_service().get_deck(user_id, deck_id)
 
         # Build update expression
         update_parts = []

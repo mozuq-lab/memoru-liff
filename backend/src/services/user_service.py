@@ -53,16 +53,25 @@ class UserService:
         """
         self.table_name = table_name or os.environ.get("USERS_TABLE", "memoru-users-dev")
 
+        endpoint_url = os.environ.get("DYNAMODB_ENDPOINT_URL") or os.environ.get("AWS_ENDPOINT_URL")
         if dynamodb_resource:
             self.dynamodb = dynamodb_resource
         else:
-            endpoint_url = os.environ.get("DYNAMODB_ENDPOINT_URL") or os.environ.get("AWS_ENDPOINT_URL")
             if endpoint_url:
                 self.dynamodb = boto3.resource("dynamodb", endpoint_url=endpoint_url)
             else:
                 self.dynamodb = boto3.resource("dynamodb")
 
         self.table = self.dynamodb.Table(self.table_name)
+
+        # 低レベルクライアント: transact_write_items 用 (C-6 link/unlink ロック)。
+        # boto3.resource().meta.client はリソース層の型変換イベントハンドラーを含むため、
+        # 低レベル DynamoDB JSON ({"S": ...}) を二重シリアライズしてしまう。
+        # 直接 boto3.client() を使うことで回避する (card_service.py と同一パターン)。
+        if endpoint_url:
+            self._client = boto3.client("dynamodb", endpoint_url=endpoint_url)
+        else:
+            self._client = boto3.client("dynamodb")
 
     def get_user(self, user_id: str) -> User:
         """Get user by user_id.
@@ -131,10 +140,22 @@ class UserService:
         except UserNotFoundError:
             return self.create_user(user_id, display_name, picture_url)
 
+    @staticmethod
+    def _link_lock_id(line_user_id: str) -> str:
+        """Build the lock-item user_id for a line_user_id.
+
+        C-6: GSI は一意制約ではないため、同一 line_user_id を別ユーザーが
+        同時に link すると両方成功してしまう。これを防ぐため、Users テーブル内に
+        `LINELINK#{line_user_id}` をキーとするロックアイテムを置き、
+        TransactWriteItems でユーザー行更新とアトミックに排他制御する。
+        """
+        return f"LINELINK#{line_user_id}"
+
     def link_line(self, user_id: str, line_user_id: str) -> User:
         """Link LINE account to user.
 
-        Uses ConditionExpression for atomic update to prevent race conditions.
+        C-6: Uses TransactWriteItems with a per-line_user_id lock item to enforce
+        a true uniqueness constraint that the GSI cannot provide.
 
         Args:
             user_id: The user's unique identifier.
@@ -148,7 +169,10 @@ class UserService:
             UserAlreadyLinkedError: If user is already linked to a different LINE account.
             LineUserIdAlreadyUsedError: If LINE user ID is already used by another user.
         """
-        # Check if LINE user ID is already used by another user (via GSI)
+        # Check if LINE user ID is already used by another user (via GSI).
+        # GSI 事前チェックはレガシーデータ（ロックアイテム無しで line_user_id だけ
+        # 持つ既存ユーザー）への対応 + 早期エラーのために残す。一意性の最終保証は
+        # 下の TransactWriteItems が担う。
         existing_user = self.get_user_by_line_id(line_user_id)
         if existing_user and existing_user.user_id != user_id:
             raise LineUserIdAlreadyUsedError("LINE user ID is already linked to another account")
@@ -156,26 +180,67 @@ class UserService:
         # Verify user exists
         user = self.get_user(user_id)
 
-        # Atomic update with ConditionExpression:
-        # - attribute_not_exists(line_user_id): first-time linking
-        # - line_user_id = :line_id: re-linking the same LINE ID
+        now = datetime.now(dt_timezone.utc)
+        lock_id = self._link_lock_id(line_user_id)
+        client = self._client
         try:
-            now = datetime.now(dt_timezone.utc)
-            self.table.update_item(
-                Key={"user_id": user_id},
-                UpdateExpression="SET line_user_id = :line_id, updated_at = :updated_at",
-                ConditionExpression="attribute_not_exists(line_user_id) OR line_user_id = :line_id",
-                ExpressionAttributeValues={
-                    ":line_id": line_user_id,
-                    ":updated_at": now.isoformat(),
-                },
+            # 低レベル client API のため属性値は {"S": ...} 形式を使う。
+            client.transact_write_items(
+                TransactItems=[
+                    {
+                        # ロックアイテム: 同一 line_user_id を所有できるのは 1 ユーザーのみ。
+                        # 同一ユーザーの再リンク（linked_user_id == :uid）は許容する。
+                        # NOTE: line_user_id 属性は持たせない。get_linked_users の Scan
+                        # FilterExpression (attribute_exists(line_user_id)) に
+                        # 誤ってヒットさせないため。
+                        "Put": {
+                            "TableName": self.table.name,
+                            "Item": {
+                                "user_id": {"S": lock_id},
+                                "linked_user_id": {"S": user_id},
+                                "created_at": {"S": now.isoformat()},
+                            },
+                            "ConditionExpression": (
+                                "attribute_not_exists(user_id) OR linked_user_id = :uid"
+                            ),
+                            "ExpressionAttributeValues": {":uid": {"S": user_id}},
+                        }
+                    },
+                    {
+                        # ユーザー行: 既存 ConditionExpression と同一。
+                        # 別 line_user_id への上書きを禁止し、再リンクは許容する。
+                        "Update": {
+                            "TableName": self.table.name,
+                            "Key": {"user_id": {"S": user_id}},
+                            "UpdateExpression": (
+                                "SET line_user_id = :line_id, updated_at = :updated_at"
+                            ),
+                            "ConditionExpression": (
+                                "attribute_not_exists(line_user_id) OR line_user_id = :line_id"
+                            ),
+                            "ExpressionAttributeValues": {
+                                ":line_id": {"S": line_user_id},
+                                ":updated_at": {"S": now.isoformat()},
+                            },
+                        }
+                    },
+                ]
             )
             user.line_user_id = line_user_id
             user.updated_at = now
             return user
         except ClientError as e:
-            if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
-                raise UserAlreadyLinkedError("User is already linked to a LINE account")
+            if e.response["Error"]["Code"] == "TransactionCanceledException":
+                reasons = e.response.get("CancellationReasons", [])
+                # Index 0 = ロックアイテム Put: 別ユーザーが先に line_user_id を取得済み
+                if reasons and reasons[0].get("Code") == "ConditionalCheckFailed":
+                    raise LineUserIdAlreadyUsedError(
+                        "LINE user ID is already linked to another account"
+                    )
+                # Index 1 = ユーザー行 Update: 別 line_user_id に既に連携済み
+                if len(reasons) > 1 and reasons[1].get("Code") == "ConditionalCheckFailed":
+                    raise UserAlreadyLinkedError("User is already linked to a LINE account")
+                raise UserServiceError(f"Failed to link LINE account: {e}")
             raise UserServiceError(f"Failed to link LINE account: {e}")
 
     def get_user_by_line_id(self, line_user_id: str) -> Optional[User]:
@@ -355,15 +420,53 @@ class UserService:
         """
         now = datetime.now(dt_timezone.utc)
 
+        # 現在の line_user_id を取得（ロックアイテムのキー導出に必要）。
+        # get_user は user_id 直接指定のため LINELINK# アイテムを誤って読むことはない。
+        # 存在しないユーザーは「LINE 未連携」と同義として LineNotLinkedError に変換する
+        # （旧実装の ConditionExpression attribute_exists(line_user_id) 失敗時と同じ挙動）。
         try:
-            self.table.update_item(
-                Key={"user_id": user_id},
-                UpdateExpression="REMOVE line_user_id SET updated_at = :now",
-                ConditionExpression="attribute_exists(line_user_id)",
-                ExpressionAttributeValues={":now": now.isoformat()},
+            user = self.get_user(user_id)
+        except UserNotFoundError:
+            raise LineNotLinkedError("LINE account not linked to this user")
+        if not user.line_user_id:
+            raise LineNotLinkedError("LINE account not linked to this user")
+
+        lock_id = self._link_lock_id(user.line_user_id)
+        client = self._client
+        try:
+            client.transact_write_items(
+                TransactItems=[
+                    {
+                        # ユーザー行から line_user_id を REMOVE。
+                        "Update": {
+                            "TableName": self.table.name,
+                            "Key": {"user_id": {"S": user_id}},
+                            "UpdateExpression": "REMOVE line_user_id SET updated_at = :now",
+                            "ConditionExpression": "attribute_exists(line_user_id)",
+                            "ExpressionAttributeValues": {":now": {"S": now.isoformat()}},
+                        }
+                    },
+                    {
+                        # ロックアイテムを削除。
+                        # レガシー（ロックアイテム無し）でも成功するよう、
+                        # attribute_not_exists(user_id) を許容条件に含める。
+                        "Delete": {
+                            "TableName": self.table.name,
+                            "Key": {"user_id": {"S": lock_id}},
+                            "ConditionExpression": (
+                                "attribute_not_exists(user_id) OR linked_user_id = :uid"
+                            ),
+                            "ExpressionAttributeValues": {":uid": {"S": user_id}},
+                        }
+                    },
+                ]
             )
             return self.get_user(user_id)
         except ClientError as e:
-            if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
-                raise LineNotLinkedError("LINE account not linked to this user")
+            if e.response["Error"]["Code"] == "TransactionCanceledException":
+                reasons = e.response.get("CancellationReasons", [])
+                # Index 0 = ユーザー行 Update: line_user_id が存在しない
+                if reasons and reasons[0].get("Code") == "ConditionalCheckFailed":
+                    raise LineNotLinkedError("LINE account not linked to this user")
+                raise UserServiceError(f"Failed to unlink LINE account: {e}")
             raise UserServiceError(f"Failed to unlink LINE account: {e}")
