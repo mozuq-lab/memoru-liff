@@ -17,6 +17,7 @@ from services.card_service import (
     CardNotFoundError,
     CardLimitExceededError,
 )
+from services.deck_service import DeckNotFoundError
 
 logger = Logger()
 tracer = Tracer()
@@ -106,6 +107,13 @@ def create_card():
             content_type=content_types.APPLICATION_JSON,
             body=json.dumps({"error": "Card limit exceeded. Maximum 2000 cards per user."}),
         )
+    except DeckNotFoundError:
+        # C-7: 存在しない/他人の deck_id はボディパラメータ不正のため 400
+        return Response(
+            status_code=400,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"code": "invalid_deck", "error": "指定されたデッキが存在しません"}),
+        )
     except Exception as e:
         logger.error("Error creating card", extra={"error": str(e)})
         raise
@@ -173,6 +181,13 @@ def update_card(card_id: str):
         return card.to_response().model_dump(mode="json")
     except CardNotFoundError:
         raise NotFoundError(f"Card not found: {card_id}")
+    except DeckNotFoundError:
+        # C-7: 存在しない/他人の deck_id はボディパラメータ不正のため 400
+        return Response(
+            status_code=400,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"code": "invalid_deck", "error": "指定されたデッキが存在しません"}),
+        )
     except Exception as e:
         logger.error("Error updating card", extra={"card_id": card_id, "error": str(e)})
         raise

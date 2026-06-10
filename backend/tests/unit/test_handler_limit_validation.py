@@ -11,6 +11,56 @@ from unittest.mock import patch
 
 from models.review import DueCardsResponse
 from services.review_service import ConcurrentReviewError
+from services.deck_service import DeckNotFoundError
+
+
+class TestCardDeckValidationHandler:
+    """C-7: create/update card with invalid deck_id -> 400 invalid_deck."""
+
+    def test_create_card_invalid_deck_returns_400(
+        self, api_gateway_event, lambda_context
+    ):
+        """存在しない/他人の deck_id での作成は 400 (invalid_deck)。"""
+        event = api_gateway_event(
+            method="POST",
+            path="/cards",
+            body={"front": "Q", "back": "A", "deck_id": "missing"},
+        )
+
+        with patch("api.handlers.cards_handler.card_service") as mock_service, patch(
+            "api.handlers.cards_handler.user_service"
+        ):
+            mock_service.create_card.side_effect = DeckNotFoundError("not found")
+            from api.handler import handler
+
+            response = handler(event, lambda_context)
+
+        assert response["statusCode"] == 400
+        body = json.loads(response["body"])
+        assert body["code"] == "invalid_deck"
+
+    def test_update_card_invalid_deck_returns_400(
+        self, api_gateway_event, lambda_context
+    ):
+        """存在しない/他人の deck_id への変更は 400 (invalid_deck)。"""
+        event = api_gateway_event(
+            method="PUT",
+            path="/cards/card-1",
+            path_parameters={"card_id": "card-1"},
+            body={"deck_id": "missing"},
+        )
+
+        with patch("api.handlers.cards_handler.card_service") as mock_service, patch(
+            "api.handlers.cards_handler.user_service"
+        ):
+            mock_service.update_card.side_effect = DeckNotFoundError("not found")
+            from api.handler import handler
+
+            response = handler(event, lambda_context)
+
+        assert response["statusCode"] == 400
+        body = json.loads(response["body"])
+        assert body["code"] == "invalid_deck"
 
 
 class TestListCardsLimitValidation:
