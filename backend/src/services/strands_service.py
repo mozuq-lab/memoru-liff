@@ -13,6 +13,7 @@ import time
 from contextlib import contextmanager
 from typing import Generator, List
 
+from aws_lambda_powertools import Logger
 from strands import Agent
 from strands.models import BedrockModel, Model
 
@@ -62,6 +63,8 @@ _DEFAULT_OLLAMA_MODEL = "llama3.2"
 _MODEL_USED_BEDROCK = "strands_bedrock"
 _MODEL_USED_OLLAMA = "strands_ollama"
 
+logger = Logger()
+
 
 @contextmanager
 def _handle_ai_errors() -> Generator[None, None, None]:
@@ -102,6 +105,10 @@ class StrandsAIService:
         model: Strands モデルプロバイダーインスタンス。
         model_used: model_used フィールドに使用するプロバイダー識別子。
     """
+
+    # C-4: 1 リクエストあたりの chunk → Bedrock 呼び出し回数のハード上限。
+    # 巨大ページで chunk 数に比例してコスト/時間が無制限に増えるのを防ぐ。
+    MAX_CHUNK_CALLS = 8
 
     def __init__(self, environment: str | None = None) -> None:
         """StrandsAIService を初期化する.
@@ -292,8 +299,24 @@ class StrandsAIService:
         # Distribute target count across chunks
         cards_per_chunk = max(3, target_count // max(len(chunks), 1))
 
+        # C-4: bound Bedrock calls. Stop once we have enough cards and never
+        # exceed MAX_CHUNK_CALLS chunk invocations.
+        processed_chunks = 0
+        total_chunks = len(chunks)
         with _handle_ai_errors():
             for chunk_text in chunks:
+                if len(all_cards) >= target_count:
+                    break
+                if processed_chunks >= self.MAX_CHUNK_CALLS:
+                    logger.warning(
+                        "Chunk call cap reached; skipping remaining chunks",
+                        extra={
+                            "processed_chunks": processed_chunks,
+                            "total_chunks": total_chunks,
+                            "max_chunk_calls": self.MAX_CHUNK_CALLS,
+                        },
+                    )
+                    break
                 user_prompt = get_url_card_generation_prompt(
                     chunk_text=chunk_text,
                     card_count=cards_per_chunk,
@@ -307,6 +330,7 @@ class StrandsAIService:
                     model=self.model,
                     system_prompt=URL_CARD_GENERATION_SYSTEM_PROMPT,
                 )
+                processed_chunks += 1
                 response = agent(user_prompt)
 
                 response_text = str(response)

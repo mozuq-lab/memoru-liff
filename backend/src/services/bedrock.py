@@ -8,6 +8,7 @@ import time
 from typing import List, Optional
 
 import boto3
+from aws_lambda_powertools import Logger
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
@@ -26,6 +27,8 @@ from services.ai_service import (
     LearningAdvice,
     RefineResult,
 )
+
+logger = Logger()
 
 
 class BedrockServiceError(AIServiceError):
@@ -66,6 +69,9 @@ class BedrockService:
     DEFAULT_TEMPERATURE = 0.7
     DEFAULT_TIMEOUT = 30
     MAX_RETRIES = 2
+    # C-4: Hard cap on per-request chunk → Bedrock invocations. A huge page can
+    # produce many chunks; without a cap, cost/latency grows unboundedly.
+    MAX_CHUNK_CALLS = 8
 
     def __init__(
         self,
@@ -176,7 +182,23 @@ class BedrockService:
         total_input_length = sum(len(c) for c in chunks)
         cards_per_chunk = max(3, target_count // max(len(chunks), 1))
 
+        # C-4: bound Bedrock calls. Process at most MAX_CHUNK_CALLS chunks and
+        # stop early once we already have enough cards for target_count.
+        processed_chunks = 0
+        total_chunks = len(chunks)
         for chunk_text in chunks:
+            if len(all_cards) >= target_count:
+                break
+            if processed_chunks >= self.MAX_CHUNK_CALLS:
+                logger.warning(
+                    "Chunk call cap reached; skipping remaining chunks",
+                    extra={
+                        "processed_chunks": processed_chunks,
+                        "total_chunks": total_chunks,
+                        "max_chunk_calls": self.MAX_CHUNK_CALLS,
+                    },
+                )
+                break
             prompt = get_url_card_generation_prompt(
                 chunk_text=chunk_text,
                 card_count=cards_per_chunk,
@@ -185,6 +207,7 @@ class BedrockService:
                 language=language,
                 page_title=page_title,
             )
+            processed_chunks += 1
             try:
                 response_text = self._invoke_with_retry(prompt)
                 cards = self._parse_response(response_text)
