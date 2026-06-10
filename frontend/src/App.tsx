@@ -15,6 +15,7 @@ import {
   SettingsPage,
   LinkLinePage,
   CallbackPage,
+  SilentRenewPage,
   ReviewPage,
   StatsPage,
   TutorPage,
@@ -30,6 +31,8 @@ function App() {
               <Layout>
                 <Routes>
                   <Route path="/callback" element={<CallbackPage />} />
+                  {/* S-2: サイレントリニュー iframe 用コールバック（不可視） */}
+                  <Route path="/silent-renew" element={<SilentRenewPage />} />
                   <Route
                     path="/"
                     element={

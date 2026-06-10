@@ -10,10 +10,18 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 const mockSigninRedirect = vi.fn();
 const mockSigninRedirectCallback = vi.fn();
 const mockSigninSilent = vi.fn();
+const mockSigninSilentCallback = vi.fn();
 const mockSignoutRedirect = vi.fn();
 const mockGetUser = vi.fn();
-const mockAddAccessTokenExpiring = vi.fn();
+const mockRemoveUser = vi.fn();
 const mockAddUserSignedOut = vi.fn();
+const mockAddSilentRenewError = vi.fn();
+const mockAddUserLoaded = vi.fn();
+const mockRemoveUserLoaded = vi.fn();
+const mockAddUserUnloaded = vi.fn();
+const mockRemoveUserUnloaded = vi.fn();
+const mockAddAccessTokenExpired = vi.fn();
+const mockRemoveAccessTokenExpired = vi.fn();
 
 // 【モッククラス定義】: UserManagerをクラスとしてモック
 // 🔵 青信号: oidc-client-ts標準のUserManager構造
@@ -21,11 +29,19 @@ class MockUserManager {
   signinRedirect = mockSigninRedirect;
   signinRedirectCallback = mockSigninRedirectCallback;
   signinSilent = mockSigninSilent;
+  signinSilentCallback = mockSigninSilentCallback;
   signoutRedirect = mockSignoutRedirect;
   getUser = mockGetUser;
+  removeUser = mockRemoveUser;
   events = {
-    addAccessTokenExpiring: mockAddAccessTokenExpiring,
     addUserSignedOut: mockAddUserSignedOut,
+    addSilentRenewError: mockAddSilentRenewError,
+    addUserLoaded: mockAddUserLoaded,
+    removeUserLoaded: mockRemoveUserLoaded,
+    addUserUnloaded: mockAddUserUnloaded,
+    removeUserUnloaded: mockRemoveUserUnloaded,
+    addAccessTokenExpired: mockAddAccessTokenExpired,
+    removeAccessTokenExpired: mockRemoveAccessTokenExpired,
   };
 }
 
@@ -344,6 +360,93 @@ describe('AuthService', () => {
       // 【検証項目】: 期限切れの場合はfalse
       // 🔵 青信号: トークン有効性確認の仕様
       expect(result).toBe(false);
+    });
+  });
+
+  describe('A-1: ログアウト失敗時のローカルクリーンアップ', () => {
+    it('signoutRedirect()が失敗してもremoveUser()でトークンを破棄する', async () => {
+      // 【テストデータ準備】: signoutRedirect が失敗する状態
+      const redirectError = new Error('network error');
+      mockSignoutRedirect.mockRejectedValue(redirectError);
+      mockRemoveUser.mockResolvedValue(undefined);
+
+      // 【実際の処理実行】: logout() を呼び出す
+      const { authService } = await import('@/services/auth');
+      await expect(authService.logout()).rejects.toThrow('network error');
+
+      // 【検証項目】: ローカルのトークンが必ず破棄される
+      expect(mockRemoveUser).toHaveBeenCalledTimes(1);
+    });
+
+    it('signoutRedirect()が成功した場合はremoveUser()を呼ばない', async () => {
+      mockSignoutRedirect.mockResolvedValue(undefined);
+
+      const { authService } = await import('@/services/auth');
+      await authService.logout();
+
+      expect(mockRemoveUser).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('S-2: サイレントリニューコールバック', () => {
+    it('handleSilentCallback()でsigninSilentCallback()が呼び出される', async () => {
+      mockSigninSilentCallback.mockResolvedValue(undefined);
+
+      const { authService } = await import('@/services/auth');
+      await authService.handleSilentCallback();
+
+      expect(mockSigninSilentCallback).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('A-3: onUserChanged イベント購読', () => {
+    it('userLoaded イベントで最新ユーザーがコールバックされる', async () => {
+      const { authService } = await import('@/services/auth');
+      const callback = vi.fn();
+      authService.onUserChanged(callback);
+
+      // 【イベント発火シミュレーション】: addUserLoaded に登録されたリスナーを取得して呼ぶ
+      const loadedListener = mockAddUserLoaded.mock.calls[0][0];
+      const renewedUser = { access_token: 'renewed-token', expired: false };
+      loadedListener(renewedUser);
+
+      expect(callback).toHaveBeenCalledWith(renewedUser);
+    });
+
+    it('userUnloaded イベントで null がコールバックされる', async () => {
+      const { authService } = await import('@/services/auth');
+      const callback = vi.fn();
+      authService.onUserChanged(callback);
+
+      const unloadedListener = mockAddUserUnloaded.mock.calls[0][0];
+      unloadedListener();
+
+      expect(callback).toHaveBeenCalledWith(null);
+    });
+
+    it('accessTokenExpired イベントで expired ユーザーがコールバックされる', async () => {
+      const expiredUser = { access_token: 'expired-token', expired: true };
+      mockGetUser.mockResolvedValue(expiredUser);
+
+      const { authService } = await import('@/services/auth');
+      const callback = vi.fn();
+      authService.onUserChanged(callback);
+
+      const expiredListener = mockAddAccessTokenExpired.mock.calls[0][0];
+      await expiredListener();
+
+      expect(callback).toHaveBeenCalledWith(expiredUser);
+    });
+
+    it('購読解除関数で全リスナーが解除される', async () => {
+      const { authService } = await import('@/services/auth');
+      const unsubscribe = authService.onUserChanged(vi.fn());
+
+      unsubscribe();
+
+      expect(mockRemoveUserLoaded).toHaveBeenCalledTimes(1);
+      expect(mockRemoveUserUnloaded).toHaveBeenCalledTimes(1);
+      expect(mockRemoveAccessTokenExpired).toHaveBeenCalledTimes(1);
     });
   });
 });

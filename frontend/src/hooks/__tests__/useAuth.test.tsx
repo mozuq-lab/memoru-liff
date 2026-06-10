@@ -15,6 +15,10 @@ const mockAuthService = {
   handleCallback: vi.fn(),
   getAccessToken: vi.fn(),
   isAuthenticated: vi.fn(),
+  // A-3: useAuth がマウント時に購読するイベント API（解除関数を返す）
+  onUserChanged: vi.fn<(callback: (user: unknown) => void) => () => void>(
+    () => vi.fn(),
+  ),
 };
 
 vi.mock('@/services/auth', () => ({
@@ -322,6 +326,88 @@ describe('useAuth', () => {
       // 【検証項目】: 未認証時はnullを返す
       // 🔵 青信号: 未認証時の動作仕様
       expect(token).toBeNull();
+    });
+  });
+
+  describe('A-3: 認証イベント購読', () => {
+    it('マウント時に onUserChanged を購読し、アンマウント時に解除する', async () => {
+      mockAuthService.getUser.mockResolvedValue(null);
+      const unsubscribe = vi.fn();
+      mockAuthService.onUserChanged.mockReturnValue(unsubscribe);
+
+      const { useAuth } = await import('@/hooks/useAuth');
+      const { result, unmount } = renderHook(() => useAuth());
+
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false);
+      });
+
+      // 【検証項目】: マウント時に購読される
+      expect(mockAuthService.onUserChanged).toHaveBeenCalledTimes(1);
+
+      unmount();
+
+      // 【検証項目】: アンマウント時に解除される
+      expect(unsubscribe).toHaveBeenCalledTimes(1);
+    });
+
+    it('トークン更新イベントで user 状態が最新化される', async () => {
+      mockAuthService.getUser.mockResolvedValue(null);
+      let capturedCallback: ((user: unknown) => void) | undefined;
+      mockAuthService.onUserChanged.mockImplementation((cb) => {
+        capturedCallback = cb;
+        return vi.fn();
+      });
+
+      const { useAuth } = await import('@/hooks/useAuth');
+      const { result } = renderHook(() => useAuth());
+
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false);
+      });
+      expect(result.current.isAuthenticated).toBe(false);
+
+      // 【イベント発火シミュレーション】: サイレントリニューで新トークンが届く
+      act(() => {
+        capturedCallback?.({
+          access_token: 'renewed-token',
+          expired: false,
+          profile: { sub: 'user-123' },
+        });
+      });
+
+      // 【検証項目】: イベント経由で認証状態とトークンが更新される
+      expect(result.current.isAuthenticated).toBe(true);
+      expect(result.current.user?.access_token).toBe('renewed-token');
+    });
+
+    it('失効イベント (null) で未認証状態に遷移する', async () => {
+      mockAuthService.getUser.mockResolvedValue({
+        access_token: 'valid-token',
+        expired: false,
+        profile: { sub: 'user-123' },
+      });
+      let capturedCallback: ((user: unknown) => void) | undefined;
+      mockAuthService.onUserChanged.mockImplementation((cb) => {
+        capturedCallback = cb;
+        return vi.fn();
+      });
+
+      const { useAuth } = await import('@/hooks/useAuth');
+      const { result } = renderHook(() => useAuth());
+
+      await waitFor(() => {
+        expect(result.current.isAuthenticated).toBe(true);
+      });
+
+      // 【イベント発火シミュレーション】: ログアウト/失効で null が届く
+      act(() => {
+        capturedCallback?.(null);
+      });
+
+      // 【検証項目】: 未認証状態へ遷移する
+      expect(result.current.isAuthenticated).toBe(false);
+      expect(result.current.user).toBeNull();
     });
   });
 });

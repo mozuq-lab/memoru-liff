@@ -5,6 +5,7 @@
  * 🔵 青信号: 要件定義・TASK-0012.mdに基づく
  */
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import type { User } from 'oidc-client-ts';
 import { authService } from '@/services/auth';
 
 /**
@@ -20,6 +21,25 @@ interface AuthUser {
     name?: string;
   };
 }
+
+/**
+ * 【ヘルパー】: oidc-client-ts の User を AuthUser へ変換する
+ * 初期化とイベント購読 (A-3) で共通利用
+ */
+const toAuthUser = (user: User | null): AuthUser | null => {
+  if (!user) return null;
+  return {
+    access_token: user.access_token,
+    expired: user.expired ?? false,
+    profile: user.profile
+      ? {
+          sub: user.profile.sub,
+          email: user.profile.email,
+          name: user.profile.name,
+        }
+      : undefined,
+  };
+};
 
 /**
  * 【型定義】: useAuthフックの戻り値
@@ -60,24 +80,7 @@ export const useAuth = (): UseAuthReturn => {
         // 【認証状態確認】: authServiceから現在のユーザーを取得
         // 🔵 青信号: oidc-client-tsのgetUser()を使用
         const currentUser = await authService.getUser();
-
-        if (currentUser) {
-          // 【ユーザー設定】: 認証済みユーザー情報を状態に反映
-          // 🔵 青信号: User型からAuthUser型への変換
-          setUser({
-            access_token: currentUser.access_token,
-            expired: currentUser.expired ?? false,
-            profile: currentUser.profile ? {
-              sub: currentUser.profile.sub,
-              email: currentUser.profile.email,
-              name: currentUser.profile.name,
-            } : undefined,
-          });
-        } else {
-          // 【未認証状態】: ユーザーが存在しない場合
-          // 🔵 青信号: 未認証状態の初期値
-          setUser(null);
-        }
+        setUser(toAuthUser(currentUser));
       } catch (err) {
         // 【エラー処理】: 初期化エラーを状態に設定
         // 🔵 青信号: エラーハンドリングの仕様
@@ -91,6 +94,15 @@ export const useAuth = (): UseAuthReturn => {
     };
 
     initAuth();
+
+    // 【イベント購読】(A-3): トークン更新（サイレントリニュー含む）・失効・
+    // ログアウトを購読し、マウント後も認証状態を最新に保つ。
+    // これにより自動更新後の新トークンが AuthContext 経由で apiClient にも伝播する。
+    const unsubscribe = authService.onUserChanged((changedUser) => {
+      setUser(toAuthUser(changedUser));
+    });
+
+    return unsubscribe;
   }, []);
 
   /**

@@ -30,19 +30,16 @@ class AuthService {
 
   /**
    * 【機能概要】: イベントリスナーを設定
-   * 【実装方針】: トークン期限切れとログアウトイベントを監視
+   * 【実装方針】: ログアウトイベントとサイレントリニューエラーを監視
    * 【テスト対応】: TC-009
    * 🔵 青信号: oidc-client-tsのイベント仕様
+   *
+   * 注 (A-2): トークン更新の起点は automaticSilentRenew (ライブラリ内蔵の
+   * expiring → signinSilent) と API 401 リトライの 2 経路に集約する。
+   * 以前ここにあった addAccessTokenExpiring の手動 refresh は
+   * automaticSilentRenew と二重更新になるため削除した。
    */
   private setupEventListeners(): void {
-    // 【トークン期限切れイベント】: 自動リフレッシュをトリガー
-    // 🔵 青信号: 要件定義3.1パフォーマンス要件
-    this.userManager.events.addAccessTokenExpiring(() => {
-      this.refreshToken().catch((error) => {
-        console.error('トークンリフレッシュ失敗:', error);
-      });
-    });
-
     // 【ログアウトイベント】: セッション終了を検知
     // 🔵 青信号: OIDC標準のセッション管理
     this.userManager.events.addUserSignedOut(() => {
@@ -50,6 +47,39 @@ class AuthService {
         console.error('ログアウト処理失敗:', error);
       });
     });
+
+    // 【サイレントリニュー失敗】: 自動更新失敗を記録（401 リトライ経路が残るため致命ではない）
+    this.userManager.events.addSilentRenewError((error) => {
+      console.error('サイレントリニュー失敗:', error);
+    });
+  }
+
+  /**
+   * 【機能概要】: 認証ユーザーの変化を購読する (A-3)
+   * 【実装方針】: userLoaded / userUnloaded / accessTokenExpired を監視し、
+   * トークン更新・失効・ログアウトを呼び出し元（useAuth）へ通知する
+   * @param callback - ユーザー変化時に最新の User（失効/ログアウト時は null）で呼ばれる
+   * @returns 購読解除関数
+   */
+  onUserChanged(callback: (user: User | null) => void): () => void {
+    const onLoaded = (user: User) => callback(user);
+    const onUnloaded = () => callback(null);
+    // accessTokenExpired 時は expired=true の User を通知して
+    // isAuthenticated=false へ遷移させる（自動更新失敗後の最終状態）
+    const onExpired = () =>
+      this.getUser()
+        .then(callback)
+        .catch(() => callback(null));
+
+    this.userManager.events.addUserLoaded(onLoaded);
+    this.userManager.events.addUserUnloaded(onUnloaded);
+    this.userManager.events.addAccessTokenExpired(onExpired);
+
+    return () => {
+      this.userManager.events.removeUserLoaded(onLoaded);
+      this.userManager.events.removeUserUnloaded(onUnloaded);
+      this.userManager.events.removeAccessTokenExpired(onExpired);
+    };
   }
 
   /**
@@ -75,6 +105,15 @@ class AuthService {
     // 【コールバック処理】: 認証コードからトークンを取得
     // 🔵 青信号: oidc-client-ts標準API
     return await this.userManager.signinRedirectCallback();
+  }
+
+  /**
+   * 【機能概要】: サイレントリニュー用 iframe のコールバックを処理する (S-2)
+   * 【実装方針】: /silent-renew ルートから呼び出され、親ウィンドウの
+   * UserManager へ認証応答を引き渡す
+   */
+  async handleSilentCallback(): Promise<void> {
+    await this.userManager.signinSilentCallback();
   }
 
   /**
@@ -125,7 +164,15 @@ class AuthService {
   async logout(): Promise<void> {
     // 【ログアウト実行】: Keycloakからログアウト
     // 🔵 青信号: oidc-client-ts標準API
-    await this.userManager.signoutRedirect();
+    try {
+      await this.userManager.signoutRedirect();
+    } catch (error) {
+      // 【ローカルクリーンアップ】(A-1): リダイレクトに失敗しても
+      // ローカルのトークンは必ず破棄する（userUnloaded イベントが発火し
+      // useAuth / apiClient の状態もクリアされる）
+      await this.userManager.removeUser();
+      throw error;
+    }
   }
 
   /**

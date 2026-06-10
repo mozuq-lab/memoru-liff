@@ -46,6 +46,7 @@ vi.mock("@/pages", () => ({
   SettingsPage: () => <div>SettingsPage</div>,
   LinkLinePage: () => <div>LinkLinePage</div>,
   CallbackPage: () => <div>CallbackPage</div>,
+  SilentRenewPage: () => <div>SilentRenewPage</div>,
   ReviewPage: () => <div>ReviewPage</div>,
   StatsPage: () => <div>StatsPage</div>,
   TutorPage: () => <div>TutorPage</div>,
