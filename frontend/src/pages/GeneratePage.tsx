@@ -11,7 +11,9 @@ import { Error as ErrorMessage } from '@/components/common/Error';
 import { UrlInput } from '@/components/UrlInput';
 import { GenerateProgress } from '@/components/GenerateProgress';
 import { GenerateOptions } from '@/components/GenerateOptions';
-import { BrowserProfileSettings } from '@/components/BrowserProfileSettings';
+// NOTE: BrowserProfileSettings は AgentCore Browser 連携の再有効化時に復活させる。
+//       現状バックエンドが profile_id 付きリクエストに 501 を返すため import を一時停止。
+// import { BrowserProfileSettings } from '@/components/BrowserProfileSettings';
 import { cardsApi } from '@/services/api';
 import { useDecksContext } from '@/contexts/DecksContext';
 import type {
@@ -57,7 +59,9 @@ export const GeneratePage = () => {
   const [cardType, setCardType] = useState<CardType>('qa');
   const [targetCount, setTargetCount] = useState(10);
   const [difficulty, setDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
-  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+  // NOTE: 認証ページ取得（AgentCore Browser）無効化中は profile 選択 UI を閉じているため、
+  //       selectedProfileId は常に null。再有効化時は BrowserProfileSettings から設定する。
+  const selectedProfileId: string | null = null;
 
   useEffect(() => {
     fetchDecks();
@@ -367,12 +371,30 @@ export const GeneratePage = () => {
               />
             </section>
 
+            {/*
+              【認証プロファイル UI 一時無効化】:
+              AgentCore Browser 連携（認証付きページ取得 / SPA フォールバック）は
+              バックエンドで意図的に無効化済み（profile_id 付きリクエストは 501 を返す）。
+              そのため BrowserProfileSettings の描画を「準備中」お知らせに置き換えている。
+              バックエンド再有効化時は、以下のお知らせを削除し、下記の元コードに戻すこと:
+
+                <section className="mb-6" aria-label="認証プロファイル">
+                  <BrowserProfileSettings
+                    selectedProfileId={selectedProfileId}
+                    onProfileSelect={setSelectedProfileId}
+                    disabled={isGenerating}
+                  />
+                </section>
+
+              （BrowserProfileSettings コンポーネントと API クライアントは温存している）
+            */}
             <section className="mb-6" aria-label="認証プロファイル">
-              <BrowserProfileSettings
-                selectedProfileId={selectedProfileId}
-                onProfileSelect={setSelectedProfileId}
-                disabled={isGenerating}
-              />
+              <div
+                className="p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-600"
+                data-testid="browser-profile-coming-soon"
+              >
+                🔒 ログインが必要なページの取得は準備中です
+              </div>
             </section>
 
             <button
