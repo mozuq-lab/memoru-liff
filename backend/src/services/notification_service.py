@@ -165,12 +165,26 @@ class NotificationService:
                     result.skipped += 1
                     continue
 
+                # 【claim → push 順序化（N-8）】: push の「前」に last_notified_date を claim する。
+                # update_last_notified_date は ConditionExpression 付きで、当日分が未設定の場合のみ
+                # True を返す。並行実行（スケジューラ二重起動等）では先に claim した実行だけが
+                # push に進み、二重通知を根本から防ぐ。
+                claimed = self.user_service.update_last_notified_date(
+                    user.user_id, today_str
+                )
+                if not claimed:
+                    # 別実行が先に claim 済み（= 当日分は既に処理されている）→ スキップ
+                    logger.debug(f"User {user.user_id} already claimed by another run")
+                    result.skipped += 1
+                    continue
+
                 # Send push message
+                # 【push 失敗時に claim を戻さない設計判断】:
+                # LINE push の失敗は大半がブロック等の恒久エラーであり、claim を戻すと
+                # 後続実行が再度 push を試みてリトライストームを招く。トランジェントな失敗で
+                # その日の通知が 1 回失われることは許容し、claim はそのまま保持する。
                 message = create_reminder_message(due_count)
                 self.line_service.push_message(user.line_user_id, [message])
-
-                # Update last notified date
-                self.user_service.update_last_notified_date(user.user_id, today_str)
 
                 result.sent += 1
                 logger.info(

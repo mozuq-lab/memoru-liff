@@ -76,6 +76,7 @@ class TestNotificationService:
         user = self._create_user("user-1")
         user_service.get_linked_users.return_value = [user]
         card_service.get_due_card_count.return_value = 5
+        user_service.update_last_notified_date.return_value = True
         line_service.push_message.return_value = True
 
         # Process
@@ -91,6 +92,74 @@ class TestNotificationService:
 
         # Verify push was called
         line_service.push_message.assert_called_once()
+        user_service.update_last_notified_date.assert_called_once_with(
+            "user-1", "2024-01-05"
+        )
+
+    def test_claim_false_skips_push(self, notification_service, mock_services):
+        """N-8: claim が False（別実行が先に claim 済み）なら push しない。"""
+        user_service, card_service, line_service = mock_services
+
+        user = self._create_user("user-1")
+        user_service.get_linked_users.return_value = [user]
+        card_service.get_due_card_count.return_value = 5
+        # 別実行が先に claim 済み
+        user_service.update_last_notified_date.return_value = False
+
+        current_time = datetime(2024, 1, 5, 0, 0, 0, tzinfo=timezone.utc)
+        result = notification_service.process_notifications(current_time)
+
+        assert result.processed == 1
+        assert result.sent == 0
+        assert result.skipped == 1
+        line_service.push_message.assert_not_called()
+        user_service.update_last_notified_date.assert_called_once_with(
+            "user-1", "2024-01-05"
+        )
+
+    def test_claim_before_push_ordering(self, notification_service, mock_services):
+        """N-8: claim は push の「前」に呼ばれる（呼び出し順序の検証）。"""
+        from unittest.mock import call
+
+        user_service, card_service, line_service = mock_services
+
+        user = self._create_user("user-1")
+        user_service.get_linked_users.return_value = [user]
+        card_service.get_due_card_count.return_value = 5
+        user_service.update_last_notified_date.return_value = True
+        line_service.push_message.return_value = True
+
+        # 共通の親 Mock に子 Mock を attach して呼び出し順序を記録する
+        manager = MagicMock()
+        manager.attach_mock(user_service.update_last_notified_date, "claim")
+        manager.attach_mock(line_service.push_message, "push")
+
+        current_time = datetime(2024, 1, 5, 0, 0, 0, tzinfo=timezone.utc)
+        notification_service.process_notifications(current_time)
+
+        # claim → push の順序を検証
+        assert manager.mock_calls[0] == call.claim("user-1", "2024-01-05")
+        assert manager.mock_calls[1].args[0] == user.line_user_id  # push
+
+    def test_push_failure_does_not_increment_sent(
+        self, notification_service, mock_services
+    ):
+        """N-8: claim 成功後の push 失敗時は sent を増やさず errors に記録（claim は戻さない）。"""
+        user_service, card_service, line_service = mock_services
+
+        user = self._create_user("user-1")
+        user_service.get_linked_users.return_value = [user]
+        card_service.get_due_card_count.return_value = 5
+        user_service.update_last_notified_date.return_value = True
+        line_service.push_message.side_effect = LineApiError("User blocked the bot")
+
+        current_time = datetime(2024, 1, 5, 0, 0, 0, tzinfo=timezone.utc)
+        result = notification_service.process_notifications(current_time)
+
+        assert result.sent == 0
+        assert len(result.errors) == 1
+        assert result.errors[0]["error_type"] == "line_api_error"
+        # claim は戻さない（リトライストーム回避）
         user_service.update_last_notified_date.assert_called_once_with(
             "user-1", "2024-01-05"
         )
