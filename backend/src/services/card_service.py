@@ -568,9 +568,12 @@ class CardService:
     def find_cards_by_reference_url(self, user_id: str, url: str) -> List[Card]:
         """指定 URL を references に含むカードを全件検索する。
 
-        C-6: list_cards の最初の50件のみで重複 URL を検出していた問題を解消するため、
-        DynamoDB の FilterExpression で全件をチェックする専用メソッド。
-        ページネーション対応で全カードを走査する。
+        C-5: list_cards の最初の50件のみで重複 URL を検出していた問題を解消するため、
+        ページネーション対応で全カードを走査し references[].value を完全一致で判定する。
+
+        references は List<Map>（{type, value}）構造のため DynamoDB の
+        ``contains`` フィルタでは文字列一致できない。そのため全件を取得し、
+        アプリケーション層で references[].value の完全一致を判定する。
 
         Args:
             user_id: ユーザー ID。
@@ -581,23 +584,14 @@ class CardService:
         """
         try:
             matched_cards: List[Card] = []
-            query_kwargs = {
+            query_kwargs: Dict[str, Any] = {
                 "KeyConditionExpression": "user_id = :user_id",
-                "FilterExpression": "contains(#references, :url)",
-                "ExpressionAttributeValues": {
-                    ":user_id": user_id,
-                    ":url": url,
-                },
-                "ExpressionAttributeNames": {
-                    "#references": "references",
-                },
+                "ExpressionAttributeValues": {":user_id": user_id},
             }
             while True:
                 response = self.table.query(**query_kwargs)
                 for item in response.get("Items", []):
                     card = Card.from_dynamodb_item(item)
-                    # FilterExpression の contains は文字列部分一致のため、
-                    # アプリケーション層で references[].value の完全一致を確認する
                     refs = card.references or []
                     for ref in refs:
                         ref_val = ref.get("value", "") if isinstance(ref, dict) else getattr(ref, "value", "")

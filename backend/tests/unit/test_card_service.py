@@ -1542,3 +1542,52 @@ class TestCardServiceReferences:
         # Verify to_response also returns empty list
         response = card.to_response()
         assert response.references == []
+
+
+class TestFindCardsByReferenceUrl:
+    """C-5: paginated reference-URL lookup must see cards beyond the first page."""
+
+    def _put_raw_card(self, dynamodb_table, user_id, card_id, ref_url=None):
+        now = datetime.now(timezone.utc)
+        item = {
+            "user_id": user_id,
+            "card_id": card_id,
+            "front": f"Q-{card_id}",
+            "back": f"A-{card_id}",
+            "tags": [],
+            "interval": 0,
+            "ease_factor": "2.5",
+            "repetitions": 0,
+            "next_review_at": now.isoformat(),
+            "created_at": now.isoformat(),
+        }
+        if ref_url:
+            item["references"] = [{"type": "url", "value": ref_url}]
+        dynamodb_table.Table("memoru-cards-test").put_item(Item=item)
+
+    def test_match_found_beyond_first_50(self, card_service, dynamodb_table):
+        """A matching card at position 51+ is still detected (full scan)."""
+        target = "https://example.com/target-article"
+        # 60 unrelated cards ...
+        for i in range(60):
+            self._put_raw_card(
+                dynamodb_table, "u-1", f"card-{i:03d}", ref_url="https://other.com/x"
+            )
+        # ... plus one matching card (would be missed by a 50-item list_cards).
+        self._put_raw_card(
+            dynamodb_table, "u-1", "card-target", ref_url=target
+        )
+
+        matched = card_service.find_cards_by_reference_url("u-1", target)
+        assert len(matched) == 1
+        assert matched[0].card_id == "card-target"
+
+    def test_no_match_returns_empty(self, card_service, dynamodb_table):
+        for i in range(5):
+            self._put_raw_card(
+                dynamodb_table, "u-1", f"card-{i}", ref_url="https://other.com/x"
+            )
+        matched = card_service.find_cards_by_reference_url(
+            "u-1", "https://example.com/none"
+        )
+        assert matched == []
