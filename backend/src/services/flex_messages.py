@@ -1,7 +1,6 @@
 """Flex Message templates for LINE Messaging API."""
 
-from typing import Any, Dict, List
-from urllib.parse import quote
+from typing import Any, Dict, List, Optional
 
 
 def create_question_message(card_id: str, front: str) -> Dict[str, Any]:
@@ -407,6 +406,7 @@ def create_card_preview_carousel(
     page_title: str,
     page_url: str,
     user_id: str,
+    ref_key: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Create card preview carousel Flex Message.
 
@@ -417,7 +417,11 @@ def create_card_preview_carousel(
         cards: List of generated card dicts with front/back/tags.
         page_title: Title of the source page.
         page_url: URL of the source page.
-        user_id: System user ID for save postback.
+        user_id: System user ID (kept for signature compatibility; the save
+            handler resolves user_id from the webhook event instead).
+        ref_key: Reference key pointing to the stored cards in UrlCardsStore.
+            The save postback carries only this short key so it stays within
+            LINE's 300-char postback data limit even for long URLs (C-3).
 
     Returns:
         Flex Message JSON structure.
@@ -504,9 +508,14 @@ def create_card_preview_carousel(
         }
         bubbles.append(bubble)
 
-    # Summary bubble with save button
-    # Postback data has 300 char limit, so we use a reference key
-    postback_data = f"action=save_url_cards&user_id={user_id}&count={len(display_cards)}&url={quote(page_url, safe='')}"
+    # Summary bubble with save button.
+    # LINE postback data has a 300-char limit, so we never embed the (up to
+    # 2048-char) URL. Instead we carry a short reference key resolved against
+    # UrlCardsStore at save time (C-3). user_id is omitted here and resolved
+    # from the webhook event's line_user_id in the save handler.
+    postback_data = (
+        f"action=save_url_cards&ref={ref_key}&count={len(display_cards)}"
+    )
 
     summary_bubble: Dict[str, Any] = {
         "type": "bubble",

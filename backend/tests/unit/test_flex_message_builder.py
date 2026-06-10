@@ -102,9 +102,46 @@ class TestCardPreviewCarousel:
             page_title="Page",
             page_url="https://example.com",
             user_id="user-1",
+            ref_key="URLCARDS#abc123",
         )
         msg_str = str(msg)
         assert "action=save_url_cards" in msg_str
+
+    def _get_save_postback_data(self, msg) -> str:
+        """Extract the save button's postback data string from a carousel msg."""
+        bubbles = msg["contents"]["contents"]
+        summary = bubbles[-1]
+        return summary["footer"]["contents"][0]["action"]["data"]
+
+    def test_carousel_postback_uses_ref_key(self) -> None:
+        """C-3: postback carries the short ref key, not the URL."""
+        cards = [{"front": "Q1", "back": "A1", "tags": []}]
+        msg = create_card_preview_carousel(
+            cards=cards,
+            page_title="Page",
+            page_url="https://example.com/long",
+            user_id="user-1",
+            ref_key="URLCARDS#deadbeef",
+        )
+        data = self._get_save_postback_data(msg)
+        assert "ref=URLCARDS#deadbeef" in data
+        # URL must NOT be embedded in the postback.
+        assert "example.com" not in data
+        assert "url=" not in data
+
+    def test_carousel_postback_within_300_chars_for_long_url(self) -> None:
+        """C-3: even a 2048-char URL keeps the postback within LINE's limit."""
+        long_url = "https://example.com/" + ("a" * 2048)
+        cards = [{"front": "Q1", "back": "A1", "tags": []}]
+        msg = create_card_preview_carousel(
+            cards=cards,
+            page_title="Page",
+            page_url=long_url,
+            user_id="user-1",
+            ref_key="URLCARDS#" + ("f" * 32),
+        )
+        data = self._get_save_postback_data(msg)
+        assert len(data) <= 300
 
     def test_empty_cards_returns_error_message(self) -> None:
         """Empty card list returns error-style message."""

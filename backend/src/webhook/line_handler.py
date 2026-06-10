@@ -33,6 +33,7 @@ from services.url_content_service import UrlContentService, ContentFetchError
 from services.content_chunker import chunk_content
 from services.ai_service import create_ai_service, AIServiceError
 from services.webhook_idempotency import WebhookIdempotencyService
+from services.url_cards_store import UrlCardsStore
 from utils.url_validator import validate_url, UrlValidationError
 
 logger = Logger()
@@ -43,6 +44,7 @@ line_service = LineService()
 card_service = CardService()
 review_service = ReviewService()
 idempotency_service = WebhookIdempotencyService()
+url_cards_store = UrlCardsStore()
 
 # LIFF URL for account linking
 LIFF_URL = os.environ.get("LIFF_URL", "https://liff.line.me/your-liff-id")
@@ -268,10 +270,20 @@ def handle_url_card_generation(
             {
                 "front": card.front,
                 "back": card.back,
-                "tags": card.suggested_tags,
+                "suggested_tags": card.suggested_tags,
             }
             for card in result.cards
         ]
+
+        # C-3: Persist the generated cards under a short reference key so the
+        # save postback can stay within LINE's 300-char limit (the URL itself
+        # may be up to 2048 chars) and so saving does NOT re-fetch/re-generate
+        # (avoids double Bedrock cost + preview/saved mismatch).
+        ref_key = url_cards_store.store_pending_cards(
+            cards=cards_data,
+            page_url=page.url,
+            page_title=page.title,
+        )
 
         # Send carousel with card previews
         carousel = create_card_preview_carousel(
@@ -279,6 +291,7 @@ def handle_url_card_generation(
             page_title=page.title,
             page_url=page.url,
             user_id=user_id,
+            ref_key=ref_key,
         )
         line_service.push_message(line_user_id, [carousel])
 
@@ -313,13 +326,88 @@ def handle_url_card_generation(
 def handle_save_url_cards(
     user_id: str,
     line_user_id: str,
+    ref_key: str,
+    reply_token: str,
+) -> None:
+    """Handle save URL cards postback action (C-3 reference-key flow).
+
+    Loads the previously-generated cards from UrlCardsStore by ref_key and
+    saves them as-is — WITHOUT re-fetching the URL or re-invoking Bedrock.
+    This keeps the saved cards identical to the preview and avoids double
+    AI cost. user_id is resolved from the webhook event, not the postback.
+
+    Args:
+        user_id: System user ID (resolved from the LINE user in handle_postback).
+        line_user_id: LINE user ID.
+        ref_key: Reference key into UrlCardsStore.
+        reply_token: Reply token for response.
+    """
+    logger.info(f"Saving URL cards for user: {user_id}, ref_key: {ref_key}")
+
+    pending = url_cards_store.get_pending_cards(ref_key)
+    if not pending or not pending.get("cards"):
+        # Record missing or TTL-expired.
+        line_service.reply_message(
+            reply_token,
+            [{
+                "type": "text",
+                "text": "有効期限が切れました。もう一度 URL を送信してください。",
+            }],
+        )
+        return
+
+    # Two-tap / double-save guard: only the first tap proceeds.
+    if not url_cards_store.mark_saved(ref_key):
+        logger.info(f"URL cards already saved for ref_key: {ref_key}")
+        line_service.reply_message(
+            reply_token,
+            [{"type": "text", "text": "このカードは既に保存済みです。"}],
+        )
+        return
+
+    page_url = pending.get("page_url", "")
+    cards = pending.get("cards", [])
+
+    references = [Reference(type="url", value=page_url)] if page_url else []
+
+    saved_count = 0
+    for card in cards:
+        front = str(card.get("front", "")).strip()
+        back = str(card.get("back", "")).strip()
+        if not front or not back:
+            continue
+        tags = card.get("suggested_tags") or card.get("tags") or []
+        try:
+            card_service.create_card(
+                user_id=user_id,
+                front=front,
+                back=back,
+                tags=tags,
+                references=references,
+            )
+            saved_count += 1
+        except Exception as e:
+            logger.warning(f"Failed to save card: {e}")
+
+    line_service.reply_message(
+        reply_token,
+        [{"type": "text", "text": f"✅ {saved_count}枚のカードを保存しました！"}],
+    )
+
+
+@tracer.capture_method
+def handle_save_url_cards_legacy(
+    user_id: str,
+    line_user_id: str,
     url: str,
     count: int,
     reply_token: str,
 ) -> None:
-    """Handle save URL cards postback action.
+    """Legacy save flow for old-format postbacks (``url=`` param).
 
-    Re-generates and saves cards from the URL.
+    Pre-C-3 carousels embedded the URL in the postback and re-generated cards
+    on save. Such postbacks may still arrive across a deploy boundary, so this
+    fallback re-fetches + re-generates as before.
 
     Args:
         user_id: System user ID.
@@ -328,7 +416,7 @@ def handle_save_url_cards(
         count: Number of cards to save.
         reply_token: Reply token for response.
     """
-    logger.info(f"Saving URL cards for user: {user_id}, url: {url}")
+    logger.info(f"Saving URL cards (legacy) for user: {user_id}, url: {url}")
 
     # Validate URL before processing (C-2: SSRF prevention)
     try:
@@ -482,16 +570,26 @@ def handle_postback(event: LineEvent) -> None:
                 logger.warning(f"Invalid grade action data: {data}")
                 line_service.reply_message(event.reply_token, [create_error_message()])
         elif action == "save_url_cards":
-            url = unquote(data.get("url", ""))
-            count_str = data.get("count", "10")
-            count = int(count_str) if count_str.isdigit() else 10
-            if url:
+            ref_key = data.get("ref", "")
+            if ref_key:
+                # C-3: new reference-key flow (no re-generation).
                 handle_save_url_cards(
-                    user_id, event.source_user_id, url, count, event.reply_token
+                    user_id, event.source_user_id, ref_key, event.reply_token
                 )
             else:
-                logger.warning("Missing url in save_url_cards action")
-                line_service.reply_message(event.reply_token, [create_error_message()])
+                # Backward-compat: old-format postbacks still carry url=.
+                url = unquote(data.get("url", ""))
+                count_str = data.get("count", "10")
+                count = int(count_str) if count_str.isdigit() else 10
+                if url:
+                    handle_save_url_cards_legacy(
+                        user_id, event.source_user_id, url, count, event.reply_token
+                    )
+                else:
+                    logger.warning("Missing ref/url in save_url_cards action")
+                    line_service.reply_message(
+                        event.reply_token, [create_error_message()]
+                    )
         else:
             logger.warning(f"Unknown action: {action}")
             line_service.reply_message(
