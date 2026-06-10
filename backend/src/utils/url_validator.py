@@ -83,7 +83,7 @@ def _is_private_ip(hostname: str) -> bool:
     try:
         addrinfos = socket.getaddrinfo(hostname, None, proto=socket.IPPROTO_TCP)
         for family, _, _, _, sockaddr in addrinfos:
-            ip_str = sockaddr[0]
+            ip_str = str(sockaddr[0])  # IPv6 sockaddr tuples may type as str | int
             if _is_private_ip_address(ip_str):
                 return True
     except socket.gaierror:

@@ -1,0 +1,7 @@
+[tool.mypy]
+# src レイアウト対応 (N-9): src/ 配下を top-level パッケージ (api, models,
+# services, ...) として解決する。これが無いと import-not-found が多発し
+# 型チェックが機能しない。
+mypy_path = "src"
+explicit_package_bases = true
+python_version = "3.12"

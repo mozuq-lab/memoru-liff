@@ -14,7 +14,6 @@ import os
 from unittest.mock import MagicMock, patch
 
 import pytest
-from botocore.exceptions import ClientError
 
 from services.ai_service import (
     AIInternalError,

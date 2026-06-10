@@ -5,7 +5,7 @@ import os
 import random
 import re
 import time
-from typing import List, Literal, Optional
+from typing import List, Optional
 
 import boto3
 from botocore.config import Config
@@ -435,7 +435,7 @@ class BedrockService:
             BedrockRateLimitError: If rate limit exceeded after retries.
             BedrockInternalError: If internal error after retries.
         """
-        last_error = None
+        last_error: Optional[BedrockServiceError] = None
 
         for attempt in range(self.MAX_RETRIES + 1):
             try:

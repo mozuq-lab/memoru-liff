@@ -12,7 +12,6 @@ import hashlib
 import hmac
 import json
 from urllib.parse import parse_qs
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -20,9 +19,7 @@ from services.line_service import (
     LineService,
     LineEvent,
     verify_signature,
-    SignatureVerificationError,
 )
-from services.card_service import CardNotFoundError
 
 
 @pytest.fixture

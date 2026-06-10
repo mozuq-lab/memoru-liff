@@ -11,7 +11,6 @@ from services.bedrock import (
     BedrockRateLimitError,
     BedrockInternalError,
     BedrockParseError,
-    GeneratedCard,
 )
 from services.prompts import get_card_generation_prompt
 from services.ai_service import GradingResult, LearningAdvice

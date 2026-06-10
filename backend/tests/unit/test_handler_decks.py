@@ -4,13 +4,11 @@ import json
 from unittest.mock import patch, MagicMock
 from datetime import datetime, timezone
 
-import pytest
 
-from models.deck import Deck, DeckResponse, DeckListResponse
+from models.deck import Deck
 from services.deck_service import (
     DeckNotFoundError,
     DeckLimitExceededError,
-    DeckServiceError,
 )
 
 

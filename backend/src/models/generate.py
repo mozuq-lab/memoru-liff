@@ -1,6 +1,6 @@
 """Card generation models for Memoru LIFF application."""
 
-from typing import List, Literal, Optional
+from typing import List, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 

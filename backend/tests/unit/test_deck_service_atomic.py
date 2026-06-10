@@ -7,7 +7,7 @@ Tests the 3-step atomic pattern:
 """
 
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from moto import mock_aws
 import boto3
 from botocore.exceptions import ClientError
@@ -15,7 +15,6 @@ from botocore.exceptions import ClientError
 from services.deck_service import (
     DeckService,
     DeckLimitExceededError,
-    DeckServiceError,
 )
 
 
@@ -111,7 +110,7 @@ class TestAtomicDeckLimit:
     def test_step2_condition_expression_prevents_duplicate(self, deck_service):
         """Step 2: ConditionExpression が重複 deck_id を防止する."""
         # Create a deck
-        deck = deck_service.create_deck(user_id="user-1", name="Original")
+        deck_service.create_deck(user_id="user-1", name="Original")
 
         # Try to insert with the same key should fail via ConditionExpression
         error_response = {
@@ -134,7 +133,6 @@ class TestAtomicDeckLimit:
         # - 49 on first call (step 1: optimistic check passes)
         # - 51 on second call (step 3: race detected, over limit)
         call_count = [0]
-        original_get_count = deck_service._get_deck_count
 
         def mock_get_count(user_id):
             call_count[0] += 1

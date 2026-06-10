@@ -1,6 +1,5 @@
 """Unit tests for content chunker (T006)."""
 
-import pytest
 
 from services.content_chunker import chunk_content, ContentChunk
 

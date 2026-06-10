@@ -1,7 +1,6 @@
 """Flex Message templates for LINE Messaging API."""
 
-import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from urllib.parse import quote
 
 
@@ -506,10 +505,6 @@ def create_card_preview_carousel(
         bubbles.append(bubble)
 
     # Summary bubble with save button
-    cards_json = json.dumps(
-        [{"front": c["front"], "back": c["back"], "tags": c.get("tags", [])} for c in display_cards],
-        ensure_ascii=False,
-    )
     # Postback data has 300 char limit, so we use a reference key
     postback_data = f"action=save_url_cards&user_id={user_id}&count={len(display_cards)}&url={quote(page_url, safe='')}"
 

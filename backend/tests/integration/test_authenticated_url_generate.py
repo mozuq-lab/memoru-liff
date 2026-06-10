@@ -6,7 +6,7 @@ must continue to work, and any browser-bound request should surface as a
 ContentFetchError so callers can convert it to a graceful HTTP response.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 

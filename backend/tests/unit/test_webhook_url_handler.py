@@ -1,9 +1,7 @@
 """Unit tests for URL detection in LINE webhook handler (T033)."""
 
-import json
-from unittest.mock import MagicMock, patch, ANY
+from unittest.mock import MagicMock, patch
 
-import pytest
 
 from webhook.line_handler import (
     detect_url_in_message,

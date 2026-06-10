@@ -1180,7 +1180,6 @@ class TestGetDueCardsPagination:
 
     def test_pagination_collects_all_pages(self, card_service, monkeypatch):
         """limit=None の場合、LastEvaluatedKey を追って全ページを収集する。"""
-        from models.card import Card
 
         now = datetime.now(timezone.utc)
         item1 = {

@@ -4,7 +4,6 @@ import pytest
 from moto import mock_aws
 import boto3
 from datetime import date, datetime, timedelta, timezone
-from decimal import Decimal
 
 from services.stats_service import StatsService
 

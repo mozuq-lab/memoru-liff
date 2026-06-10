@@ -5,7 +5,6 @@ TASK-0044: LINE ID トークン検証 + httpx 統一
 """
 
 import json
-import pytest
 from unittest.mock import patch, MagicMock
 
 
@@ -29,7 +28,7 @@ class TestLinkLineHandler:
 
         # 【実際の処理実行】: handler を呼び出す
         with patch("api.handlers.user_handler.user_service") as mock_user_service, \
-             patch("api.handlers.user_handler.line_service") as mock_line_service:
+             patch("api.handlers.user_handler.line_service"):
             mock_user_service.get_or_create_user.return_value = MagicMock()
 
             from api.handler import handler
@@ -62,7 +61,7 @@ class TestLinkLineHandler:
 
         # 【実際の処理実行】: handler を呼び出す
         with patch("api.handlers.user_handler.user_service") as mock_user_service, \
-             patch("api.handlers.user_handler.line_service") as mock_line_service:
+             patch("api.handlers.user_handler.line_service"):
             mock_user_service.get_or_create_user.return_value = MagicMock()
 
             from api.handler import handler

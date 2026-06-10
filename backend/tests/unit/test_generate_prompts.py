@@ -133,8 +133,6 @@ class TestGenerateExports:
         from services.prompts.generate import (
             get_card_generation_prompt,
             DIFFICULTY_GUIDELINES,
-            DifficultyLevel,
-            Language,
         )
 
         # 【検証項目】: get_card_generation_prompt が呼び出し可能であること

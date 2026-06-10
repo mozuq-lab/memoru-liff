@@ -10,11 +10,16 @@ Use create_tutor_ai_service() factory to select based on USE_STRANDS env var.
 import json
 import os
 import re
+from typing import TYPE_CHECKING
 
 import boto3
 from aws_lambda_powertools import Logger
 from botocore.config import Config
 from botocore.exceptions import ClientError
+
+if TYPE_CHECKING:
+    # strands は遅延 import 方針のため、型参照のみ TYPE_CHECKING 配下で行う
+    from strands.models import Model
 
 logger = Logger()
 
@@ -188,7 +193,7 @@ class StrandsTutorAIService:
         self.environment = environment
         self.model, self.model_used = self._create_model()
 
-    def _create_model(self) -> tuple[object, str]:
+    def _create_model(self) -> "tuple[Model, str]":
         """Select model provider based on environment."""
         if self.environment == "dev":
             try:
@@ -201,7 +206,7 @@ class StrandsTutorAIService:
 
             ollama_host = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
             ollama_model = os.environ.get("OLLAMA_MODEL", "llama3.2")
-            model = OllamaModel(host=ollama_host, model_id=ollama_model)
+            model: Model = OllamaModel(host=ollama_host, model_id=ollama_model)
             return model, "strands_ollama"
         else:
             from strands.models import BedrockModel
@@ -256,6 +261,10 @@ class StrandsTutorAIService:
                 content = str(response)
             else:
                 # Backward-compatible mode: messages is list[dict] with full history
+                if isinstance(messages, str):
+                    raise TutorAIServiceError(
+                        "messages must be a list of dicts when session_manager is None"
+                    )
                 if not messages:
                     raise TutorAIServiceError("messages must not be empty")
                 history = messages[:-1]

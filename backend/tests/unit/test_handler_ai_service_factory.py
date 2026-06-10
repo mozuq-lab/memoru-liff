@@ -22,7 +22,6 @@ TASK-0056: handler.py AIServiceFactory 統合 + template.yaml 更新
 import json
 import os
 
-import pytest
 import yaml
 from unittest.mock import patch, MagicMock
 

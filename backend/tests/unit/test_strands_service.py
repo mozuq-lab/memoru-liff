@@ -14,8 +14,7 @@
 import inspect
 import json
 import os
-import time
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -25,8 +24,6 @@ from services.ai_service import (
     GenerationResult,
     GradingResult,
     LearningAdvice,
-    DifficultyLevel,
-    Language,
     AIServiceError,
     AITimeoutError,
     AIRateLimitError,
@@ -263,7 +260,7 @@ class TestStrandsServiceEnvironment:
     @patch("services.strands_service.BedrockModel")
     def test_dev_environment_selects_ollama(self, mock_bedrock, mock_ollama, mock_agent):
         """TC-ENV-001: ENVIRONMENT=dev で OllamaModel が選択される."""
-        service = StrandsAIService()
+        StrandsAIService()
 
         mock_ollama.assert_called_once()
         mock_bedrock.assert_not_called()
@@ -274,7 +271,7 @@ class TestStrandsServiceEnvironment:
     @patch("services.strands_service.OllamaModel")
     def test_prod_environment_selects_bedrock(self, mock_ollama, mock_bedrock, mock_agent):
         """TC-ENV-002: ENVIRONMENT=prod で BedrockModel が選択される."""
-        service = StrandsAIService()
+        StrandsAIService()
 
         mock_bedrock.assert_called_once()
         mock_ollama.assert_not_called()
@@ -284,7 +281,7 @@ class TestStrandsServiceEnvironment:
     @patch("services.strands_service.BedrockModel")
     def test_staging_environment_selects_bedrock(self, mock_bedrock, mock_agent):
         """TC-ENV-003: ENVIRONMENT=staging で BedrockModel が選択される."""
-        service = StrandsAIService()
+        StrandsAIService()
 
         mock_bedrock.assert_called_once()
 
@@ -295,7 +292,7 @@ class TestStrandsServiceEnvironment:
         # conftest.py で ENVIRONMENT=test が設定されているため、明示的に削除する
         os.environ.pop("ENVIRONMENT", None)
         try:
-            service = StrandsAIService()
+            StrandsAIService()
             mock_bedrock.assert_called_once()
         finally:
             # テスト後に conftest.py の値を復元する
@@ -307,7 +304,7 @@ class TestStrandsServiceEnvironment:
     @patch("services.strands_service.BedrockModel")
     def test_constructor_environment_overrides_env_var(self, mock_bedrock, mock_ollama, mock_agent):
         """TC-ENV-005: コンストラクタ引数で環境変数をオーバーライドできる."""
-        service = StrandsAIService(environment="dev")
+        StrandsAIService(environment="dev")
 
         mock_ollama.assert_called_once()
         mock_bedrock.assert_not_called()

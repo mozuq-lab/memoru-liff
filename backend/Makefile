@@ -86,7 +86,7 @@ test-integration: ## Run integration tests
 
 lint: ## Run linter
 	ruff check src/ tests/
-	mypy src/
+	python -m mypy src/
 
 format: ## Format code
 	ruff format src/ tests/

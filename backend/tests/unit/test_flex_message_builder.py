@@ -1,6 +1,5 @@
 """Unit tests for card preview Flex Message builder (T034)."""
 
-import pytest
 
 from services.flex_messages import (
     create_url_generation_progress_message,

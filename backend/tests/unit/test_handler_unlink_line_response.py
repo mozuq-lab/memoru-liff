@@ -9,7 +9,6 @@ RED フェーズ: 現在の実装が user_service.unlink_line() の戻り値（d
 """
 
 import json
-import pytest
 from unittest.mock import patch, MagicMock
 
 

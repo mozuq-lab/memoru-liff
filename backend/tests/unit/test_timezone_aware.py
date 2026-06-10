@@ -1,7 +1,7 @@
 """Tests for timezone-aware datetime usage."""
 
 import pytest
-from datetime import datetime, timezone
+from datetime import timezone
 from moto import mock_aws
 import boto3
 
@@ -215,7 +215,7 @@ class TestTimezoneAware:
     def test_user_operations_use_timezone_aware(self, user_service):
         """Test that user operations use timezone-aware datetime."""
         # Create user
-        user = user_service.create_user(user_id="test-user", display_name="Test User")
+        user_service.create_user(user_id="test-user", display_name="Test User")
 
         # Retrieve user to verify operations work correctly
         retrieved_user = user_service.get_user("test-user")

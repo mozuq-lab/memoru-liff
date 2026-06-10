@@ -26,7 +26,6 @@ from services.bedrock import (
     BedrockRateLimitError,
     BedrockInternalError,
     BedrockParseError,
-    GeneratedCard,
 )
 from services.ai_service import (
     AIService,
@@ -750,7 +749,7 @@ class TestBoundaryValues:
 
         # Given
         mock_client = MagicMock()
-        service = BedrockService(bedrock_client=mock_client)
+        BedrockService(bedrock_client=mock_client)
 
         mock_response_body = MagicMock()
         mock_response_body.read.return_value = json.dumps({

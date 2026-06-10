@@ -1,6 +1,7 @@
 """Card API route handlers."""
 
 import json
+from typing import Any, Dict
 
 from aws_lambda_powertools import Logger, Tracer
 from aws_lambda_powertools.event_handler import Response, content_types
@@ -149,7 +150,7 @@ def update_card(card_id: str):
 
     try:
         # Determine deck_id: distinguish JSON null from missing key
-        update_kwargs = {
+        update_kwargs: Dict[str, Any] = {
             "user_id": user_id,
             "card_id": card_id,
             "front": request.front,

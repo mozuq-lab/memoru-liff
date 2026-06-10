@@ -8,7 +8,6 @@ RED フェーズ: 現在の実装が UserSettingsResponse (success, settings) �
 """
 
 import json
-import pytest
 from unittest.mock import patch, MagicMock
 
 

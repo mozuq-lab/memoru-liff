@@ -9,9 +9,6 @@ from aws_lambda_powertools import Logger
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
 
-logger = Logger()
-
-from models.card import Card
 from models.review import (
     DueCardInfo,
     DueCardsResponse,
@@ -22,9 +19,11 @@ from models.review import (
     UndoReviewResponse,
 )
 from .ai_service import ReviewSummary
-from .card_service import CardNotFoundError, CardService, CardServiceError
+from .card_service import CardService, CardServiceError
 from .srs import ReviewHistoryEntry, SM2Result, add_review_history, calculate_next_review_boundary, calculate_sm2
 from .stats_service import calculate_streak, calculate_tag_performance
+
+logger = Logger()
 
 
 class ReviewServiceError(Exception):

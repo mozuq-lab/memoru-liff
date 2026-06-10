@@ -1,8 +1,6 @@
 """Tests for Sentinel pattern in card_service.update_card deck_id handling."""
 
-import os
 from datetime import datetime, timezone
-from unittest.mock import patch, MagicMock
 
 import pytest
 import boto3

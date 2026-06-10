@@ -36,8 +36,8 @@ class BrowserProfileService:
     """
 
     def __init__(self, table_name: str | None = None) -> None:
-        self._table_name = table_name or os.getenv(
-            "BROWSER_PROFILES_TABLE", "memoru-browser-profiles"
+        self._table_name: str = (
+            table_name or os.getenv("BROWSER_PROFILES_TABLE") or "memoru-browser-profiles"
         )
         dynamodb = boto3.resource("dynamodb")
         self._table = dynamodb.Table(self._table_name)
@@ -99,10 +99,10 @@ class BrowserProfileService:
 
         return [
             BrowserProfile(
-                profile_id=item["profile_id"],
-                user_id=item["user_id"],
-                name=item["name"],
-                created_at=item["created_at"],
+                profile_id=str(item["profile_id"]),
+                user_id=str(item["user_id"]),
+                name=str(item["name"]),
+                created_at=str(item["created_at"]),
             )
             for item in response.get("Items", [])
         ]
@@ -133,10 +133,10 @@ class BrowserProfileService:
             return None
 
         return BrowserProfile(
-            profile_id=item["profile_id"],
-            user_id=item["user_id"],
-            name=item["name"],
-            created_at=item["created_at"],
+            profile_id=str(item["profile_id"]),
+            user_id=str(item["user_id"]),
+            name=str(item["name"]),
+            created_at=str(item["created_at"]),
         )
 
     def delete_profile(self, user_id: str, profile_id: str) -> bool:

@@ -205,7 +205,7 @@ class TutorService:
             role="assistant",
             content=greeting_content,
             related_cards=related_cards,
-            timestamp=now.isoformat(),
+            timestamp=now,
         )
 
         return TutorSessionResponse(
@@ -215,8 +215,8 @@ class TutorService:
             status="active",
             messages=[greeting_msg],
             message_count=0,
-            created_at=now.isoformat(),
-            updated_at=now.isoformat(),
+            created_at=now,
+            updated_at=now,
         )
 
     def send_message(
@@ -349,7 +349,7 @@ class TutorService:
             role="assistant",
             content=ai_content,
             related_cards=related_cards,
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=datetime.now(timezone.utc),
         )
 
         # AI 成功後: ロック解放 (REMOVE processing_started_at) + count++ を
@@ -448,8 +448,8 @@ class TutorService:
             messages=messages,
             message_count=int(item.get("message_count", 0)),
             created_at=item["created_at"],
-            updated_at=now.isoformat(),
-            ended_at=now.isoformat(),
+            updated_at=now,
+            ended_at=now,
         )
 
     def list_sessions(
@@ -610,12 +610,16 @@ class TutorService:
                     else:
                         content_str = str(content)
                     content_str = clean_response_text(content_str)
+                    # AgentCore 復元メッセージは元の timestamp を保持していないため
+                    # epoch をセンチネルとして使う。従来の timestamp="" は Pydantic の
+                    # ValidationError で常に except 節へフォールバックしており、
+                    # SessionManager からの復元が実質機能していなかった (mypy で検出)。
                     messages.append(
                         TutorMessage(
                             role=msg["role"],
                             content=content_str,
                             related_cards=[],
-                            timestamp="",
+                            timestamp=datetime.fromtimestamp(0, tz=timezone.utc),
                         )
                     )
                 return messages
