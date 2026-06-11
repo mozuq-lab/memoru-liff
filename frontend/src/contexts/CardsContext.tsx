@@ -19,6 +19,8 @@ interface CardsContextType {
   deleteCard: (cardId: string) => void;
   dueCount: number;
   fetchDueCount: () => Promise<void>;
+  // F-8: ページ横断で残留する error をクリアする
+  clearError: () => void;
 }
 
 const CardsContext = createContext<CardsContextType | undefined>(undefined);
@@ -129,6 +131,11 @@ export const CardsProvider = ({ children }: CardsProviderProps) => {
     setCards(prev => prev.filter(card => card.card_id !== cardId));
   }, []);
 
+  // F-8: error はページ横断で残留するため、各ページのマウント時に明示的にクリアできるようにする
+  const clearError = useCallback(() => {
+    setError(null);
+  }, []);
+
   const fetchDueCount = useCallback(async () => {
     try {
       const count = await cardsApi.getDueCount();
@@ -151,8 +158,9 @@ export const CardsProvider = ({ children }: CardsProviderProps) => {
       deleteCard,
       dueCount,
       fetchDueCount,
+      clearError,
     }),
-    [cards, dueCards, isLoading, error, fetchCards, fetchDueCards, addCard, updateCard, deleteCard, dueCount, fetchDueCount]
+    [cards, dueCards, isLoading, error, fetchCards, fetchDueCards, addCard, updateCard, deleteCard, dueCount, fetchDueCount, clearError]
   );
 
   return (

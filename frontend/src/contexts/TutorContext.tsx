@@ -10,6 +10,8 @@ import {
 } from "react";
 import type { TutorSession, TutorMessage, LearningMode } from "@/types";
 import * as tutorApi from "@/services/tutor-api";
+import { ApiError, getUserFacingMessage } from "@/services/api";
+import { TIMEOUT_MS, MESSAGE_LIMIT } from "@/constants/tutor";
 
 interface TutorContextType {
   session: TutorSession | null;
@@ -33,12 +35,6 @@ const TutorContext = createContext<TutorContextType | undefined>(undefined);
 interface TutorProviderProps {
   children: ReactNode;
 }
-
-/** 30分のタイムアウト閾値（ミリ秒） */
-const TIMEOUT_MS = 30 * 60 * 1000;
-
-/** セッションあたりのメッセージ上限数 */
-const MESSAGE_LIMIT = 20;
 
 export const TutorProvider = ({ children }: TutorProviderProps) => {
   const [session, setSession] = useState<TutorSession | null>(null);
@@ -100,23 +96,28 @@ export const TutorProvider = ({ children }: TutorProviderProps) => {
         setMessages(newSession.messages);
         resetTimeoutTimer();
       } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "セッションの開始に失敗しました";
-        // Detect 422 insufficient review data for weak_point mode
-        if (
-          message.includes("レビュー履歴が不足") ||
-          message.includes("insufficient review")
-        ) {
-          setIsInsufficientReviewData(true);
+        // E-3: 422 業務エラーは status で判定。バックエンド (tutor_handler.py) の
+        // InsufficientReviewDataError / EmptyDeckError はいずれも 422 で code を持たないため、
+        // 422 でゲートしたうえで 2 種のうちどちらかをメッセージ文字列で識別する。
+        if (err instanceof ApiError && err.status === 422) {
+          const message = err.message;
+          // Detect 422 insufficient review data for weak_point mode
+          if (
+            message.includes("レビュー履歴が不足") ||
+            message.includes("insufficient review")
+          ) {
+            setIsInsufficientReviewData(true);
+          }
+          // Detect 422 empty deck
+          if (
+            message.includes("カードがありません") ||
+            message.includes("no cards")
+          ) {
+            setIsEmptyDeck(true);
+          }
         }
-        // Detect 422 empty deck
-        if (
-          message.includes("カードがありません") ||
-          message.includes("no cards")
-        ) {
-          setIsEmptyDeck(true);
-        }
-        setError(message);
+        // E-1: 業務エラー(4xx)はメッセージを表示、想定外(5xx/ネットワーク)は固定文言
+        setError(getUserFacingMessage(err, "セッションの開始に失敗しました"));
       } finally {
         setIsLoading(false);
       }
@@ -162,9 +163,8 @@ export const TutorProvider = ({ children }: TutorProviderProps) => {
         // Remove optimistic user message by tempId (safe even if other messages were added)
         setMessages((prev) => prev.filter((m) => m.tempId !== tempId));
         lastFailedContentRef.current = content;
-        const message =
-          err instanceof Error ? err.message : "メッセージの送信に失敗しました";
-        setError(message);
+        // E-1: 業務エラー(4xx)はメッセージを表示、想定外(5xx/ネットワーク)は固定文言
+        setError(getUserFacingMessage(err, "メッセージの送信に失敗しました"));
       } finally {
         setIsLoading(false);
       }

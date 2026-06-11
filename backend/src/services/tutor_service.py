@@ -25,6 +25,24 @@ from services.tutor_session_factory import create_tutor_session_manager
 
 logger = Logger()
 
+
+def _close_quietly(sm: Any) -> None:
+    """Close a SessionManager, logging (not raising) any error.
+
+    Calling sm.close() inside a try/finally can mask the body's original
+    exception if close() itself raises (#15). DynamoDBSessionManager.close is a
+    no-op today, but AgentCore-backed managers may raise real errors. This helper
+    swallows close errors (after logging) so the body exception always propagates.
+    """
+    try:
+        sm.close()
+    except Exception as exc:  # noqa: BLE001 - intentional: must not mask body error
+        logger.warning(
+            "SessionManager.close() raised; suppressing to preserve body exception",
+            extra={"error": str(exc)},
+        )
+
+
 # Exceptions
 class TutorServiceError(Exception):
     """Base exception for TutorService errors."""
@@ -177,29 +195,37 @@ class TutorService:
         # Generate AI greeting via SessionManager-attached Agent
         sm = self.session_manager_factory(session_id=session_id, user_id=user_id)
         try:
-            greeting_content, related_cards = self.ai_service.generate_response(
-                system_prompt=system_prompt,
-                messages="セッションを開始してください。デッキの内容を要約して挨拶してください。",
-                session_manager=sm,
-            )
-        except Exception:
-            # Rollback: remove the incomplete session to avoid orphaned records
             try:
-                self.table.delete_item(
-                    Key={"user_id": user_id, "session_id": session_id}
+                greeting_content, related_cards = self.ai_service.generate_response(
+                    system_prompt=system_prompt,
+                    messages="セッションを開始してください。デッキの内容を要約して挨拶してください。",
+                    session_manager=sm,
                 )
             except Exception:
-                logger.warning(
-                    "Failed to cleanup session after AI error",
-                    extra={"session_id": session_id},
-                )
-            raise
-        finally:
-            sm.close()
-        greeting_content = self.ai_service.clean_response_text(greeting_content)
+                # Rollback: remove the incomplete session to avoid orphaned records
+                try:
+                    self.table.delete_item(
+                        Key={"user_id": user_id, "session_id": session_id}
+                    )
+                except Exception:
+                    logger.warning(
+                        "Failed to cleanup session after AI error",
+                        extra={"session_id": session_id},
+                    )
+                raise
 
-        # Validate related_cards against deck's card IDs
-        related_cards = [cid for cid in related_cards if cid in valid_card_ids]
+            # Validate related_cards against deck's card IDs
+            related_cards = [cid for cid in related_cards if cid in valid_card_ids]
+
+            # Persist validated related_cards onto the greeting message that the
+            # SessionManager just stored (#10). Strands' append path always writes
+            # related_cards=[], so we patch the DynamoDB messages field here so that
+            # history restoration returns the IDs instead of losing them.
+            self._persist_related_cards(sm, related_cards)
+        finally:
+            _close_quietly(sm)
+
+        greeting_content = self.ai_service.clean_response_text(greeting_content)
 
         greeting_msg = TutorMessage(
             role="assistant",
@@ -305,6 +331,7 @@ class TutorService:
 
         # Get AI response via SessionManager
         system_prompt = item.get("system_prompt", "")
+        deck_card_ids = set(item.get("deck_card_ids", []))
         try:
             sm = self.session_manager_factory(session_id=session_id, user_id=user_id)
             try:
@@ -313,8 +340,20 @@ class TutorService:
                     messages=content,
                     session_manager=sm,
                 )
+
+                # Validate related_cards against deck's card IDs
+                if deck_card_ids:
+                    related_cards = [
+                        cid for cid in related_cards if cid in deck_card_ids
+                    ]
+
+                # Persist validated related_cards onto the assistant message that
+                # the SessionManager just stored (#10). Strands' append path always
+                # writes related_cards=[], so we patch the DynamoDB messages field
+                # here to survive history restoration.
+                self._persist_related_cards(sm, related_cards)
             finally:
-                sm.close()
+                _close_quietly(sm)
         except Exception:
             # AI error: ロックを解放する (count は進めない)。
             # 解放に失敗しても LOCK_TIMEOUT_SECONDS 後には他の送信が引き継げる。
@@ -336,11 +375,6 @@ class TutorService:
             raise
 
         ai_content = self.ai_service.clean_response_text(ai_content)
-
-        # Validate related_cards against deck's card IDs
-        deck_card_ids = set(item.get("deck_card_ids", []))
-        if deck_card_ids:
-            related_cards = [cid for cid in related_cards if cid in deck_card_ids]
 
         new_count = current_count + 1
         is_limit_reached = new_count >= self.MAX_ROUNDS
@@ -550,6 +584,27 @@ class TutorService:
 
     # ---- Private helpers ----
 
+    def _persist_related_cards(self, sm: Any, related_cards: list[str]) -> None:
+        """Persist validated related_cards onto the last stored message (#10).
+
+        Only DynamoDB-backed SessionManagers expose
+        update_last_message_related_cards. For other backends (e.g. AgentCore)
+        the Strands/AgentCore session store has no related_cards concept, so this
+        is skipped — the API response still carries related_cards, but they are
+        not restored from history for those backends. Failures here must not break
+        the request, so any error is logged and swallowed.
+        """
+        updater = getattr(sm, "update_last_message_related_cards", None)
+        if not callable(updater):
+            return
+        try:
+            updater(related_cards)
+        except Exception as exc:  # noqa: BLE001 - persistence is best-effort
+            logger.warning(
+                "Failed to persist related_cards to session history",
+                extra={"error": str(exc)},
+            )
+
     def _get_session_messages(
         self, user_id: str, session_id: str, item: dict
     ) -> list[TutorMessage]:
@@ -624,7 +679,7 @@ class TutorService:
                     )
                 return messages
             finally:
-                sm.close()
+                _close_quietly(sm)
         except Exception:
             # SessionManager failure: fall back to DynamoDB messages field
             logger.warning(

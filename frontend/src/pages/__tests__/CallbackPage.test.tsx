@@ -3,6 +3,7 @@
  * 【テスト対象】: CallbackPage コンポーネント
  * 【テスト対応】: TASK-0025 テストケース1〜3
  */
+import { StrictMode } from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -80,6 +81,24 @@ describe('CallbackPage', () => {
       });
 
       expect(mockNavigate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('F-6: StrictMode 二重実行ガード', () => {
+    it('StrictMode でマウントしても handleCallback は 1 回のみ実行される', async () => {
+      render(
+        <StrictMode>
+          <MemoryRouter initialEntries={['/callback']}>
+            <CallbackPage />
+          </MemoryRouter>
+        </StrictMode>,
+      );
+
+      await waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalledWith('/', { replace: true });
+      });
+      // StrictMode の effect 二重実行でも processedRef ガードにより 1 回のみ
+      expect(mockHandleCallback).toHaveBeenCalledTimes(1);
     });
   });
 

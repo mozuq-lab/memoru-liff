@@ -637,6 +637,171 @@ class TestReadMessages:
 
 
 # ===================================================================
+# update_last_message_related_cards tests (#10)
+# ===================================================================
+
+
+class TestUpdateLastMessageRelatedCards:
+    """Tests for persisting related_cards onto the last stored message (#10)."""
+
+    def test_updates_last_message_related_cards(self):
+        """related_cards should be written onto the last message index."""
+        from services.tutor_session_manager import DynamoDBSessionManager
+
+        messages = [
+            _make_dynamo_message("user", "question"),
+            _make_dynamo_message("assistant", "answer", related_cards=[]),
+        ]
+        table = _make_mock_table(item={
+            "user_id": "user1",
+            "session_id": "sess1",
+            "messages": messages,
+        })
+        dynamodb = _make_mock_dynamodb(table)
+
+        sm = DynamoDBSessionManager(
+            table_name="test-table",
+            session_id="sess1",
+            user_id="user1",
+            dynamodb_resource=dynamodb,
+        )
+        result = sm.update_last_message_related_cards(["card_001", "card_002"])
+
+        assert result is True
+        table.update_item.assert_called_once()
+        call_kwargs = table.update_item.call_args[1]
+        assert call_kwargs["Key"] == {"user_id": "user1", "session_id": "sess1"}
+        # Index 1 == last message
+        assert "messages[1].related_cards" in call_kwargs["UpdateExpression"]
+        assert call_kwargs["ExpressionAttributeValues"][":rc"] == [
+            "card_001",
+            "card_002",
+        ]
+
+    def test_empty_related_cards_is_noop(self):
+        """Empty related_cards should not trigger an update (default is already [])."""
+        from services.tutor_session_manager import DynamoDBSessionManager
+
+        table = _make_mock_table()
+        dynamodb = _make_mock_dynamodb(table)
+
+        sm = DynamoDBSessionManager(
+            table_name="test-table",
+            session_id="sess1",
+            user_id="user1",
+            dynamodb_resource=dynamodb,
+        )
+        result = sm.update_last_message_related_cards([])
+
+        assert result is False
+        table.update_item.assert_not_called()
+
+    def test_no_item_returns_false(self):
+        """If the session item is missing, returns False without updating."""
+        from services.tutor_session_manager import DynamoDBSessionManager
+
+        table = _make_mock_table(item=None)
+        dynamodb = _make_mock_dynamodb(table)
+
+        sm = DynamoDBSessionManager(
+            table_name="test-table",
+            session_id="sess1",
+            user_id="user1",
+            dynamodb_resource=dynamodb,
+        )
+        result = sm.update_last_message_related_cards(["card_001"])
+
+        assert result is False
+        table.update_item.assert_not_called()
+
+    def test_no_messages_returns_false(self):
+        """If there are no stored messages, returns False without updating."""
+        from services.tutor_session_manager import DynamoDBSessionManager
+
+        table = _make_mock_table(item={
+            "user_id": "user1",
+            "session_id": "sess1",
+            "messages": [],
+        })
+        dynamodb = _make_mock_dynamodb(table)
+
+        sm = DynamoDBSessionManager(
+            table_name="test-table",
+            session_id="sess1",
+            user_id="user1",
+            dynamodb_resource=dynamodb,
+        )
+        result = sm.update_last_message_related_cards(["card_001"])
+
+        assert result is False
+        table.update_item.assert_not_called()
+
+    def test_related_cards_survive_save_then_read_roundtrip(self):
+        """Persisted related_cards should be returned by read_messages (#10).
+
+        Simulates the full save->restore round trip by reflecting the update_item
+        write back into the stored item, then reading it back.
+        """
+        from services.tutor_session_manager import DynamoDBSessionManager
+
+        messages = [
+            _make_dynamo_message("user", "question"),
+            _make_dynamo_message("assistant", "answer", related_cards=[]),
+        ]
+        item = {"user_id": "user1", "session_id": "sess1", "messages": messages}
+        table = _make_mock_table(item=item)
+
+        def _apply_update(**kwargs):
+            # Reflect the SET messages[1].related_cards write into the stored item.
+            messages[1]["related_cards"] = kwargs["ExpressionAttributeValues"][":rc"]
+            return {}
+
+        table.update_item.side_effect = _apply_update
+        dynamodb = _make_mock_dynamodb(table)
+
+        sm = DynamoDBSessionManager(
+            table_name="test-table",
+            session_id="sess1",
+            user_id="user1",
+            dynamodb_resource=dynamodb,
+        )
+        sm.update_last_message_related_cards(["card_042"])
+
+        restored = sm.read_messages()
+        assert restored[1]["related_cards"] == ["card_042"]
+
+    def test_past_data_without_related_cards_still_restores(self):
+        """Legacy messages lacking a related_cards key must restore safely (#10)."""
+        from services.tutor_session_manager import DynamoDBSessionManager
+
+        # Legacy message: no related_cards key at all.
+        legacy = {
+            "role": "assistant",
+            "content": "old answer",
+            "timestamp": "2025-01-01T00:00:00+00:00",
+        }
+        table = _make_mock_table(item={
+            "user_id": "user1",
+            "session_id": "sess1",
+            "messages": [legacy],
+        })
+        dynamodb = _make_mock_dynamodb(table)
+
+        sm = DynamoDBSessionManager(
+            table_name="test-table",
+            session_id="sess1",
+            user_id="user1",
+            dynamodb_resource=dynamodb,
+        )
+        # read_messages returns raw; downstream uses .get("related_cards", []).
+        restored = sm.read_messages()
+        assert restored[0].get("related_cards", []) == []
+        # Strands conversion must not raise on legacy data.
+        strands = DynamoDBSessionManager._dynamo_to_strands_message(legacy)
+        assert strands == {"role": "assistant", "content": [{"text": "old answer"}]}
+
+
+# ===================================================================
 # Round-trip conversion test
 # ===================================================================
 

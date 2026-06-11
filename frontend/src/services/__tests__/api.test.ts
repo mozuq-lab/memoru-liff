@@ -548,6 +548,95 @@ describe('ApiClient', () => {
     });
   });
 
+  // ---------------------------------------------------------------------------
+  // E-3: ApiError による status/code 保持 + getUserFacingMessage
+  // ---------------------------------------------------------------------------
+  describe('E-3: ApiError の status/code 保持', () => {
+    it('エラー応答で ApiError が throw され status/code/message を保持する', async () => {
+      mockFetch.mockResolvedValue(
+        new Response(
+          JSON.stringify({ error: 'チューター機能が現在利用できません。', code: 'tutor_unavailable' }),
+          { status: 503, headers: { 'Content-Type': 'application/json' } },
+        ),
+      );
+
+      const { apiClient, ApiError } = await import('@/services/api');
+
+      let caught: unknown;
+      try {
+        await apiClient['request']<void>('/tutor/sessions', { method: 'POST' });
+      } catch (e) {
+        caught = e;
+      }
+
+      expect(caught).toBeInstanceOf(ApiError);
+      const err = caught as InstanceType<typeof ApiError>;
+      expect(err.status).toBe(503);
+      expect(err.code).toBe('tutor_unavailable');
+      expect(err.message).toBe('チューター機能が現在利用できません。');
+    });
+
+    it('code フィールドが無い 422 応答では code が undefined になる', async () => {
+      mockFetch.mockResolvedValue(
+        new Response(
+          JSON.stringify({ error: 'このデッキにはカードがありません。' }),
+          { status: 422, headers: { 'Content-Type': 'application/json' } },
+        ),
+      );
+
+      const { apiClient, ApiError } = await import('@/services/api');
+
+      let caught: unknown;
+      try {
+        await apiClient['request']<void>('/tutor/sessions', { method: 'POST' });
+      } catch (e) {
+        caught = e;
+      }
+
+      expect(caught).toBeInstanceOf(ApiError);
+      const err = caught as InstanceType<typeof ApiError>;
+      expect(err.status).toBe(422);
+      expect(err.code).toBeUndefined();
+      expect(err.message).toBe('このデッキにはカードがありません。');
+    });
+
+    it('ApiError は Error のインスタンスでもある（後方互換）', async () => {
+      mockFetch.mockResolvedValue(
+        new Response(JSON.stringify({ message: 'Card not found' }), { status: 404 }),
+      );
+
+      const { apiClient } = await import('@/services/api');
+
+      await expect(
+        apiClient['request']<void>('/cards/x', { method: 'DELETE' }),
+      ).rejects.toThrow('Card not found');
+    });
+  });
+
+  describe('E-1: getUserFacingMessage', () => {
+    it('4xx 業務エラーはメッセージをそのまま返す', async () => {
+      const { ApiError, getUserFacingMessage } = await import('@/services/api');
+      const err = new ApiError('このデッキにはカードがありません。', 422);
+      expect(getUserFacingMessage(err)).toBe('このデッキにはカードがありません。');
+    });
+
+    it('5xx は固定文言に差し替える', async () => {
+      const { ApiError, getUserFacingMessage, GENERIC_ERROR_MESSAGE } = await import('@/services/api');
+      const err = new ApiError('チューター機能が現在利用できません。', 503, 'tutor_unavailable');
+      expect(getUserFacingMessage(err)).toBe(GENERIC_ERROR_MESSAGE);
+    });
+
+    it('非 ApiError（ネットワークエラー等）は固定文言を返す', async () => {
+      const { getUserFacingMessage, GENERIC_ERROR_MESSAGE } = await import('@/services/api');
+      expect(getUserFacingMessage(new Error('Network error'))).toBe(GENERIC_ERROR_MESSAGE);
+    });
+
+    it('非 ApiError でも fallback 指定時は fallback を返す', async () => {
+      const { getUserFacingMessage } = await import('@/services/api');
+      expect(getUserFacingMessage(new Error('boom'), '生成に失敗しました')).toBe('生成に失敗しました');
+    });
+  });
+
   describe('request() - 401 Unauthorized トークンリフレッシュ', () => {
     it('TC-037-01: 401レスポンスでトークンリフレッシュが呼ばれる', async () => {
       // 【テストデータ準備】: アクセストークンが期限切れの場合、401 Unauthorized が返される

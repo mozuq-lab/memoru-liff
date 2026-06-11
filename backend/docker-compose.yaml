@@ -118,6 +118,9 @@ services:
     ports:
       - "8180:8080"
     environment:
+      # I-11: admin/admin はローカル開発専用の固定資格情報。start-dev モードで
+      # ローカルホストからのみ利用する前提のため弱い値で問題ない。本番 Keycloak
+      # (infrastructure/cdk/lib/keycloak-stack.ts) では別途強い資格情報を使うこと。
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin
       KC_HEALTH_ENABLED: "true"
@@ -139,9 +142,15 @@ services:
   ollama:
     image: ollama/ollama:latest
     container_name: memoru-ollama
+    # I-11: 公開ポートはループバック (127.0.0.1) のみにバインドし、ホストの全
+    # ネットワークインターフェースへ Ollama を露出しない。ホスト (Makefile /
+    # SAM Local) は localhost:11434 で従来どおりアクセス可能。
     ports:
-      - "11434:11434"
+      - "127.0.0.1:11434:11434"
     environment:
+      # コンテナ内サーバーは 0.0.0.0 で待ち受ける必要がある (公開ポートおよび
+      # memoru-network 上の他コンテナからの接続を受けるため)。外部公開は上の
+      # ports バインドを 127.0.0.1 に絞ることで制御している。
       - OLLAMA_HOST=0.0.0.0:11434
     volumes:
       - ollama-data:/root/.ollama

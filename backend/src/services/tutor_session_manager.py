@@ -141,6 +141,47 @@ class DynamoDBSessionManager:
         """Context Manager: exit."""
         self.close()
 
+    def update_last_message_related_cards(self, related_cards: list[str]) -> bool:
+        """Persist related_cards onto the most recent stored message.
+
+        The Strands SessionManager path (append_message/sync_agent) has no concept
+        of related_cards, so it always stores them as an empty list (#10). After the
+        Agent has written the assistant turn, TutorService calls this to attach the
+        validated related_cards to the last message in the DynamoDB 'messages' field,
+        so that history restoration (read_messages) returns them instead of always [].
+
+        Scope: only the DynamoDB-backed messages field (the fallback/read source for
+        get_session/end_session) is updated. AgentCore/Strands internal session
+        storage is unaffected and has no related_cards concept.
+
+        Args:
+            related_cards: Validated related card IDs to store on the last message.
+
+        Returns:
+            True if a message was updated, False if there were no messages to update.
+        """
+        if not related_cards:
+            # Nothing to persist; default stored value is already [].
+            return False
+
+        response = self.table.get_item(
+            Key={"user_id": self.user_id, "session_id": self.session_id}
+        )
+        item = response.get("Item")
+        if not item:
+            return False
+        messages = item.get("messages", [])
+        if not messages:
+            return False
+
+        last_index = len(messages) - 1
+        self.table.update_item(
+            Key={"user_id": self.user_id, "session_id": self.session_id},
+            UpdateExpression=f"SET messages[{last_index}].related_cards = :rc",
+            ExpressionAttributeValues={":rc": related_cards},
+        )
+        return True
+
     def read_messages(self) -> list[dict]:
         """Read raw DynamoDB-format messages for this session.
 

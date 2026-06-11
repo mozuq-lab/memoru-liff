@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Loading } from '@/components/common';
 import { authService } from '@/services/auth';
@@ -6,8 +6,14 @@ import { authService } from '@/services/auth';
 export const CallbackPage = () => {
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
+  // F-6: StrictMode の effect 二重実行で signinRedirectCallback が
+  // 二重に走ると 2 回目が「認証応答なし」で偽エラーになるため ref でガードする
+  const processedRef = useRef(false);
 
   useEffect(() => {
+    if (processedRef.current) return;
+    processedRef.current = true;
+
     const processCallback = async () => {
       try {
         await authService.handleCallback();

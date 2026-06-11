@@ -194,13 +194,39 @@ describe("useSpeech", () => {
   // ─── cleanup ──────────────────────────────────────────────────
 
   describe("cleanup", () => {
-    it("アンマウント時に cancel が自動呼び出しされる", () => {
-      const { unmount } = renderHook(() => useSpeech());
+    it("発話中にアンマウントすると cancel が自動呼び出しされる", () => {
+      const { result, unmount } = renderHook(() => useSpeech());
+      act(() => {
+        result.current.speak("テスト");
+      });
       const cancelCountBeforeUnmount = mockCancel.mock.calls.length;
       unmount();
       expect(mockCancel.mock.calls.length).toBeGreaterThan(
         cancelCountBeforeUnmount,
       );
+    });
+
+    it("F-7: 発話していないフックのアンマウントでは cancel されない", () => {
+      // このフックは speak を一度も呼んでいないため、cleanup で
+      // 他コンポーネント起点の発話を止めない（無条件 cancel しない）
+      const { unmount } = renderHook(() => useSpeech());
+      const cancelCountBeforeUnmount = mockCancel.mock.calls.length;
+      unmount();
+      expect(mockCancel.mock.calls.length).toBe(cancelCountBeforeUnmount);
+    });
+
+    it("F-7: 発話完了(onend)後にアンマウントしても cancel されない", () => {
+      const { result, unmount } = renderHook(() => useSpeech());
+      act(() => {
+        result.current.speak("テスト");
+      });
+      act(() => {
+        lastUtterance.onend?.();
+      });
+      const cancelCountBeforeUnmount = mockCancel.mock.calls.length;
+      unmount();
+      // 発話は既に終了しているため cleanup では cancel しない
+      expect(mockCancel.mock.calls.length).toBe(cancelCountBeforeUnmount);
     });
   });
 

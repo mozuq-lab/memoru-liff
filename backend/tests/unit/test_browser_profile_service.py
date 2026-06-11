@@ -9,6 +9,53 @@ from services.browser_profile_service import (
 )
 
 
+class TestBrowserProfileTableName:
+    """Tests for table name resolution (I-8)."""
+
+    @patch("services.browser_profile_service.boto3")
+    def test_default_table_name_has_dev_suffix(self, mock_boto3: MagicMock) -> None:
+        """Default table name should follow the -dev convention (I-8)."""
+        mock_dynamodb = MagicMock()
+        mock_boto3.resource.return_value = mock_dynamodb
+
+        with patch.dict("os.environ", {}, clear=False):
+            import os
+
+            os.environ.pop("BROWSER_PROFILES_TABLE", None)
+            service = BrowserProfileService()
+
+        assert service._table_name == "memoru-browser-profiles-dev"
+        mock_dynamodb.Table.assert_called_once_with("memoru-browser-profiles-dev")
+
+    @patch("services.browser_profile_service.boto3")
+    def test_env_var_overrides_default(self, mock_boto3: MagicMock) -> None:
+        """BROWSER_PROFILES_TABLE env var should override the default."""
+        mock_dynamodb = MagicMock()
+        mock_boto3.resource.return_value = mock_dynamodb
+
+        with patch.dict(
+            "os.environ", {"BROWSER_PROFILES_TABLE": "custom-table"}, clear=False
+        ):
+            service = BrowserProfileService()
+
+        assert service._table_name == "custom-table"
+
+    @patch("services.browser_profile_service.boto3")
+    def test_explicit_arg_overrides_env_and_default(
+        self, mock_boto3: MagicMock
+    ) -> None:
+        """Explicit table_name arg should take precedence over env and default."""
+        mock_dynamodb = MagicMock()
+        mock_boto3.resource.return_value = mock_dynamodb
+
+        with patch.dict(
+            "os.environ", {"BROWSER_PROFILES_TABLE": "env-table"}, clear=False
+        ):
+            service = BrowserProfileService(table_name="explicit-table")
+
+        assert service._table_name == "explicit-table"
+
+
 class TestBrowserProfileService:
     """Tests for BrowserProfileService."""
 
