@@ -6,21 +6,8 @@
  */
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import type { User } from 'oidc-client-ts';
+import type { AuthUser } from '@/types';
 import { authService } from '@/services/auth';
-
-/**
- * 【型定義】: 認証ユーザー情報
- * 🔵 青信号: oidc-client-tsのUser型に準拠
- */
-interface AuthUser {
-  access_token: string;
-  expired: boolean;
-  profile?: {
-    sub: string;
-    email?: string;
-    name?: string;
-  };
-}
 
 /**
  * 【ヘルパー】: oidc-client-ts の User を AuthUser へ変換する

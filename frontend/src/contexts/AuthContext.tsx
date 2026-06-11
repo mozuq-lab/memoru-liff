@@ -1,16 +1,7 @@
 import { createContext, useContext, useEffect, type ReactNode } from 'react';
+import type { AuthUser } from '@/types';
 import { useAuth } from '@/hooks/useAuth';
 import { apiClient } from '@/services/api';
-
-interface AuthUser {
-  access_token: string;
-  expired: boolean;
-  profile?: {
-    sub: string;
-    email?: string;
-    name?: string;
-  };
-}
 
 interface AuthContextType {
   user: AuthUser | null;
