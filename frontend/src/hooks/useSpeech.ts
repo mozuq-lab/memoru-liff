@@ -27,6 +27,11 @@ export const useSpeech = (options?: UseSpeechOptions): UseSpeechReturn => {
 
   const [isSpeaking, setIsSpeaking] = useState(false);
 
+  // F-7: このフックが発話中かどうかをアンマウント時の cleanup から参照するための ref。
+  // SpeechSynthesis はグローバル単一キューのため、isSpeaking state を直接 cleanup で
+  // 読むと古い値を掴む。発話開始/終了で同期更新する ref を別に持つ。
+  const speakingRef = useRef(false);
+
   // rate は options が変わっても speak 関数を再生成しないよう ref で管理
   const rateRef = useRef<number>(options?.rate ?? 1);
   useEffect(() => {
@@ -36,6 +41,7 @@ export const useSpeech = (options?: UseSpeechOptions): UseSpeechReturn => {
   const cancel = useCallback(() => {
     if (!isSupported) return;
     window.speechSynthesis.cancel();
+    speakingRef.current = false;
     setIsSpeaking(false);
   }, [isSupported]);
 
@@ -46,19 +52,33 @@ export const useSpeech = (options?: UseSpeechOptions): UseSpeechReturn => {
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.rate = rateRef.current;
-      utterance.onend = () => setIsSpeaking(false);
-      utterance.onerror = () => setIsSpeaking(false);
+      utterance.onend = () => {
+        speakingRef.current = false;
+        setIsSpeaking(false);
+      };
+      utterance.onerror = () => {
+        speakingRef.current = false;
+        setIsSpeaking(false);
+      };
       window.speechSynthesis.speak(utterance);
+      speakingRef.current = true;
       setIsSpeaking(true);
     },
     [isSupported],
   );
 
-  // アンマウント時にクリーンアップ
+  // アンマウント時のクリーンアップ。
+  // F-7: このフックが発話中の場合のみ cancel する。無条件 cancel だと他コンポーネント
+  // 起点の発話まで止めてしまう。ただし SpeechSynthesis はグローバル単一キューのため、
+  // 完全な分離は不可能（複数フックが同時に発話すると後発が前発を上書きする）。
   // NOTE: vi.unstubAllGlobals() 後に cleanup が走ることがあるため、実行時に存在確認する
   useEffect(() => {
     return () => {
-      if (typeof window !== "undefined" && window.speechSynthesis) {
+      if (
+        speakingRef.current &&
+        typeof window !== "undefined" &&
+        window.speechSynthesis
+      ) {
         window.speechSynthesis.cancel();
       }
     };
