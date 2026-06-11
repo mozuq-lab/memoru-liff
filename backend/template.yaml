@@ -1047,8 +1047,12 @@ Resources:
           Type: SQS
           Properties:
             Queue: !GetAtt UrlGenerateQueue.Arn
-            BatchSize: 5
-            # 部分失敗を SQS に返し、失敗メッセージのみリトライさせる。
+            # 1 件の処理時間 (60〜100 秒級) が Lambda Timeout (120s) に近いため、
+            # BatchSize を 1 にしてバッチ途中のタイムアウトによる未処理メッセージの
+            # 巻き込み (receive count 増加 → 不当な DLQ 送り) を防ぐ。
+            BatchSize: 1
+            # 部分失敗を SQS に返し、失敗メッセージのみリトライさせる
+            # （BatchSize 1 でも防御として残す）。
             FunctionResponseTypes:
               - ReportBatchItemFailures
             # Bedrock 同時実行を抑えるためワーカーの最大同時実行を制限する。

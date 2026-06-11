@@ -54,8 +54,9 @@ LIFF_URL = os.environ.get("LIFF_URL", "https://liff.line.me/your-liff-id")
 # 受付（本 webhook Lambda）は進捗 reply まで行い、重い生成本体は SQS へ enqueue して
 # 即 return することで API Gateway の 30 秒上限による LINE 側タイムアウトを解消する。
 # URL_GENERATE_QUEUE_URL が設定され、かつ URL_WORKER_MODE != "inline" のときのみ enqueue。
-# それ以外（ローカル開発・テスト・enqueue 失敗時のフォールバック）は従来どおりその場で
-# 同期実行する（インラインフォールバック。動作は現行と同一）。
+# それ以外（ローカル開発・テスト）はその場で同期実行する（インライン）。
+# enqueue 失敗時はインライン同期実行へフォールバックしない（30 秒上限問題の再発を防ぐ）。
+# 代わりにエラーをユーザーへ通知して即 200 を返す。
 # NOTE(ローカル): sam local は SQS → Lambda トリガーを再現できないため、env.json で
 # URL_WORKER_MODE="inline" を設定し、ローカルは常に同期実行する。
 URL_GENERATE_QUEUE_URL = os.environ.get("URL_GENERATE_QUEUE_URL", "")
@@ -78,7 +79,7 @@ def _should_enqueue() -> bool:
 
     Returns:
         True  — キュー URL があり、かつ inline モードでない（→ enqueue）。
-        False — それ以外（→ その場で同期実行＝インラインフォールバック）。
+        False — それ以外（→ その場で同期実行＝インライン）。
     """
     return bool(URL_GENERATE_QUEUE_URL) and URL_WORKER_MODE != "inline"
 
@@ -231,8 +232,9 @@ def handle_url_card_generation(
 
     受付側の責務はバリデーション → 進捗 reply → ディスパッチに簡素化されている。
     重い生成本体（取得 → chunk → Bedrock → 保存 → push）は
-    ``services.url_generation_service.generate_and_push_url_cards`` に切り出され、
-    SQS ワーカーで非同期実行される（インラインフォールバックも可能）。
+    ``services.url_generation_service`` に切り出され、SQS ワーカーで非同期実行される
+    （queue 未設定 / inline モード時のみその場で同期実行）。enqueue 失敗時はインライン
+    へフォールバックせず、エラーを通知して 200 を返す。
 
     Args:
         user_id: System user ID.
@@ -274,14 +276,26 @@ def handle_url_card_generation(
                 url=url,
                 webhook_event_id=webhook_event_id or "",
             )
-            return
         except Exception as e:
-            # enqueue 失敗時はインラインへフォールバック（受付は決して落とさない）。
-            logger.warning(
-                f"Failed to enqueue URL generation; falling back to inline: {e}"
-            )
+            # enqueue 失敗時にインライン同期実行へフォールバックすると 30 秒上限問題が
+            # 再発するため、フォールバックは廃止。error ログを残し、best-effort で
+            # ユーザーにエラーを通知して受付は 200 で返す（受付は決して落とさない）。
+            logger.error(f"Failed to enqueue URL generation: {e}")
+            try:
+                line_service.push_message(
+                    line_user_id,
+                    [create_url_generation_error_message(
+                        "エラーが発生しました。しばらくしてからもう一度 URL を送信してください。"
+                    )],
+                )
+            except Exception as push_err:
+                logger.warning(
+                    f"Failed to push enqueue-failure notification: {push_err}"
+                )
+        return
 
-    # インラインフォールバック（ローカル・テスト・enqueue 失敗）: その場で同期実行。
+    # インライン同期実行（_should_enqueue() == False の場合のみ：
+    # queue 未設定 or URL_WORKER_MODE=inline）。ローカル開発・テスト相当。
     generate_and_push_url_cards(
         user_id=user_id,
         line_user_id=line_user_id,

@@ -50,6 +50,14 @@ def test_queue_settings(resources):
     assert props["RedrivePolicy"]["maxReceiveCount"] == 3
 
 
+def test_max_receive_count_matches_worker_constant(resources):
+    """template の maxReceiveCount とワーカーの最終試行判定定数を一致させる。"""
+    from jobs.url_generate_worker_handler import MAX_RECEIVE_COUNT
+
+    props = resources["UrlGenerateQueue"]["Properties"]
+    assert props["RedrivePolicy"]["maxReceiveCount"] == MAX_RECEIVE_COUNT
+
+
 def test_dlq_settings(resources):
     props = resources["UrlGenerateWorkerDLQ"]["Properties"]
     # 14 days retention (matches DuePushJobDLQ).
@@ -66,6 +74,9 @@ def test_worker_function_settings(resources):
 
     sqs_event = props["Events"]["UrlGenerateSqs"]
     assert sqs_event["Type"] == "SQS"
+    # 1 件の処理時間が Lambda Timeout に近いため BatchSize は 1
+    # （バッチ途中タイムアウトによる未処理メッセージの巻き込みを防ぐ）。
+    assert sqs_event["Properties"]["BatchSize"] == 1
     assert "ReportBatchItemFailures" in sqs_event["Properties"]["FunctionResponseTypes"]
     assert sqs_event["Properties"]["ScalingConfig"]["MaximumConcurrency"] == 2
 

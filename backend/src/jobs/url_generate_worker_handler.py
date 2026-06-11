@@ -5,13 +5,26 @@ LINE Webhook は API Gateway の 30 秒上限内に 200 を返す必要がある
 SQS 経由で非同期実行する。受付側（webhook Lambda）は進捗 reply を返して即 return し、
 LINE 側のタイムアウト観測を解消する。
 
+通知とリトライ判定の分離（R-2）:
+  ワーカーはインライン用ラッパーではなくコア関数 ``generate_url_cards_core`` を直接
+  呼び、コアが分類して raise する型付き例外を見て「ユーザー通知」と「SQS リトライ
+  /DLQ 判定」を独立に制御する。
+
+    - 成功 → mark_processed（claim 確定）。
+    - ``UrlGenerationPermanentError`` → 再試行無意味なのでユーザーに失敗を通知し、
+      mark_processed（成功扱い・リトライしない）。
+    - ``UrlGenerationTransientError``（その他想定外例外を含む）→ SQS リトライへ委ねる。
+      最終試行（ApproximateReceiveCount >= maxReceiveCount=3）のみユーザーに失敗を
+      通知した上で release + batchItemFailures（→ DLQ）。それ以外は通知せず（サイレ
+      ントリトライ）release + batchItemFailures。
+
 冪等の設計判断（claim タイミングと二重 push 窓）:
   SQS standard キューは at-least-once 配信のため、同一メッセージが複数回届きうる。
   本ワーカーでは「処理開始」ではなく webhook_event_id 単位の claim を取り、
-  ``generate_and_push_url_cards`` 全体を try で包む。
+  コア処理全体を try で包む。
 
     - claim 成功 → 本処理を実行。
-    - 本処理が例外で失敗 → claim を release し、その messageId を batchItemFailures
+    - 本処理が失敗 → claim を release し、その messageId を batchItemFailures
       に入れて SQS のリトライ（maxReceiveCount 3）に委ねる。release により再配信が
       即座に再 claim できる。
     - 本処理が成功 → mark_processed で claim を ``processed`` に確定。以降の重複配信は
@@ -33,7 +46,11 @@ from aws_lambda_powertools import Logger, Tracer
 from aws_lambda_powertools.utilities.typing import LambdaContext
 
 from services.webhook_idempotency import WebhookIdempotencyService
-from services.url_generation_service import generate_and_push_url_cards
+from services.url_generation_service import (
+    generate_url_cards_core,
+    notify_generation_failure,
+    UrlGenerationPermanentError,
+)
 
 logger = Logger()
 tracer = Tracer()
@@ -42,6 +59,11 @@ tracer = Tracer()
 # （受付側は webhook_event_id をそのまま、URL カードストアは URLCARDS#、本ワーカーは
 #  URLGENWORK# を使うことで同一 PROCESSED_EVENTS_TABLE 上で名前空間を分離する。）
 _WORKER_KEY_PREFIX = "URLGENWORK#"
+
+# SQS RedrivePolicy.maxReceiveCount と一致させる（template.yaml）。
+# ApproximateReceiveCount がこの値以上なら「最終試行」とみなし、失敗時にユーザーへ
+# 通知した上で DLQ へ送る。値の一致は test_template_url_worker.py で担保する。
+MAX_RECEIVE_COUNT = 3
 
 # 冪等サービスを worker でも流用（同一 PROCESSED_EVENTS_TABLE / TTL 付きクレーム）。
 idempotency_service = WebhookIdempotencyService()
@@ -52,14 +74,28 @@ def _worker_claim_key(webhook_event_id: str) -> str:
     return f"{_WORKER_KEY_PREFIX}{webhook_event_id}"
 
 
-def _process_record(body: Dict[str, Any]) -> None:
-    """1 件の SQS メッセージ本文を処理する（冪等 claim 付き）。
+def _approximate_receive_count(record: Dict[str, Any]) -> int:
+    """SQS レコードの ApproximateReceiveCount を整数で返す（取得不能時は 1）。
+
+    値は SQS が配信ごとにインクリメントする受信回数（1 始まり）。
+    """
+    raw = (record.get("attributes") or {}).get("ApproximateReceiveCount", "1")
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return 1
+
+
+def _process_record(record: Dict[str, Any], body: Dict[str, Any]) -> None:
+    """1 件の SQS メッセージを処理する（冪等 claim + 通知/リトライ判定の分離）。
 
     Args:
+        record: SQS レコード（attributes.ApproximateReceiveCount を参照）。
         body: enqueue 時の JSON（user_id / line_user_id / url / webhook_event_id）。
 
     Raises:
-        Exception: 本処理が失敗した場合（呼び出し側で batchItemFailures に積む）。
+        Exception: SQS リトライさせたい場合に再送出（呼び出し側が batchItemFailures
+            に積む）。permanent エラーは通知のうえ成功扱い（送出しない）。
     """
     user_id = body.get("user_id", "")
     line_user_id = body.get("line_user_id", "")
@@ -87,14 +123,49 @@ def _process_record(body: Dict[str, Any]) -> None:
         return
 
     try:
-        generate_and_push_url_cards(
+        generate_url_cards_core(
             user_id=user_id,
             line_user_id=line_user_id,
             url=url,
         )
-    except Exception:
+    except UrlGenerationPermanentError as e:
+        # 再試行無意味 → ユーザーに失敗を通知し、成功扱いで確定（リトライしない）。
+        logger.warning(
+            "URL-generate permanent failure; notifying user and marking processed",
+            extra={"webhook_event_id": webhook_event_id, "error": str(e)},
+        )
+        notify_generation_failure(line_user_id, e.user_message)
+        if claim_key:
+            idempotency_service.mark_processed(claim_key)
+        return
+    except Exception as exc:
+        # transient（UrlGenerationTransientError）+ その他想定外例外 → SQS リトライへ。
+        # 最終試行のみユーザーに通知（途中経過のエラー連発で混乱させないため、それ以外
+        # はサイレントにリトライする）。
+        receive_count = _approximate_receive_count(record)
+        if receive_count >= MAX_RECEIVE_COUNT:
+            user_message = getattr(exc, "user_message", "")
+            logger.error(
+                "URL-generate transient failure on final attempt; "
+                "notifying user before DLQ",
+                extra={
+                    "webhook_event_id": webhook_event_id,
+                    "receive_count": receive_count,
+                    "error": str(exc),
+                },
+            )
+            notify_generation_failure(line_user_id, user_message)
+        else:
+            logger.warning(
+                "URL-generate transient failure; silent retry",
+                extra={
+                    "webhook_event_id": webhook_event_id,
+                    "receive_count": receive_count,
+                    "error": str(exc),
+                },
+            )
         # 失敗時は claim を release して再配信での再 claim を許可し、例外を再送出して
-        # 呼び出し側で batchItemFailures に積ませる（SQS リトライへ委譲）。
+        # 呼び出し側で batchItemFailures に積ませる（SQS リトライ／DLQ へ委譲）。
         if claim_key:
             idempotency_service.release(claim_key)
         raise
@@ -139,7 +210,7 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
             continue
 
         try:
-            _process_record(body)
+            _process_record(record, body)
         except Exception as e:
             logger.error(
                 "URL-generate worker failed; reporting batch item failure",

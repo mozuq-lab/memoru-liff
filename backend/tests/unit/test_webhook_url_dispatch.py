@@ -115,10 +115,13 @@ class TestDispatch:
 
     @patch("webhook.line_handler.generate_and_push_url_cards")
     @patch("webhook.line_handler.line_service")
-    def test_enqueue_failure_falls_back_to_inline(
+    def test_enqueue_failure_notifies_and_does_not_run_inline(
         self, mock_line_service, mock_generate
     ):
-        """enqueue 失敗 → インラインへフォールバックし、受付は落とさない。"""
+        """enqueue 失敗 → 同期実行せず、エラーを push して受付は 200 で返す。
+
+        インライン同期フォールバックは 30 秒上限問題を再発させるため廃止。
+        """
         failing_sqs = MagicMock()
         failing_sqs.send_message.side_effect = RuntimeError("boom")
         with _patch_dispatch(queue_url="https://q", worker_mode=""), patch(
@@ -130,7 +133,13 @@ class TestDispatch:
                 url="https://example.com/article",
                 reply_token="rt",
             )
-        mock_generate.assert_called_once()
+        # インライン同期実行はされない。
+        mock_generate.assert_not_called()
+        # best-effort でユーザーにエラーを push する
+        # （reply は進捗メッセージで消費済みのため push を使う）。
+        assert mock_line_service.push_message.called
+        pushed_to = mock_line_service.push_message.call_args[0][0]
+        assert pushed_to == "line-1"
 
     @patch("webhook.line_handler.generate_and_push_url_cards")
     @patch("webhook.line_handler.line_service")
