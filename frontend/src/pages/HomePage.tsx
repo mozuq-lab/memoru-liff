@@ -20,14 +20,17 @@ import { Error } from '@/components/common/Error';
  */
 export const HomePage = () => {
   const { user } = useAuthContext();
-  const { dueCount, fetchDueCount, isLoading, error } = useCardsContext();
+  const { dueCount, fetchDueCount, isLoading, error, clearError } = useCardsContext();
   const { fetchDecks } = useDecksContext();
 
   // 【復習待ちカード数取得 + デッキ一覧取得】: 画面表示時に取得
+  // F-8: 他ページで発生し残留した CardsContext の error をマウント時にクリアし、
+  //      ホーム画面に無関係なエラーが表示されたままにならないようにする
   useEffect(() => {
+    clearError();
     fetchDueCount();
     fetchDecks();
-  }, [fetchDueCount, fetchDecks]);
+  }, [clearError, fetchDueCount, fetchDecks]);
 
   // 【ローディング表示】
   if (isLoading) {

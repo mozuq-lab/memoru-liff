@@ -10,6 +10,7 @@ import { HomePage } from '../HomePage';
 
 // CardsContext モック
 const mockFetchDueCount = vi.fn();
+const mockClearError = vi.fn();
 const mockCardsContext = {
   cards: [],
   isLoading: false,
@@ -20,6 +21,7 @@ const mockCardsContext = {
   deleteCard: vi.fn(),
   dueCount: 5,
   fetchDueCount: mockFetchDueCount,
+  clearError: mockClearError,
 };
 
 vi.mock('@/contexts/CardsContext', () => ({
@@ -192,6 +194,13 @@ describe('HomePage', () => {
     it('エラー時はエラーメッセージが表示される', () => {
       renderHomePage();
       expect(screen.getByText('データの取得に失敗しました')).toBeInTheDocument();
+    });
+  });
+
+  describe('F-8: マウント時の error クリア', () => {
+    it('マウント時に CardsContext の clearError が呼ばれる', () => {
+      renderHomePage();
+      expect(mockClearError).toHaveBeenCalled();
     });
   });
 
