@@ -21,10 +21,12 @@ vi.mock('react-router-dom', async () => {
 
 // cardsApiのモック
 const mockGenerateCards = vi.fn();
+const mockGenerateFromUrl = vi.fn();
 const mockCreateCard = vi.fn();
 vi.mock('@/services/api', () => ({
   cardsApi: {
     generateCards: (...args: unknown[]) => mockGenerateCards(...args),
+    generateFromUrl: (...args: unknown[]) => mockGenerateFromUrl(...args),
     createCard: (...args: unknown[]) => mockCreateCard(...args),
   },
 }));
@@ -54,6 +56,7 @@ describe('GeneratePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGenerateCards.mockReset();
+    mockGenerateFromUrl.mockReset();
     mockCreateCard.mockReset();
   });
 
@@ -447,6 +450,46 @@ describe('GeneratePage', () => {
     it('空白のみの場合は生成ボタンが無効', () => {
       renderGeneratePage();
       expect(screen.getByTestId('generate-button')).toBeDisabled();
+    });
+  });
+
+  // 認証ページ取得（AgentCore Browser）はバックエンドで無効化済み（profile_id 付きは 501）。
+  // フロントはプロファイル選択 UI を閉じ、「準備中」お知らせを表示する。
+  describe('認証ページ取得 無効化（準備中表示）', () => {
+    it('URLモードでプロファイル選択UIの代わりに準備中メッセージが表示される', async () => {
+      const user = userEvent.setup();
+      renderGeneratePage();
+
+      await user.click(screen.getByTestId('tab-url'));
+
+      // 準備中お知らせが表示される
+      expect(screen.getByTestId('browser-profile-coming-soon')).toHaveTextContent(
+        'ログインが必要なページの取得は準備中です',
+      );
+      // プロファイル選択 UI は描画されない
+      expect(screen.queryByTestId('browser-profile-settings')).not.toBeInTheDocument();
+    });
+
+    it('URLからの生成リクエストに profile_id が含まれない', async () => {
+      const user = userEvent.setup();
+      mockGenerateFromUrl.mockResolvedValue({
+        page_info: { title: 'タイトル', url: 'https://example.com' },
+        generated_cards: [{ front: '質問1', back: '回答1', suggested_tags: [] }],
+      });
+
+      renderGeneratePage();
+
+      await user.click(screen.getByTestId('tab-url'));
+      await user.type(screen.getByTestId('url-input'), 'https://example.com');
+      await user.click(screen.getByTestId('generate-from-url-button'));
+
+      await waitFor(() => {
+        expect(mockGenerateFromUrl).toHaveBeenCalled();
+      });
+
+      const requestArg = mockGenerateFromUrl.mock.calls[0][0];
+      expect(requestArg).not.toHaveProperty('profile_id');
+      expect(requestArg.url).toBe('https://example.com');
     });
   });
 });

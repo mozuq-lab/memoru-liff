@@ -59,6 +59,64 @@ class TestPrompts:
             assert difficulty in prompt
 
 
+class TestGenerateCardsFromChunksCap:
+    """C-4: chunk → Bedrock call bounding (early break + MAX_CHUNK_CALLS)."""
+
+    @pytest.fixture
+    def bedrock_service(self):
+        return BedrockService(bedrock_client=MagicMock())
+
+    @staticmethod
+    def _card_json(idx: int) -> str:
+        # One unique card per chunk so dedup never collapses them.
+        return json.dumps(
+            {"cards": [{"front": f"Q{idx}", "back": f"A{idx}", "tags": []}]}
+        )
+
+    def test_stops_early_once_target_reached(self, bedrock_service):
+        """Once target_count cards exist, remaining chunks are NOT called."""
+        chunks = [f"chunk-{i}" for i in range(6)]
+        call_count = {"n": 0}
+
+        def fake_invoke(prompt):
+            call_count["n"] += 1
+            # Each chunk yields 2 unique cards.
+            i = call_count["n"]
+            return json.dumps(
+                {
+                    "cards": [
+                        {"front": f"Q{i}a", "back": "A", "tags": []},
+                        {"front": f"Q{i}b", "back": "A", "tags": []},
+                    ]
+                }
+            )
+
+        with patch.object(bedrock_service, "_invoke_with_retry", side_effect=fake_invoke):
+            result = bedrock_service.generate_cards_from_chunks(
+                chunks=chunks, target_count=4
+            )
+
+        # 2 chunks * 2 cards = 4 >= target_count(4) → stop before chunk 3.
+        assert call_count["n"] == 2
+        assert len(result.cards) == 4
+
+    def test_respects_max_chunk_calls_cap(self, bedrock_service):
+        """Never invoke Bedrock more than MAX_CHUNK_CALLS times."""
+        # Many chunks, high target so the early-break never triggers; the cap
+        # is the only thing that stops the loop.
+        chunks = [f"chunk-{i}" for i in range(20)]
+        call_count = {"n": 0}
+
+        def fake_invoke(prompt):
+            call_count["n"] += 1
+            return self._card_json(call_count["n"])
+
+        with patch.object(bedrock_service, "_invoke_with_retry", side_effect=fake_invoke):
+            bedrock_service.generate_cards_from_chunks(chunks=chunks, target_count=1000)
+
+        assert call_count["n"] == BedrockService.MAX_CHUNK_CALLS
+
+
 class TestBedrockServiceParsing:
     """Tests for BedrockService response parsing."""
 

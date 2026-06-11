@@ -126,20 +126,16 @@ def generate_from_url():
             body=json.dumps({"error": "Invalid JSON body"}),
         )
 
-    # Duplicate URL detection warning
+    # Duplicate URL detection warning.
+    # C-5: use the paginated reference-URL lookup so cards beyond the first
+    # page (list_cards default 50) are also considered. Non-critical: a check
+    # failure must not block generation.
     duplicate_warning = None
     try:
         card_service = CardService()
-        existing_cards, _ = card_service.list_cards(user_id)
-        for card in existing_cards:
-            refs = getattr(card, "references", None) or []
-            for ref in refs:
-                ref_val = ref.get("value", "") if isinstance(ref, dict) else getattr(ref, "value", "")
-                if ref_val == request.url:
-                    duplicate_warning = "この URL からは既にカードが生成されています。"
-                    break
-            if duplicate_warning:
-                break
+        matched_cards = card_service.find_cards_by_reference_url(user_id, request.url)
+        if matched_cards:
+            duplicate_warning = "この URL からは既にカードが生成されています。"
     except Exception:
         pass  # Non-critical: don't block generation on duplicate check failure
 
