@@ -51,16 +51,9 @@ export class LiffHostingStack extends cdk.Stack {
           abortIncompleteMultipartUploadAfter: cdk.Duration.days(7),
         },
       ],
-      cors: [
-        {
-          allowedHeaders: ['*'],
-          allowedMethods: [s3.HttpMethods.GET, s3.HttpMethods.HEAD],
-          allowedOrigins: props.domainName
-            ? [`https://${props.domainName}`]
-            : ['*'],
-          maxAge: 3600,
-        },
-      ],
+      // I-9: S3 バケットの CORS は設定しない。配信は CloudFront 経由 (OAC) であり、
+      // ブラウザは S3 オリジンに直接アクセスしないため S3 側の CORS は不要。
+      // (旧設定では dev で allowedOrigins: ['*'] となっており不要な全許可だった)
     });
 
     // Log Bucket (for production only)
