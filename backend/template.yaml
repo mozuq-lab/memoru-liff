@@ -47,15 +47,25 @@ Parameters:
     Default: liff-client
     Description: OIDC Audience (JWT audience claim)
 
+  # NOTE (Bedrock IAM): モデル ID は cross-region (global) inference profile 形式
+  # "global.anthropic...." を前提とする。IAM の bedrock:InvokeModel Resource は
+  # inference-profile ARN と、その配下の foundation-model ARN の両方を必要とする。
+  # foundation-model ID は "global." プレフィックスを除いた値 (!Split ["global.", ...])
+  # で導出するため、ここで指定する値は必ず "global." で始まる ID にすること。
   BedrockModelId:
     Type: String
     Default: global.anthropic.claude-haiku-4-5-20251001-v1:0
-    Description: Amazon Bedrock model ID for AI card generation
+    Description: >-
+      Amazon Bedrock model ID for AI card generation.
+      Must be a cross-region (global) inference profile ID starting with "global."
+      (IAM derives the underlying foundation-model ARN by stripping the "global." prefix).
 
   TutorModelId:
     Type: String
     Default: ""
-    Description: Bedrock model ID for AI tutor (defaults to BedrockModelId if empty)
+    Description: >-
+      Bedrock model ID for AI tutor (defaults to BedrockModelId if empty).
+      When set, must also be a "global."-prefixed cross-region inference profile ID.
 
   LineChannelId:
     Type: String
@@ -204,9 +214,10 @@ Resources:
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
-      TimeToLiveSpecification:
-        AttributeName: expires_at
-        Enabled: true
+      # TTL は指定しない (I-7): review_service は expires_at を書き込まないため
+      # TimeToLiveSpecification を設定しても実質無効だった。レビュー履歴は統計用に
+      # 永久保持する。保持方針を変える場合は、コード側で expires_at を書き込む実装と
+      # セットで TimeToLiveSpecification (AttributeName: expires_at) を再導入すること。
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
       SSESpecification:
@@ -378,7 +389,9 @@ Resources:
           - PUT
           - DELETE
           - OPTIONS
-        AllowCredentials: true
+        # AllowCredentials は指定しない (#14): Bearer トークン運用で Cookie を使わないため
+        # 不要。フロント (frontend/src/services/api.ts) の fetch も credentials:'include'
+        # を使っておらず、Authorization ヘッダーのみで認証している。
         MaxAge: 3600
       Auth:
         DefaultAuthorizer: JwtAuthorizer
@@ -427,9 +440,13 @@ Resources:
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
+              # cross-region (global) inference profile とその配下の foundation-model の両方を許可。
+              # foundation-model ID は BedrockModelId から "global." を除いた値で導出する。
               Resource:
                 - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
-                - !Sub arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0
+                - !Sub
+                  - arn:aws:bedrock:*::foundation-model/${FoundationModelId}
+                  - FoundationModelId: !Select [1, !Split ["global.", !Ref BedrockModelId]]
         - !If
           - HasTutorModelId
           - Version: "2012-10-17"
@@ -439,6 +456,9 @@ Resources:
                   - bedrock:InvokeModel
                 Resource:
                   - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${TutorModelId}
+                  - !Sub
+                    - arn:aws:bedrock:*::foundation-model/${FoundationModelId}
+                    - FoundationModelId: !Select [1, !Split ["global.", !Ref TutorModelId]]
           - !Ref AWS::NoValue
         - !If
           - UseAgentCore
@@ -677,9 +697,12 @@ Resources:
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
+              # inference profile + 配下の foundation-model ("global." 除去で導出)
               Resource:
                 - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
-                - !Sub arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0
+                - !Sub
+                  - arn:aws:bedrock:*::foundation-model/${FoundationModelId}
+                  - FoundationModelId: !Select [1, !Split ["global.", !Ref BedrockModelId]]
       Environment:
         Variables:
           LINE_CHANNEL_SECRET_ARN: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:memoru-${Environment}-line-credentials
@@ -739,10 +762,15 @@ Resources:
             Type: SQS
             Destination: !GetAtt DuePushJobDLQ.Arn
       Policies:
+        # I-4: 最小権限の意図 — Users/Cards は Read 全般 (Query/GetItem/Scan)、
+        # 書き込みは Users テーブルの last_notified_date を更新する UpdateItem のみ。
         - DynamoDBReadPolicy:
             TableName: !Ref UsersTable
         - DynamoDBReadPolicy:
             TableName: !Ref CardsTable
+        # UsersTable の last_notified_date を更新するための UpdateItem のみを許可。
+        # Resource はテーブル本体の ARN のみ (GSI は含めない) — GSI への直接書き込みは
+        # DynamoDB では不可能なため、ベーステーブル ARN だけで十分。
         - Version: "2012-10-17"
           Statement:
             - Effect: Allow
@@ -800,9 +828,12 @@ Resources:
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
+              # inference profile + 配下の foundation-model ("global." 除去で導出)
               Resource:
                 - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
-                - !Sub arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0
+                - !Sub
+                  - arn:aws:bedrock:*::foundation-model/${FoundationModelId}
+                  - FoundationModelId: !Select [1, !Split ["global.", !Ref BedrockModelId]]
       Environment:
         Variables:
           OIDC_ISSUER: !Ref OidcIssuer
@@ -841,9 +872,12 @@ Resources:
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
+              # inference profile + 配下の foundation-model ("global." 除去で導出)
               Resource:
                 - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
-                - !Sub arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0
+                - !Sub
+                  - arn:aws:bedrock:*::foundation-model/${FoundationModelId}
+                  - FoundationModelId: !Select [1, !Split ["global.", !Ref BedrockModelId]]
       Environment:
         Variables:
           OIDC_ISSUER: !Ref OidcIssuer
@@ -886,9 +920,12 @@ Resources:
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
+              # inference profile + 配下の foundation-model ("global." 除去で導出)
               Resource:
                 - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
-                - !Sub arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0
+                - !Sub
+                  - arn:aws:bedrock:*::foundation-model/${FoundationModelId}
+                  - FoundationModelId: !Select [1, !Split ["global.", !Ref BedrockModelId]]
       Environment:
         Variables:
           OIDC_ISSUER: !Ref OidcIssuer
