@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, act, waitFor } from "@testing-library/react";
 import { TutorProvider, useTutorContext } from "../TutorContext";
+import { ApiError } from "@/services/api";
 import type { TutorSession, SendMessageResponse } from "@/types";
 
 // Mock tutor-api
@@ -64,9 +65,17 @@ function TestConsumer() {
       <span data-testid="error">{ctx.error ?? "none"}</span>
       <span data-testid="messages">{JSON.stringify(ctx.messages)}</span>
       <span data-testid="is-limit-reached">{String(ctx.isLimitReached)}</span>
+      <span data-testid="is-empty-deck">{String(ctx.isEmptyDeck)}</span>
+      <span data-testid="is-insufficient">
+        {String(ctx.isInsufficientReviewData)}
+      </span>
       <button
         data-testid="start"
         onClick={() => ctx.startSession("deck_123", "free_talk")}
+      />
+      <button
+        data-testid="start-weak"
+        onClick={() => ctx.startSession("deck_123", "weak_point")}
       />
       <button data-testid="send" onClick={() => ctx.sendMessage("テスト")} />
       <button data-testid="end" onClick={() => ctx.endSession()} />
@@ -129,6 +138,100 @@ describe("TutorContext", () => {
       await waitFor(() => {
         expect(screen.getByTestId("error").textContent).not.toBe("none");
       });
+    });
+
+    it("E-1: 想定外エラー(非 ApiError)は生メッセージを露出せず固定文言になる", async () => {
+      mockStartSession.mockRejectedValue(new Error("ECONNREFUSED 内部詳細"));
+
+      renderWithProvider();
+      await act(async () => {
+        screen.getByTestId("start").click();
+      });
+
+      await waitFor(() => {
+        // 生の "ECONNREFUSED 内部詳細" は露出せず、安全な固定文言に差し替わる
+        expect(screen.getByTestId("error").textContent).toBe(
+          "セッションの開始に失敗しました",
+        );
+      });
+      expect(screen.getByTestId("error").textContent).not.toContain(
+        "ECONNREFUSED",
+      );
+    });
+
+    it("E-1: 5xx ApiError も生メッセージを露出せず固定文言になる", async () => {
+      mockStartSession.mockRejectedValue(
+        new ApiError("内部スタックトレース等の詳細", 503, "tutor_unavailable"),
+      );
+
+      renderWithProvider();
+      await act(async () => {
+        screen.getByTestId("start").click();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("error").textContent).toBe(
+          "セッションの開始に失敗しました",
+        );
+      });
+    });
+
+    it("E-3: 422 + 空デッキメッセージで isEmptyDeck が立つ", async () => {
+      mockStartSession.mockRejectedValue(
+        new ApiError(
+          "このデッキにはカードがありません。カードを追加してからセッションを開始してください。",
+          422,
+        ),
+      );
+
+      renderWithProvider();
+      await act(async () => {
+        screen.getByTestId("start").click();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("is-empty-deck").textContent).toBe("true");
+      });
+      expect(screen.getByTestId("is-insufficient").textContent).toBe("false");
+    });
+
+    it("E-3: 422 + レビュー履歴不足メッセージで isInsufficientReviewData が立つ", async () => {
+      mockStartSession.mockRejectedValue(
+        new ApiError(
+          "レビュー履歴が不足しています。Free Talk モードをお試しください。",
+          422,
+        ),
+      );
+
+      renderWithProvider();
+      await act(async () => {
+        screen.getByTestId("start-weak").click();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("is-insufficient").textContent).toBe("true");
+      });
+      expect(screen.getByTestId("is-empty-deck").textContent).toBe("false");
+    });
+
+    it("E-3: 同じメッセージでも 500 では業務フラグが立たない(status ゲート)", async () => {
+      // status が 422 でなければ、たとえメッセージに「カードがありません」を含んでも
+      // 業務エラーフラグは立たず、固定文言になる
+      mockStartSession.mockRejectedValue(
+        new ApiError("このデッキにはカードがありません。", 500),
+      );
+
+      renderWithProvider();
+      await act(async () => {
+        screen.getByTestId("start").click();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("error").textContent).toBe(
+          "セッションの開始に失敗しました",
+        );
+      });
+      expect(screen.getByTestId("is-empty-deck").textContent).toBe("false");
     });
   });
 

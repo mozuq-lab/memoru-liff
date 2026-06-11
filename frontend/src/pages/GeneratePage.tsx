@@ -14,7 +14,7 @@ import { GenerateOptions } from '@/components/GenerateOptions';
 // NOTE: BrowserProfileSettings は AgentCore Browser 連携の再有効化時に復活させる。
 //       現状バックエンドが profile_id 付きリクエストに 501 を返すため import を一時停止。
 // import { BrowserProfileSettings } from '@/components/BrowserProfileSettings';
-import { cardsApi } from '@/services/api';
+import { cardsApi, getUserFacingMessage } from '@/services/api';
 import { useDecksContext } from '@/contexts/DecksContext';
 import type {
   GeneratedCardWithId,
@@ -175,10 +175,9 @@ export const GeneratePage = () => {
       clearTimeout(timer2);
       if (err instanceof DOMException && err.name === 'AbortError') {
         setError('生成がタイムアウトしました。URLが正しいか確認してください。');
-      } else if (err instanceof Error) {
-        setError(err.message || 'URLからのカード生成に失敗しました。');
       } else {
-        setError('URLからのカード生成に失敗しました。');
+        // E-1: 業務エラー(4xx)はメッセージを表示、想定外(5xx/ネットワーク)は固定文言
+        setError(getUserFacingMessage(err, 'URLからのカード生成に失敗しました。'));
       }
     } finally {
       setIsGenerating(false);

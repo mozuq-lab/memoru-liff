@@ -33,6 +33,41 @@ import { authService } from "./auth";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
 
+/**
+ * API エラー応答を構造化して保持する Error。
+ * E-3: status / code を捨てずに保持し、呼び出し側がメッセージ文字列に依存せず
+ * 業務エラー（4xx + code）と想定外エラー（5xx・ネットワーク等）を判別できるようにする。
+ */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code?: string;
+
+  constructor(message: string, status: number, code?: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
+/** 想定外エラー時にユーザーへ表示する固定文言。 */
+export const GENERIC_ERROR_MESSAGE =
+  "エラーが発生しました。時間をおいて再度お試しください。";
+
+/**
+ * E-1/E-3: ユーザー表示用のエラーメッセージを返す。
+ * - ApiError かつ 4xx（業務エラー）: バックエンドのメッセージをそのまま表示
+ * - それ以外（5xx・ネットワーク・非 ApiError・status 不明）: 固定文言に差し替え
+ *
+ * @param fallback 業務エラーにメッセージが無い場合などに使う既定文言（省略時は固定文言）
+ */
+export function getUserFacingMessage(err: unknown, fallback?: string): string {
+  if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
+    return err.message || fallback || GENERIC_ERROR_MESSAGE;
+  }
+  return fallback ?? GENERIC_ERROR_MESSAGE;
+}
+
 class ApiClient {
   private accessToken: string | null = null;
   private isRefreshing = false;
@@ -99,8 +134,11 @@ class ApiClient {
       const error = await response
         .json()
         .catch(() => ({ message: "Unknown error" }));
-      throw new Error(
+      // E-3: status/code を保持した ApiError を throw（message は従来互換）
+      throw new ApiError(
         error.error || error.message || `HTTP ${response.status}`,
+        response.status,
+        typeof error.code === "string" ? error.code : undefined,
       );
     }
 

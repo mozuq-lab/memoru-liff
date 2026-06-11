@@ -8,6 +8,7 @@ import { SessionList } from "@/components/tutor/SessionList";
 import { Loading } from "@/components/common/Loading";
 import { Error } from "@/components/common/Error";
 import type { LearningMode } from "@/types";
+import { MESSAGE_LIMIT, TIMEOUT_MINUTES } from "@/constants/tutor";
 
 type PageView = "mode-select" | "chat" | "history";
 
@@ -327,7 +328,7 @@ export const TutorPage = () => {
         {isLimitReached && (
           <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg text-center">
             <p className="text-blue-800 text-sm mb-2">
-              メッセージ上限（20ラウンドトリップ）に達しました。
+              メッセージ上限（{MESSAGE_LIMIT}ラウンドトリップ）に達しました。
             </p>
             <button
               onClick={handleModeSwitch}
@@ -342,7 +343,7 @@ export const TutorPage = () => {
         {isTimedOut && (
           <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-center">
             <p className="text-yellow-800 text-sm mb-2">
-              セッションがタイムアウトしました（30分の非アクティブ）。
+              セッションがタイムアウトしました（{TIMEOUT_MINUTES}分の非アクティブ）。
             </p>
             <button
               onClick={handleModeSwitch}
