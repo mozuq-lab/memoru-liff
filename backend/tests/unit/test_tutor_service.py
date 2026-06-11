@@ -1343,3 +1343,197 @@ class TestGetSessionWithSessionManager:
 
         assert "[RELATED_CARDS" not in result.messages[0].content
         assert result.messages[0].content == "appleはりんごです。"
+
+
+class TestRelatedCardsPersistence:
+    """Tests for #10: related_cards persisted to session history."""
+
+    def test_send_message_persists_related_cards_to_history(
+        self, dynamodb_tables, mock_ai_service
+    ):
+        """send_message should call update_last_message_related_cards with
+        the validated related_cards so they survive history restore (#10)."""
+        _seed_deck(dynamodb_tables)
+
+        mock_sm = MagicMock()
+        mock_sm_factory = MagicMock(return_value=mock_sm)
+
+        with patch.dict(os.environ, {
+            "TUTOR_SESSIONS_TABLE": "memoru-tutor-sessions-test",
+            "DECKS_TABLE": "memoru-decks-test",
+            "CARDS_TABLE": "memoru-cards-test",
+        }):
+            from services.tutor_service import TutorService
+
+            service = TutorService(
+                table_name="memoru-tutor-sessions-test",
+                dynamodb_resource=dynamodb_tables,
+                ai_service=mock_ai_service,
+                session_manager_factory=mock_sm_factory,
+            )
+            session = service.start_session(
+                user_id="test-user", deck_id="deck_001", mode="free_talk"
+            )
+
+            # AI returns one valid and one invalid (not in deck) card id.
+            mock_ai_service.generate_response.return_value = (
+                "explanation",
+                ["card_001", "card_unknown"],
+            )
+            mock_sm.update_last_message_related_cards.reset_mock()
+
+            service.send_message(
+                "test-user", session.session_id, "tell me about apple"
+            )
+
+        # Only the valid (deck-member) card id should be persisted.
+        mock_sm.update_last_message_related_cards.assert_called_with(["card_001"])
+
+    def test_start_session_persists_related_cards(
+        self, dynamodb_tables, mock_ai_service
+    ):
+        """start_session should persist greeting related_cards to history (#10)."""
+        _seed_deck(dynamodb_tables)
+
+        mock_sm = MagicMock()
+        mock_sm_factory = MagicMock(return_value=mock_sm)
+        mock_ai_service.generate_response.return_value = ("hi", ["card_002"])
+
+        with patch.dict(os.environ, {
+            "TUTOR_SESSIONS_TABLE": "memoru-tutor-sessions-test",
+            "DECKS_TABLE": "memoru-decks-test",
+            "CARDS_TABLE": "memoru-cards-test",
+        }):
+            from services.tutor_service import TutorService
+
+            service = TutorService(
+                table_name="memoru-tutor-sessions-test",
+                dynamodb_resource=dynamodb_tables,
+                ai_service=mock_ai_service,
+                session_manager_factory=mock_sm_factory,
+            )
+            service.start_session(
+                user_id="test-user", deck_id="deck_001", mode="free_talk"
+            )
+
+        mock_sm.update_last_message_related_cards.assert_called_with(["card_002"])
+
+    def test_persist_skipped_when_backend_lacks_method(
+        self, dynamodb_tables, mock_ai_service
+    ):
+        """Backends without update_last_message_related_cards are skipped safely."""
+        _seed_deck(dynamodb_tables)
+
+        # SessionManager without the method (e.g. AgentCore backend).
+        mock_sm = MagicMock(spec=["close"])
+        mock_sm_factory = MagicMock(return_value=mock_sm)
+        mock_ai_service.generate_response.return_value = ("hi", ["card_001"])
+
+        with patch.dict(os.environ, {
+            "TUTOR_SESSIONS_TABLE": "memoru-tutor-sessions-test",
+            "DECKS_TABLE": "memoru-decks-test",
+            "CARDS_TABLE": "memoru-cards-test",
+        }):
+            from services.tutor_service import TutorService
+
+            service = TutorService(
+                table_name="memoru-tutor-sessions-test",
+                dynamodb_resource=dynamodb_tables,
+                ai_service=mock_ai_service,
+                session_manager_factory=mock_sm_factory,
+            )
+            # Should not raise even though method is absent.
+            session = service.start_session(
+                user_id="test-user", deck_id="deck_001", mode="free_talk"
+            )
+
+        assert session.status == "active"
+
+
+class TestCloseQuietly:
+    """Tests for #15: sm.close() exceptions must not mask the body exception."""
+
+    def test_close_exception_does_not_mask_body_exception(
+        self, dynamodb_tables, mock_ai_service, caplog
+    ):
+        """When the AI call raises AND close() raises, the AI (body) exception
+        must propagate, and the close error must be logged (#15)."""
+        import logging
+
+        _seed_deck(dynamodb_tables)
+
+        mock_sm = MagicMock()
+        mock_sm.close.side_effect = RuntimeError("close failed")
+        mock_sm_factory = MagicMock(return_value=mock_sm)
+
+        mock_ai_service.generate_response.side_effect = RuntimeError(
+            "AI body error"
+        )
+
+        with patch.dict(os.environ, {
+            "TUTOR_SESSIONS_TABLE": "memoru-tutor-sessions-test",
+            "DECKS_TABLE": "memoru-decks-test",
+            "CARDS_TABLE": "memoru-cards-test",
+        }):
+            from services.tutor_service import TutorService
+
+            service = TutorService(
+                table_name="memoru-tutor-sessions-test",
+                dynamodb_resource=dynamodb_tables,
+                ai_service=mock_ai_service,
+                session_manager_factory=mock_sm_factory,
+            )
+
+            with caplog.at_level(logging.WARNING):
+                with pytest.raises(RuntimeError, match="AI body error"):
+                    service.start_session(
+                        user_id="test-user", deck_id="deck_001", mode="free_talk"
+                    )
+
+        # close() was attempted and its failure was logged, not raised.
+        mock_sm.close.assert_called_once()
+        assert any("close" in r.message.lower() for r in caplog.records)
+
+    def test_send_message_close_exception_does_not_mask_body(
+        self, dynamodb_tables, mock_ai_service, caplog
+    ):
+        """send_message: close() raising must not mask AI body exception (#15)."""
+        import logging
+
+        _seed_deck(dynamodb_tables)
+
+        mock_sm = MagicMock()
+        mock_sm_factory = MagicMock(return_value=mock_sm)
+
+        with patch.dict(os.environ, {
+            "TUTOR_SESSIONS_TABLE": "memoru-tutor-sessions-test",
+            "DECKS_TABLE": "memoru-decks-test",
+            "CARDS_TABLE": "memoru-cards-test",
+        }):
+            from services.tutor_service import TutorService
+            from services.tutor_ai_service import TutorAIServiceError
+
+            service = TutorService(
+                table_name="memoru-tutor-sessions-test",
+                dynamodb_resource=dynamodb_tables,
+                ai_service=mock_ai_service,
+                session_manager_factory=mock_sm_factory,
+            )
+            session = service.start_session(
+                user_id="test-user", deck_id="deck_001", mode="free_talk"
+            )
+
+            # Now make AI fail and close() fail during send_message.
+            mock_ai_service.generate_response.side_effect = TutorAIServiceError(
+                "send body error"
+            )
+            mock_sm.close.side_effect = RuntimeError("close failed")
+            mock_sm.close.reset_mock()
+
+            with caplog.at_level(logging.WARNING):
+                with pytest.raises(TutorAIServiceError, match="send body error"):
+                    service.send_message(
+                        "test-user", session.session_id, "question"
+                    )
+
+        assert any("close" in r.message.lower() for r in caplog.records)
