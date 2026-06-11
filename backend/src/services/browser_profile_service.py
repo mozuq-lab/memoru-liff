@@ -37,7 +37,7 @@ class BrowserProfileService:
 
     def __init__(self, table_name: str | None = None) -> None:
         self._table_name: str = (
-            table_name or os.getenv("BROWSER_PROFILES_TABLE") or "memoru-browser-profiles"
+            table_name or os.getenv("BROWSER_PROFILES_TABLE") or "memoru-browser-profiles-dev"
         )
         dynamodb = boto3.resource("dynamodb")
         self._table = dynamodb.Table(self._table_name)
