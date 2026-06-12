@@ -507,7 +507,8 @@ class ReviewService:
         all_due_cards = self.card_service.get_due_cards(
             user_id=user_id,
             limit=None,  # 【全件取得】: DynamoDB Query レベルの切り詰めを防ぎ、正確な総数を計算する 🔵
-            before=now if not include_future else None,
+            before=now,
+            include_future=include_future,
         )
 
         # 【deck_id フィルタ】: deck_id が指定された場合はアプリケーション層でフィルタを適用 🔵
