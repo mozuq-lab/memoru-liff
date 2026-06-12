@@ -159,6 +159,8 @@ Resources:
           AttributeType: S
         - AttributeName: next_review_at
           AttributeType: S
+        - AttributeName: deck_id
+          AttributeType: S
       KeySchema:
         - AttributeName: user_id
           KeyType: HASH
@@ -173,6 +175,23 @@ Resources:
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
+        # deck_id-due-index: デッキ別カード集計 (get_deck_card_counts / get_deck_due_counts) を
+        # COUNT クエリ化するための GSI。カウント用途のみのため Projection は KEYS_ONLY で最小化する。
+        # next_review_at を RANGE キーに置くことで due 集計を KeyCondition (deck_id = :d AND
+        # next_review_at <= :now) で絞り込める。next_review_at は ISO8601 文字列で、辞書順比較が
+        # 時刻順と一致する (review #11)。
+        # 注意 1 (スパースインデックス): deck_id 属性を持たないカードはこの GSI に投影されないため、
+        # 未分類カード (deck_id なし) は集計対象に含まれない。
+        # 注意 2 (オンラインバックフィル): 既存テーブルへの GSI 追加は DynamoDB が
+        # バックフィルを自動実行する。バックフィル完了までは GSI クエリが不完全な結果を返し得る。
+        - IndexName: deck_id-due-index
+          KeySchema:
+            - AttributeName: deck_id
+              KeyType: HASH
+            - AttributeName: next_review_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: KEYS_ONLY
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
       SSESpecification:

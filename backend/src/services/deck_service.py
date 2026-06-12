@@ -344,10 +344,20 @@ class DeckService:
     ) -> Dict[str, int]:
         """Get card counts per deck.
 
-        Queries the Cards table for the user and counts cards per deck_id.
+        デッキごとに deck_id-due-index GSI へ COUNT クエリを発行して集計する。
+        旧実装はユーザーの全カードを Query してアプリ側で deck_id 別に数えていたため、
+        コスト・レイテンシがユーザーの総カード数に線形比例していた (review #11)。
+        本実装ではデッキ数 N に対して N 回のクエリになるが、各クエリは対象デッキの
+        カード数にのみ比例し、Select="COUNT" によりカード本体の読み取りも発生しない。
+
+        注意 (スパースインデックス): deck_id 属性を持たないカード (未分類) は GSI に
+        投影されないため、deck_ids に渡されたデッキのカードのみが対象となる。これは
+        旧実装が deck_id を持たないカードを除外していた挙動と一致する。
 
         Args:
-            user_id: The user's ID.
+            user_id: The user's ID. (互換性維持のため受け取るが、GSI は deck_id を
+                HASH キーとするため絞り込みには使用しない。デッキは user 固有のため
+                deck_id だけでユーザー境界は保たれる。)
             deck_ids: List of deck IDs to count for.
 
         Returns:
@@ -356,44 +366,57 @@ class DeckService:
         if not deck_ids:
             return {}
 
-        # TODO: パフォーマンス改善 - 全カードスキャンを GSI カウントまたは
-        # DynamoDB Streams + カウンターテーブルに置き換える（MVP後対応）
         counts: Dict[str, int] = {deck_id: 0 for deck_id in deck_ids}
 
-        try:
-            # Query all cards for the user
-            query_kwargs: Dict[str, Any] = {
-                "KeyConditionExpression": "user_id = :user_id",
-                "ExpressionAttributeValues": {":user_id": user_id},
-                "ProjectionExpression": "deck_id",
-            }
+        for deck_id in deck_ids:
+            try:
+                query_kwargs: Dict[str, Any] = {
+                    "IndexName": "deck_id-due-index",
+                    "KeyConditionExpression": "deck_id = :deck_id",
+                    "ExpressionAttributeValues": {":deck_id": deck_id},
+                    "Select": "COUNT",
+                }
 
-            while True:
-                response = self.cards_table.query(**query_kwargs)
-                for item in response.get("Items", []):
-                    card_deck_id = item.get("deck_id")
-                    if card_deck_id and card_deck_id in counts:
-                        counts[card_deck_id] += 1
-                last_key = response.get("LastEvaluatedKey")
-                if not last_key:
-                    break
-                query_kwargs["ExclusiveStartKey"] = last_key
+                while True:
+                    response = self.cards_table.query(**query_kwargs)
+                    # 複数ページにまたがる場合は各ページの Count を合算する。
+                    counts[deck_id] += response.get("Count", 0)
+                    last_key = response.get("LastEvaluatedKey")
+                    if not last_key:
+                        break
+                    query_kwargs["ExclusiveStartKey"] = last_key
+            except ClientError as e:
+                # GSI 未作成環境 (古いローカルテーブル等) では ResourceNotFoundException
+                # 等で失敗し得る。フォールバックは行わず、原因を明示してログに残す。
+                logger.warning(
+                    "Failed to get deck card count for deck "
+                    f"{deck_id} (deck_id-due-index GSI が必要): {e}"
+                )
 
-            return counts
-        except ClientError as e:
-            logger.warning(f"Failed to get deck card counts: {e}")
-            return counts
+        return counts
 
     def get_deck_due_counts(
         self, user_id: str, deck_ids: List[str]
     ) -> Dict[str, int]:
         """Get due card counts per deck.
 
-        Queries the Cards table using the user_id-due-index GSI
-        and counts due cards per deck_id.
+        デッキごとに deck_id-due-index GSI へ COUNT クエリを発行し、
+        next_review_at <= 現在時刻 のカードのみを集計する。
+        旧実装は user_id-due-index を全件読みしてアプリ側で deck_id 別に数えていたため、
+        ユーザーの due カード総数に線形比例していた (review #11)。本実装は GSI の
+        RANGE キー (next_review_at) を KeyCondition で絞り込み、Select="COUNT" で
+        カード本体を読まずに件数のみ取得する。
+
+        due の定義 (旧実装とのセマンティクス一致):
+          - 現在時刻は datetime.now(timezone.utc) (UTC) で生成する (旧実装と同一)。
+          - 境界は next_review_at <= now の包含 (<=) で、旧実装の比較演算子と同一。
+          - next_review_at は ISO8601 文字列で保存されており、辞書順比較が時刻順と
+            一致するため、文字列の <= 比較で正しく due 判定できる。
+            (旧実装も user_id-due-index 上で同じ文字列 <= 比較を行っていた。)
 
         Args:
-            user_id: The user's ID.
+            user_id: The user's ID. (get_deck_card_counts と同様、互換性維持のため
+                受け取るが GSI の絞り込みには使用しない。)
             deck_ids: List of deck IDs to count for.
 
         Returns:
@@ -402,37 +425,38 @@ class DeckService:
         if not deck_ids:
             return {}
 
-        # TODO: パフォーマンス改善 - 全カードスキャンを GSI カウントまたは
-        # DynamoDB Streams + カウンターテーブルに置き換える（MVP後対応）
         counts: Dict[str, int] = {deck_id: 0 for deck_id in deck_ids}
         now = datetime.now(timezone.utc)
+        now_iso = now.isoformat()
 
-        try:
-            query_kwargs: Dict[str, Any] = {
-                "IndexName": "user_id-due-index",
-                "KeyConditionExpression": "user_id = :user_id AND next_review_at <= :now",
-                "ExpressionAttributeValues": {
-                    ":user_id": user_id,
-                    ":now": now.isoformat(),
-                },
-                "ProjectionExpression": "deck_id",
-            }
+        for deck_id in deck_ids:
+            try:
+                query_kwargs: Dict[str, Any] = {
+                    "IndexName": "deck_id-due-index",
+                    "KeyConditionExpression": (
+                        "deck_id = :deck_id AND next_review_at <= :now"
+                    ),
+                    "ExpressionAttributeValues": {
+                        ":deck_id": deck_id,
+                        ":now": now_iso,
+                    },
+                    "Select": "COUNT",
+                }
 
-            while True:
-                response = self.cards_table.query(**query_kwargs)
-                for item in response.get("Items", []):
-                    card_deck_id = item.get("deck_id")
-                    if card_deck_id and card_deck_id in counts:
-                        counts[card_deck_id] += 1
-                last_key = response.get("LastEvaluatedKey")
-                if not last_key:
-                    break
-                query_kwargs["ExclusiveStartKey"] = last_key
+                while True:
+                    response = self.cards_table.query(**query_kwargs)
+                    counts[deck_id] += response.get("Count", 0)
+                    last_key = response.get("LastEvaluatedKey")
+                    if not last_key:
+                        break
+                    query_kwargs["ExclusiveStartKey"] = last_key
+            except ClientError as e:
+                logger.warning(
+                    "Failed to get deck due count for deck "
+                    f"{deck_id} (deck_id-due-index GSI が必要): {e}"
+                )
 
-            return counts
-        except ClientError as e:
-            logger.warning(f"Failed to get deck due counts: {e}")
-            return counts
+        return counts
 
     def _get_deck_count(self, user_id: str) -> int:
         """Get the number of decks for a user.
