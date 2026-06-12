@@ -167,16 +167,27 @@ class ApiClient {
     deckId?: string,
     options?: { signal?: AbortSignal },
   ): Promise<Card[]> {
-    // 【クエリ文字列構築】: deckId が指定された場合のみ deck_id パラメータを追加
-    const searchParams = new URLSearchParams();
-    if (deckId) searchParams.set("deck_id", deckId);
-    const qs = searchParams.toString();
-    // F-3: signal を fetch まで伝播し、古いリクエストを実際にキャンセルする
-    const response = await this.request<{ cards: Card[] }>(
-      `/cards${qs ? `?${qs}` : ""}`,
-      { signal: options?.signal },
-    );
-    return response.cards;
+    const cards: Card[] = [];
+    let cursor: string | undefined;
+
+    do {
+      const searchParams = new URLSearchParams({ limit: "100" });
+      if (deckId) searchParams.set("deck_id", deckId);
+      if (cursor) searchParams.set("cursor", cursor);
+
+      // The cards screen performs client-side search and sorting, so it needs
+      // every page rather than silently limiting the visible collection.
+      const response = await this.request<{
+        cards: Card[];
+        next_cursor?: string | null;
+      }>(`/cards?${searchParams.toString()}`, {
+        signal: options?.signal,
+      });
+      cards.push(...response.cards);
+      cursor = response.next_cursor ?? undefined;
+    } while (cursor);
+
+    return cards;
   }
 
   async getCard(id: string): Promise<Card> {

@@ -961,4 +961,43 @@ describe('ApiClient', () => {
       expect(typeof result.user_id).toBe('string');
     });
   });
+
+  describe('getCards pagination', () => {
+    it('next_cursor を最後まで追って全カードを返す', async () => {
+      mockFetch
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({
+            cards: [{ card_id: 'card-1', front: 'Q1', back: 'A1' }],
+            next_cursor: 'cursor-1',
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({
+            cards: [{ card_id: 'card-2', front: 'Q2', back: 'A2' }],
+            next_cursor: null,
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        );
+
+      const { apiClient } = await import('@/services/api');
+      const result = await apiClient.getCards('deck-1');
+
+      expect(result.map((card) => card.card_id)).toEqual(['card-1', 'card-2']);
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        1,
+        'https://api.example.com/cards?limit=100&deck_id=deck-1',
+        expect.any(Object),
+      );
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        2,
+        'https://api.example.com/cards?limit=100&deck_id=deck-1&cursor=cursor-1',
+        expect.any(Object),
+      );
+    });
+  });
 });

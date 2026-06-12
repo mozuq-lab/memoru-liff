@@ -531,6 +531,46 @@ class TestCardServiceList:
         for card in cards:
             assert card.deck_id == "deck-1"
 
+    def test_list_cards_by_deck_continues_past_empty_filtered_page(
+        self, card_service, monkeypatch
+    ):
+        """Deck filtering continues when DynamoDB filters every item on a page."""
+        matching_item = {
+            "user_id": "test-user-id",
+            "card_id": "matching-card",
+            "front": "Q",
+            "back": "A",
+            "deck_id": "deck-1",
+            "ease_factor": "2.5",
+            "interval": 0,
+            "repetitions": 0,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        calls = []
+
+        def query(**kwargs):
+            calls.append(kwargs.copy())
+            if len(calls) == 1:
+                return {
+                    "Items": [],
+                    "LastEvaluatedKey": {
+                        "user_id": "test-user-id",
+                        "card_id": "non-matching-card",
+                    },
+                }
+            return {"Items": [matching_item]}
+
+        monkeypatch.setattr(card_service.table, "query", query)
+
+        cards, cursor = card_service.list_cards(
+            "test-user-id", limit=1, deck_id="deck-1"
+        )
+
+        assert [card.card_id for card in cards] == ["matching-card"]
+        assert cursor is None
+        assert calls[1]["ExclusiveStartKey"]["card_id"] == "non-matching-card"
+
 
 class TestCardServiceDueCards:
     """Tests for CardService.get_due_cards method."""
