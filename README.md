@@ -7,7 +7,8 @@ LINE ベースの暗記カードアプリケーション。SRS (Spaced Repetitio
 Memoru は LINE LIFF (LINE Front-end Framework) を活用した暗記カードアプリです。主な機能：
 
 - AI によるカード自動生成（Strands Agents SDK / Amazon Bedrock）
-- AI による回答採点・学習アドバイス
+- URL からのカード自動生成（LINE に URL を送信 → SQS ワーカーで非同期生成・プレビュー配信）
+- AI による回答採点・学習アドバイス・カード内容の AI 補足
 - AI チューター（フリートーク・クイズ・弱点克服の3モード対話学習）
 - SM-2 アルゴリズムによる復習スケジューリング
 - LINE 通知による復習リマインダー
@@ -58,6 +59,7 @@ memoru-liff/
 │   ├── src/
 │   │   ├── components/    # UI コンポーネント
 │   │   ├── config/        # 設定（OIDC 等）
+│   │   ├── constants/     # 共有定数
 │   │   ├── contexts/      # React Context
 │   │   ├── hooks/         # カスタムフック
 │   │   ├── pages/         # ページコンポーネント
@@ -266,10 +268,17 @@ aws cloudfront create-invalidation --distribution-id YOUR_DIST_ID --paths "/*"
 
 ### CI/CD
 
-GitHub Actions (`deploy.yml`) で CI/CD が設定されています。
+GitHub Actions で CI/CD が設定されています。
 
-- **Push 時** (`backend/**`, `frontend/**` の変更): テストのみ実行（バックエンド pytest + フロントエンド type-check/test/build）
-- **手動トリガー** (`workflow_dispatch`): テスト + デプロイ（dev / staging / prod を選択可能）
+**PR 時** (`ci.yml`): 以下の 3 job を実行
+
+- Backend Tests: ruff + mypy + pytest（カバレッジ付き）
+- Frontend Tests: type-check + Vitest
+- Infrastructure (CDK) Tests: build + Jest + `cdk synth --all`
+
+**main への push 時** (`deploy.yml`, `backend/**` / `frontend/**` の変更): テストのみ実行（バックエンド pytest + フロントエンド type-check/test/build）
+
+**手動トリガー** (`workflow_dispatch`): テスト + デプロイ（dev / staging / prod を選択可能）
 
 #### 必要な GitHub Secrets/Variables
 
@@ -322,6 +331,8 @@ GitHub Actions (`deploy.yml`) で CI/CD が設定されています。
 | DELETE | `/cards/{cardId}` | カード削除 |
 | GET | `/cards/due` | 復習期限カード取得 |
 | POST | `/cards/generate` | AI カード生成 |
+| POST | `/cards/generate-from-url` | URL からの AI カード生成 |
+| POST | `/cards/refine` | カード内容の AI 補足（表面・裏面の改善） |
 
 ### デッキ
 
@@ -364,6 +375,16 @@ GitHub Actions (`deploy.yml`) で CI/CD が設定されています。
 |---------|------|------|
 | GET | `/advice` | 学習アドバイス取得 |
 
+### ブラウザプロファイル（準備中）
+
+認証付きページ取得（AgentCore Browser 連携）用のプロファイル管理 API。バックエンドのブラウザ連携は現在無効化されており、`profile_id` 指定の URL カード生成は 501 を返す。
+
+| メソッド | パス | 説明 |
+|---------|------|------|
+| GET | `/browser-profiles` | プロファイル一覧取得 |
+| POST | `/browser-profiles` | プロファイル作成 |
+| DELETE | `/browser-profiles/{profileId}` | プロファイル削除 |
+
 ### Webhook
 
 | メソッド | パス | 説明 |
@@ -391,8 +412,11 @@ cd backend && make build
 
 ```bash
 aws dynamodb list-tables --endpoint-url http://localhost:8000 --region ap-northeast-1
-# 期待結果: memoru-users-dev, memoru-cards-dev, memoru-reviews-dev, memoru-decks-dev, memoru-tutor-sessions-dev
+# 期待結果: memoru-users-dev, memoru-cards-dev, memoru-reviews-dev, memoru-decks-dev,
+#           memoru-tutor-sessions-dev, memoru-browser-profiles-dev, memoru-processed-events-dev
 ```
+
+テーブルが不足している場合は `make local-db` を再実行すると、既存テーブルはそのままに不足分だけが作成されます。
 
 ### Keycloak が起動しない
 
@@ -408,6 +432,10 @@ curl -s http://localhost:8180/health/ready
 ```bash
 cd backend && docker compose logs keycloak
 ```
+
+### URL カード生成がローカルで同期実行される
+
+本番では LINE Webhook が URL カード生成を SQS ワーカー（`UrlGenerateWorkerFunction`）へ非同期ディスパッチしますが、SAM local は SQS → Lambda トリガーを再現できません。そのため `env.json` で `URL_WORKER_MODE: "inline"` を設定しており、ローカルでは Webhook 内で同期実行されます（動作確認の操作感は同じです）。
 
 ### JWT フォールバックが動作しない（SAM local）
 

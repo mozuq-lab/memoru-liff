@@ -9,10 +9,11 @@ LINE ベースの暗記カードアプリケーション。SRS (Spaced Repetitio
 ## 技術スタック
 
 ### バックエンド
-- Python 3.12 / AWS SAM (Lambda, API Gateway, DynamoDB)
+- Python 3.12 / AWS SAM (Lambda, API Gateway, DynamoDB, SQS)
 - AWS Lambda Powertools / Pydantic v2
 - Strands Agents SDK / Amazon Bedrock (Claude)
 - Bedrock AgentCore Memory SDK (SessionManager)
+- SQS: LINE Webhook の URL カード生成を非同期ワーカーで処理（ローカルは `URL_WORKER_MODE=inline` で同期実行）
 
 ### フロントエンド
 - React 19 + TypeScript 5.x / Vite 7 / Tailwind CSS 4
@@ -37,6 +38,8 @@ backend/src/
 
 frontend/src/
 ├── components/    # UI コンポーネント
+├── config/        # 設定 (OIDC 等)
+├── constants/     # 共有定数
 ├── contexts/      # React Context
 ├── hooks/         # カスタムフック
 ├── pages/         # ページコンポーネント
@@ -54,7 +57,8 @@ infrastructure/cdk/
 docs/
 ├── spec/{要件名}/    # 要件定義
 ├── design/{要件名}/  # 設計文書
-└── tasks/{要件名}/   # タスクファイル
+├── tasks/{要件名}/   # タスクファイル
+└── reviews/          # コードレビュー記録（指摘と対応状況）
 ```
 
 ## 開発コマンド
