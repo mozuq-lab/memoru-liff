@@ -65,7 +65,7 @@ export const SettingsPage = () => {
       setUser(data);
       setSelectedTime(data.notification_time || '09:00');
       setSelectedDayStartHour(data.day_start_hour ?? 4);
-    } catch (err) {
+    } catch {
       setError('設定の取得に失敗しました');
     } finally {
       setIsLoading(false);
@@ -96,7 +96,7 @@ export const SettingsPage = () => {
       });
       setUser(updatedUser);
       setSuccessMessage('設定を保存しました');
-    } catch (err) {
+    } catch {
       setError('設定の保存に失敗しました');
     } finally {
       setIsSaving(false);
@@ -111,7 +111,7 @@ export const SettingsPage = () => {
     try {
       await logout();
       navigate('/');
-    } catch (err) {
+    } catch {
       setError('ログアウトに失敗しました');
       setIsLoggingOut(false);
     }

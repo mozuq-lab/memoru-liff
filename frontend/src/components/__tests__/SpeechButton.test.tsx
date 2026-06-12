@@ -170,5 +170,10 @@ describe("SpeechButton", () => {
       await user.click(screen.getByRole("button"));
       expect(onClick).toHaveBeenCalledTimes(1);
     });
+
+    it("読み上げテキストが空の場合、ボタンが非活性状態になる", () => {
+      renderSpeechButton({ text: "   " });
+      expect(screen.getByRole("button")).toBeDisabled();
+    });
   });
 });

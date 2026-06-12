@@ -11,6 +11,9 @@ describe('main.tsx', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    vi.doMock('react-dom/client', () => ({
+      createRoot: vi.fn(() => ({ render: vi.fn() })),
+    }));
   });
 
   describe('TC-MAIN-001: 起動時のOIDC設定バリデーション', () => {

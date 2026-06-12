@@ -16,12 +16,13 @@ interface SpeechButtonProps {
 }
 
 export const SpeechButton = ({
-  text: _text,
+  text,
   isSpeaking,
   onClick,
   disabled = false,
   label,
 }: SpeechButtonProps) => {
+  const isDisabled = disabled || text.trim().length === 0;
   const ariaLabel = label
     ? isSpeaking
       ? `${label}の読み上げを停止`
@@ -34,11 +35,11 @@ export const SpeechButton = ({
     <button
       type="button"
       onClick={onClick}
-      disabled={disabled}
+      disabled={isDisabled}
       aria-label={ariaLabel}
       className={[
         "rounded-full p-2 leading-none transition-colors min-h-[36px] min-w-[36px] flex items-center justify-center text-base",
-        disabled
+        isDisabled
           ? "opacity-40 cursor-not-allowed bg-gray-100 text-gray-400"
           : isSpeaking
             ? "bg-blue-600 text-white hover:bg-blue-700 active:bg-blue-800"

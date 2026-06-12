@@ -37,6 +37,7 @@ describe("useSpeech", () => {
       this.rate = 1;
       this.onend = null;
       this.onerror = null;
+      // eslint-disable-next-line @typescript-eslint/no-this-alias -- captures the constructor instance for event assertions
       lastUtterance = this;
     });
 
