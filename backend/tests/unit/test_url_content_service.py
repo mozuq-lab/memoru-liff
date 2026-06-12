@@ -8,6 +8,23 @@ import pytest
 from services.url_content_service import UrlContentService, PageContent, ContentFetchError
 
 
+@pytest.fixture(autouse=True)
+def _stub_dns_resolution():
+    """Pin DNS resolution to a fixed public IP for all content-service tests.
+
+    The fetch path resolves+validates the host once and pins the connection to
+    a verified IP (SSRF / DNS-rebinding defence). Tests use non-resolvable
+    example hostnames, so without this stub every fetch would fail at
+    resolution. Returning a single public IP keeps the existing behavioural
+    assertions intact while exercising the pinning code path.
+    """
+    with patch(
+        "services.url_content_service.resolve_and_validate_host",
+        return_value=["93.184.216.34"],
+    ) as mock_resolve:
+        yield mock_resolve
+
+
 def _setup_stream_client(
     mock_client_cls,
     *,
@@ -204,6 +221,188 @@ class TestUrlContentService:
         """Private IP URLs are rejected."""
         with pytest.raises(ContentFetchError):
             self.service.fetch_content("https://192.168.1.1/admin")
+
+
+class TestIpPinning:
+    """Tests for IP-pinning SSRF / DNS-rebinding defence (joint-review #9)."""
+
+    def setup_method(self) -> None:
+        self.service = UrlContentService()
+
+    def test_build_pinned_request_pins_ipv4_and_sets_host_and_sni(self) -> None:
+        """Request URL is the resolved IP; Host + sni_hostname keep the real host."""
+        with patch(
+            "services.url_content_service.resolve_and_validate_host",
+            return_value=["93.184.216.34"],
+        ):
+            with httpx.Client() as client:
+                req = self.service._build_pinned_request(
+                    client, "https://example.com/article?q=1"
+                )
+
+        assert req.url.host == "93.184.216.34"
+        assert req.url.path == "/article"
+        assert req.url.query == b"q=1"
+        # Host header carries the ORIGINAL hostname for vhost/CDN routing.
+        assert req.headers["host"] == "example.com"
+        # SNI / cert verification done against the original hostname.
+        assert req.extensions["sni_hostname"] == "example.com"
+
+    def test_build_pinned_request_resolves_host_only_once(self) -> None:
+        """The host is resolved exactly once (no TOCTOU second resolution)."""
+        with patch(
+            "services.url_content_service.resolve_and_validate_host",
+            return_value=["93.184.216.34"],
+        ) as mock_resolve:
+            with httpx.Client() as client:
+                self.service._build_pinned_request(client, "https://example.com/x")
+
+        mock_resolve.assert_called_once_with("example.com")
+
+    def test_build_pinned_request_preserves_port(self) -> None:
+        """A non-default port is preserved in both the pinned URL and Host header."""
+        with patch(
+            "services.url_content_service.resolve_and_validate_host",
+            return_value=["93.184.216.34"],
+        ):
+            with httpx.Client() as client:
+                req = self.service._build_pinned_request(
+                    client, "https://example.com:8443/path"
+                )
+
+        assert req.url.host == "93.184.216.34"
+        assert req.url.port == 8443
+        assert req.headers["host"] == "example.com:8443"
+
+    def test_build_pinned_request_ipv6_literal_bracketed(self) -> None:
+        """IPv6 resolved address is bracketed in the URL host part."""
+        with patch(
+            "services.url_content_service.resolve_and_validate_host",
+            return_value=["2606:2800:220:1:248:1893:25c8:1946"],
+        ):
+            with httpx.Client() as client:
+                req = self.service._build_pinned_request(
+                    client, "https://example.com/path"
+                )
+
+        assert req.url.host == "2606:2800:220:1:248:1893:25c8:1946"
+        assert req.extensions["sni_hostname"] == "example.com"
+        assert req.headers["host"] == "example.com"
+
+    def test_build_pinned_request_rejects_private_resolution(self) -> None:
+        """If resolution validation rejects (private IP mixed in), it propagates."""
+        from utils.url_validator import UrlValidationError
+
+        with patch(
+            "services.url_content_service.resolve_and_validate_host",
+            side_effect=UrlValidationError("private"),
+        ):
+            with httpx.Client() as client:
+                with pytest.raises(UrlValidationError):
+                    self.service._build_pinned_request(client, "https://evil.example.com/")
+
+    def test_build_pinned_request_nxdomain_raises_fetch_error(self) -> None:
+        """Empty resolution (NXDOMAIN) surfaces as a ContentFetchError."""
+        with patch(
+            "services.url_content_service.resolve_and_validate_host",
+            return_value=[],
+        ):
+            with httpx.Client() as client:
+                with pytest.raises(ContentFetchError, match="resolve"):
+                    self.service._build_pinned_request(client, "https://missing.example.com/")
+
+    def test_fetch_blocks_when_any_resolved_ip_is_private(self) -> None:
+        """A host whose resolution includes a private IP is rejected (rebinding)."""
+        from utils.url_validator import UrlValidationError
+
+        # resolve_and_validate_host raises when ANY address is private.
+        with patch(
+            "services.url_content_service.resolve_and_validate_host",
+            side_effect=UrlValidationError(
+                "Access to private/internal IP addresses is blocked: rebind.example.com"
+            ),
+        ):
+            with pytest.raises(ContentFetchError, match="SSRF"):
+                self.service.fetch_content("https://rebind.example.com/page")
+
+    @patch("services.url_content_service.httpx.Client")
+    def test_fetch_passes_pinned_request_to_stream(self, mock_client_cls: MagicMock) -> None:
+        """The streamed request uses the pinned IP URL, Host header and sni_hostname."""
+        html = (
+            "<html><head><title>T</title></head><body>"
+            "<p>Plenty of meaningful content for the extractor to accept here.</p>"
+            "</body></html>"
+        )
+        mock_client, resp = _setup_stream_client(
+            mock_client_cls, text=html, url="https://example.com/article"
+        )
+        # Provide a real-ish build_request that records the pinned values.
+        real_req = httpx.Request(
+            "GET",
+            "https://93.184.216.34/article",
+            headers={"Host": "example.com"},
+            extensions={"sni_hostname": "example.com"},
+        )
+        mock_client.build_request.return_value = real_req
+
+        with patch(
+            "services.url_content_service.resolve_and_validate_host",
+            return_value=["93.184.216.34"],
+        ):
+            self.service.fetch_content("https://example.com/article")
+
+        # stream() called with the pinned IP URL, Host header, sni extension.
+        args, kwargs = mock_client.stream.call_args
+        assert str(args[1]).startswith("https://93.184.216.34/")
+        assert kwargs["headers"]["Host"] == "example.com"
+        assert kwargs["extensions"]["sni_hostname"] == "example.com"
+
+    @patch("services.url_content_service.httpx.Client")
+    def test_redirect_hop_repins_each_hop(self, mock_client_cls: MagicMock) -> None:
+        """Each redirect hop independently resolves + validates + pins."""
+        # First response: redirect to a different host; second: real HTML.
+        redirect_resp = MagicMock()
+        redirect_resp.is_redirect = True
+        redirect_resp.status_code = 302
+        redirect_resp.headers = {"location": "https://final.example.com/dest"}
+
+        ok_resp = MagicMock()
+        ok_resp.is_redirect = False
+        ok_resp.status_code = 200
+        ok_resp.headers = {"content-type": "text/html; charset=utf-8"}
+        ok_resp.encoding = "utf-8"
+        ok_resp.url = "https://final.example.com/dest"
+        ok_resp.iter_bytes.return_value = [
+            b"<html><head><title>F</title></head><body>"
+            b"<p>Plenty of meaningful destination content present here now.</p>"
+            b"</body></html>"
+        ]
+
+        def make_cm(resp):
+            cm = MagicMock()
+            cm.__enter__ = MagicMock(return_value=resp)
+            cm.__exit__ = MagicMock(return_value=False)
+            return cm
+
+        mock_client = MagicMock()
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client.stream.side_effect = [make_cm(redirect_resp), make_cm(ok_resp)]
+        mock_client.build_request.side_effect = lambda *a, **k: httpx.Request(
+            "GET", "https://1.2.3.4/x", headers={"Host": "h"}, extensions={}
+        )
+        mock_client_cls.return_value = mock_client
+
+        with patch(
+            "services.url_content_service.resolve_and_validate_host",
+            return_value=["93.184.216.34"],
+        ) as mock_resolve:
+            result = self.service.fetch_content("https://start.example.com/a")
+
+        # Resolved twice: once for the start host, once for the redirect host.
+        hosts = [c.args[0] for c in mock_resolve.call_args_list]
+        assert hosts == ["start.example.com", "final.example.com"]
+        assert result.url == "https://final.example.com/dest"
 
 
 class TestSpaDetection:

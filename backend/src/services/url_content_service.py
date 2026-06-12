@@ -2,16 +2,22 @@
 
 from __future__ import annotations
 
+import ipaddress
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional, Tuple
+from urllib.parse import urlparse, urlunparse
 
 import httpx
 from aws_lambda_powertools import Logger
 from bs4 import BeautifulSoup
 
-from utils.url_validator import UrlValidationError, validate_url
+from utils.url_validator import (
+    UrlValidationError,
+    resolve_and_validate_host,
+    validate_url,
+)
 
 logger = Logger(child=True)
 
@@ -103,6 +109,79 @@ class UrlContentService:
         page = self._fetch_via_http(url, allow_spa_fallback=True, profile_id=profile_id)
         return page
 
+    def _build_pinned_request(
+        self,
+        client: httpx.Client,
+        url: str,
+    ) -> httpx.Request:
+        """Build a GET request pinned to a freshly-validated resolved IP.
+
+        SSRF / DNS-rebinding defence (joint-review #9): instead of letting httpx
+        resolve the hostname independently at connect time (which would create a
+        TOCTOU window after ``validate_url``), we resolve the host *once* here,
+        verify *every* resolved address is public, pick one, and connect directly
+        to that IP. This eliminates the second, unchecked resolution.
+
+        To keep TLS and virtual-host routing correct while connecting to a raw
+        IP:
+          * The request URL's host is replaced with the validated IP (port
+            preserved). httpx therefore opens the TCP connection to that exact
+            IP — no re-resolution happens.
+          * The ``Host`` header is set to the original hostname so origin
+            virtual-host / CDN routing is unchanged (Host + SNI together make
+            the request indistinguishable from a normal one).
+          * ``extensions={"sni_hostname": original_host}`` makes httpcore pass
+            the original hostname as ``server_hostname`` to
+            ``ssl_context.wrap_socket``. That drives both the TLS SNI extension
+            and certificate hostname verification, so the cert is still validated
+            against the real hostname (not the IP).
+
+        Raises:
+            UrlValidationError: If the host resolves to a private/internal IP.
+            ContentFetchError: If the host cannot be resolved (no records).
+        """
+        parsed = urlparse(url)
+        original_host = parsed.hostname
+        if not original_host:
+            raise ContentFetchError("URL must have a valid hostname")
+
+        # Resolve once and verify *all* addresses are public (rebinding-safe).
+        addresses = resolve_and_validate_host(original_host)
+        if not addresses:
+            # NXDOMAIN / no records — surface as a connection error, matching
+            # the previous behaviour where httpx would fail to resolve.
+            raise ContentFetchError(f"Failed to resolve host: {original_host}")
+
+        # All addresses validated as public; the first is fine to pin to.
+        pinned_ip = addresses[0]
+
+        # Embed IPv6 literals in bracket form; leave IPv4 / hostnames bare.
+        try:
+            host_part = (
+                f"[{pinned_ip}]"
+                if isinstance(ipaddress.ip_address(pinned_ip), ipaddress.IPv6Address)
+                else pinned_ip
+            )
+        except ValueError:  # pragma: no cover - resolve_host returns IP literals
+            host_part = pinned_ip
+
+        # Preserve the original port (urlparse normalises it to None when absent).
+        netloc = f"{host_part}:{parsed.port}" if parsed.port is not None else host_part
+        pinned_url = urlunparse(parsed._replace(netloc=netloc))
+
+        # Host header carries the original hostname (incl. explicit port if any)
+        # so virtual-host routing is unaffected by the IP pinning.
+        host_header = original_host
+        if parsed.port is not None:
+            host_header = f"{original_host}:{parsed.port}"
+
+        return client.build_request(
+            "GET",
+            pinned_url,
+            headers={"Host": host_header},
+            extensions={"sni_hostname": original_host},
+        )
+
     def _fetch_via_http(
         self,
         url: str,
@@ -111,7 +190,9 @@ class UrlContentService:
     ) -> PageContent:
         """Fetch content using HTTP GET with optional SPA fallback.
 
-        Manually follows redirects to validate each hop against SSRF.
+        Manually follows redirects, and for each hop independently re-resolves,
+        re-validates and re-pins the connection to a verified IP (SSRF /
+        DNS-rebinding defence).
         """
         try:
             with httpx.Client(
@@ -121,14 +202,30 @@ class UrlContentService:
             ) as client:
                 current_url = url
                 for _ in range(_MAX_REDIRECTS):
-                    # Stream the response so the body can be size-capped *before*
-                    # being fully loaded into memory (N-7: prevent memory exhaustion).
-                    with client.stream("GET", current_url) as response:
+                    # Resolve + validate + pin this hop's connection to a verified
+                    # IP, then stream the response so the body can be size-capped
+                    # *before* being fully loaded into memory (N-7).
+                    try:
+                        request = self._build_pinned_request(client, current_url)
+                    except UrlValidationError as e:
+                        raise ContentFetchError(
+                            f"Blocked by SSRF protection: {e}"
+                        ) from e
+                    with client.stream(
+                        "GET", request.url, headers=request.headers, extensions=request.extensions
+                    ) as response:
                         if response.is_redirect:
-                            redirect_url = str(response.next_request.url) if response.next_request else None
-                            if not redirect_url:
+                            location = response.headers.get("location")
+                            if not location:
                                 raise ContentFetchError("Redirect without Location header")
-                            # Validate redirect target against SSRF
+                            # Resolve the Location against the *original* hostname
+                            # URL (current_url), NOT the IP-pinned request URL, so
+                            # relative redirects keep the real host rather than the
+                            # raw pinned IP.
+                            redirect_url = str(httpx.URL(current_url).join(location))
+                            # Validate redirect target against SSRF. The next loop
+                            # iteration re-resolves + re-pins this hop, so each hop
+                            # gets the same resolve → validate → pin treatment.
                             try:
                                 redirect_url = validate_url(redirect_url)
                             except UrlValidationError as e:
@@ -186,7 +283,10 @@ class UrlContentService:
                                 )
 
                         html = buf.decode(response.encoding or "utf-8", errors="replace")
-                        final_url = str(response.url)
+                        # Report the original-host URL, not the IP-pinned one that
+                        # was actually dialled, so downstream consumers see the
+                        # real address.
+                        final_url = current_url
                         break
                 else:
                     raise ContentFetchError(
