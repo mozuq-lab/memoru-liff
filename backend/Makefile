@@ -16,14 +16,51 @@ build: ## Build SAM application (uses Docker container for Python 3.12)
 validate: ## Validate SAM template
 	sam validate --lint
 
-deploy-dev: build ## Deploy to development environment
-	sam deploy --config-env dev
+# ------------------------------------------------------------
+# 実環境固有の値は samconfig.toml にコミットせず、デプロイ時に環境変数から
+# --parameter-overrides を組み立てて注入する（public リポジトリ方針）。
+#
+# 必須（未設定なら fail-fast）:
+#   OIDC_ISSUER    OIDC Issuer URL (Cognito/Keycloak)
+#   OIDC_AUDIENCE  OIDC Audience (Cognito の場合は UserPool Client ID)
+# 任意（未設定なら template.yaml の既定値を使用。空文字は渡さない）:
+#   LINE_CHANNEL_ID, USE_STRANDS, TUTOR_SESSION_BACKEND,
+#   AGENTCORE_MEMORY_ID, BEDROCK_MODEL_ID
+#
+# 使い方:
+#   export OIDC_ISSUER=... OIDC_AUDIENCE=... && make deploy-dev
+# 詳細は docs/deployment-guide-prod.md を参照。
+# ------------------------------------------------------------
+define build_param_overrides
+	if [ -z "$$OIDC_ISSUER" ] || [ -z "$$OIDC_AUDIENCE" ]; then \
+		echo "ERROR: 必須の環境変数が未設定です。" >&2; \
+		[ -z "$$OIDC_ISSUER" ] && echo "  - OIDC_ISSUER (例: https://cognito-idp.ap-northeast-1.amazonaws.com/<UserPoolId>)" >&2; \
+		[ -z "$$OIDC_AUDIENCE" ] && echo "  - OIDC_AUDIENCE (例: <UserPool Client ID>)" >&2; \
+		echo "詳細: docs/deployment-guide-prod.md" >&2; \
+		exit 1; \
+	fi; \
+	if [ -z "$$LINE_CHANNEL_ID" ]; then \
+		echo "WARNING: LINE_CHANNEL_ID が未設定です。template.yaml の既定値(空)を使用します（LINE ID トークン検証は無効）。" >&2; \
+	fi; \
+	OVERRIDES="Environment=$(1) OidcIssuer=$$OIDC_ISSUER OidcAudience=$$OIDC_AUDIENCE"; \
+	[ -n "$$LINE_CHANNEL_ID" ]       && OVERRIDES="$$OVERRIDES LineChannelId=$$LINE_CHANNEL_ID"; \
+	[ -n "$$USE_STRANDS" ]           && OVERRIDES="$$OVERRIDES UseStrands=$$USE_STRANDS"; \
+	[ -n "$$TUTOR_SESSION_BACKEND" ] && OVERRIDES="$$OVERRIDES TutorSessionBackend=$$TUTOR_SESSION_BACKEND"; \
+	[ -n "$$AGENTCORE_MEMORY_ID" ]   && OVERRIDES="$$OVERRIDES AgentCoreMemoryId=$$AGENTCORE_MEMORY_ID"; \
+	[ -n "$$BEDROCK_MODEL_ID" ]      && OVERRIDES="$$OVERRIDES BedrockModelId=$$BEDROCK_MODEL_ID"
+endef
 
-deploy-staging: build ## Deploy to staging environment
-	sam deploy --config-env staging
+deploy-dev: build ## Deploy to development environment (requires OIDC_ISSUER, OIDC_AUDIENCE)
+	@$(call build_param_overrides,dev); \
+	sam deploy --config-env dev --parameter-overrides "$$OVERRIDES"
 
-deploy-prod: build ## Deploy to production environment
-	sam deploy --config-env prod
+deploy-staging: build ## Deploy to staging environment (requires OIDC_ISSUER, OIDC_AUDIENCE)
+	@$(call build_param_overrides,staging); \
+	sam deploy --config-env staging --parameter-overrides "$$OVERRIDES"
+
+deploy-prod: build ## Deploy to production environment (requires OIDC_ISSUER, OIDC_AUDIENCE)
+	@$(call build_param_overrides,prod); \
+	sam deploy --config-env prod --parameter-overrides "$$OVERRIDES"
 
 local-db: ## Start local DynamoDB
 	docker compose up -d dynamodb-local dynamodb-admin setup-tables

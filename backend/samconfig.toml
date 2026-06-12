@@ -19,7 +19,7 @@ capabilities = "CAPABILITY_IAM CAPABILITY_AUTO_EXPAND"
 confirm_changeset = true
 resolve_s3 = true
 region = "ap-northeast-1"
-parameter_overrides = "Environment=dev OidcIssuer=https://keycloak.example.com/realms/memoru"
+parameter_overrides = "Environment=dev"
 
 [default.local_start_api.parameters]
 warm_containers = "EAGER"
@@ -27,6 +27,15 @@ docker_network = "memoru-network"
 
 [default.local_invoke.parameters]
 docker_network = "memoru-network"
+
+# ------------------------------------------------------------
+# NOTE (public リポジトリ方針):
+# 実環境固有の値（OidcIssuer / OidcAudience / LineChannelId 等）は
+# このファイルにコミットしません。デプロイ時に環境変数 → Makefile が組み立てる
+# --parameter-overrides で外部注入します（CI は GitHub Environment Variables）。
+# 各環境セクションには Environment のみを固定し、残りは外部注入に委ねます。
+# 詳細は docs/deployment-guide-prod.md / deployment-guide-dev.md を参照。
+# ------------------------------------------------------------
 
 # Development environment
 [dev]
@@ -36,7 +45,7 @@ capabilities = "CAPABILITY_IAM CAPABILITY_AUTO_EXPAND"
 confirm_changeset = false
 resolve_s3 = true
 region = "ap-northeast-1"
-parameter_overrides = "Environment=dev OidcIssuer=https://keycloak.example.com/realms/memoru"
+parameter_overrides = "Environment=dev"
 
 # Staging environment
 [staging]
@@ -46,7 +55,7 @@ capabilities = "CAPABILITY_IAM CAPABILITY_AUTO_EXPAND"
 confirm_changeset = true
 resolve_s3 = true
 region = "ap-northeast-1"
-parameter_overrides = "Environment=staging OidcIssuer=https://keycloak.example.com/realms/memoru"
+parameter_overrides = "Environment=staging"
 
 # Production environment
 [prod]
@@ -56,4 +65,4 @@ capabilities = "CAPABILITY_IAM CAPABILITY_AUTO_EXPAND"
 confirm_changeset = true
 resolve_s3 = true
 region = "ap-northeast-1"
-parameter_overrides = "Environment=prod OidcIssuer=https://keycloak.your-domain.com/realms/memoru"
+parameter_overrides = "Environment=prod"
