@@ -95,6 +95,19 @@ class TestLinkLineHandler:
             # verify_id_token が line_user_id を返すようにモック
             mock_line_service.verify_id_token.return_value = "U1234567890abcdef1234567890abcdef"
             mock_user_service.get_or_create_user.return_value = MagicMock()
+            linked_user = MagicMock()
+            linked_user.to_response.return_value.model_dump.return_value = {
+                "user_id": "test-user-id",
+                "display_name": None,
+                "picture_url": None,
+                "line_linked": True,
+                "notification_time": "09:00",
+                "timezone": "Asia/Tokyo",
+                "day_start_hour": 4,
+                "created_at": "2024-01-01T00:00:00+00:00",
+                "updated_at": "2024-01-01T00:00:00+00:00",
+            }
+            mock_user_service.link_line.return_value = linked_user
 
             from api.handler import handler
             response = handler(event, lambda_context)
@@ -110,6 +123,11 @@ class TestLinkLineHandler:
             "test-user-id",
             "U1234567890abcdef1234567890abcdef",
         )  # 🔵
+
+        body = json.loads(response["body"])
+        assert body["success"] is True
+        assert body["data"]["user_id"] == "test-user-id"
+        assert body["data"]["line_linked"] is True
 
     def test_link_line_unauthorized_on_verification_failure(self, api_gateway_event, lambda_context):
         """TC-10: ID トークン検証失敗時に 401 エラーが返る.

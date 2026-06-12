@@ -9,7 +9,7 @@ from aws_lambda_powertools.event_handler.exceptions import NotFoundError
 from pydantic import ValidationError
 
 from api.shared import get_user_id_from_context, make_validation_error_response
-from models.user import LinkLineResponse, UserSettingsRequest
+from models.user import UserMutationResponse, UserSettingsRequest
 from services.user_service import (
     UserService,
     UserNotFoundError,
@@ -69,8 +69,11 @@ def link_line_account():
     try:
         user_service.get_or_create_user(user_id)
         line_user_id = line_service.verify_id_token(id_token)
-        user_service.link_line(user_id, line_user_id)
-        return LinkLineResponse(success=True, message="LINE account linked successfully").model_dump()
+        user = user_service.link_line(user_id, line_user_id)
+        return UserMutationResponse(
+            success=True,
+            data=user.to_response().model_dump(mode="json"),
+        ).model_dump(mode="json")
     except UserAlreadyLinkedError:
         return Response(
             status_code=409,
@@ -116,7 +119,10 @@ def update_user_settings():
             timezone=request.timezone,
             day_start_hour=request.day_start_hour,
         )
-        return {"success": True, "data": user.to_response().model_dump(mode="json")}
+        return UserMutationResponse(
+            success=True,
+            data=user.to_response().model_dump(mode="json"),
+        ).model_dump(mode="json")
     except UserNotFoundError:
         raise NotFoundError("User not found")
     except Exception as e:
@@ -133,7 +139,10 @@ def unlink_line():
 
     try:
         user = user_service.unlink_line(user_id)
-        return {"success": True, "data": user.to_response().model_dump(mode="json")}
+        return UserMutationResponse(
+            success=True,
+            data=user.to_response().model_dump(mode="json"),
+        ).model_dump(mode="json")
     except LineNotLinkedError:
         return Response(
             status_code=400,

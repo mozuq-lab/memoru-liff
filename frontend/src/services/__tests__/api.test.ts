@@ -341,7 +341,7 @@ describe('ApiClient', () => {
       // Given
       const mockUser = { user_id: 'test-user', line_user_id: 'U123' };
       mockFetch.mockResolvedValue(
-        new Response(JSON.stringify(mockUser), {
+        new Response(JSON.stringify({ success: true, data: mockUser }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         })
@@ -483,7 +483,7 @@ describe('ApiClient', () => {
         created_at: '2026-01-01T00:00:00Z',
       };
       mockFetch.mockResolvedValue(
-        new Response(JSON.stringify(mockUser), {
+        new Response(JSON.stringify({ success: true, data: mockUser }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         })
@@ -862,7 +862,7 @@ describe('ApiClient', () => {
       };
 
       mockFetch.mockResolvedValue(
-        new Response(JSON.stringify(mockResponse), {
+        new Response(JSON.stringify({ success: true, data: mockResponse }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         })
@@ -937,7 +937,7 @@ describe('ApiClient', () => {
       };
 
       mockFetch.mockResolvedValue(
-        new Response(JSON.stringify(mockServerResponse), {
+        new Response(JSON.stringify({ success: true, data: mockServerResponse }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         })
