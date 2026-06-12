@@ -128,7 +128,9 @@ new CognitoStack(app, 'MemoruCognitoDev', {
 });
 ```
 
-> **注意**: `cognitoDomainPrefix` はグローバルで一意である必要がある。`memoru-dev` が既に使用されている場合は `memoru-dev-<任意の識別子>` に変更すること。
+> **注意**: `cognitoDomainPrefix` はグローバルで一意である必要がある。`memoru-dev` が既に使用されている場合は、環境変数 `MEMORU_DEV_COGNITO_DOMAIN_PREFIX=memoru-dev-<任意の識別子>` を `export` して上書きする（app.ts を編集する必要はない）。
+>
+> dev 環境の app.ts 値（`localhost` ベースの callback URL・プレースホルダの Keycloak ドメイン）は実環境固有の値を含まないため、public リポジトリにコミットされたままで問題ない。CloudFront ドメイン等を callback に追加したい場合は Step 7 を参照。
 
 ### 2.2 デプロイの実行
 
@@ -338,39 +340,42 @@ aws secretsmanager describe-secret \
 
 ## Step 6: バックエンドのデプロイ（SAM）
 
-### 6.1 samconfig.toml の更新
+### 6.1 デプロイ用パラメータを環境変数で設定
 
-`backend/samconfig.toml` の `[dev.deploy.parameters]` セクションを、Step 2 で取得した Cognito の値に更新する。
+> **重要（public リポジトリ方針）**: 実環境値（Cognito UserPool ID / Client ID 等）は `samconfig.toml` に **コミットしない**。`samconfig.toml` には `Environment=dev` のみを固定し、残りのパラメータは **環境変数から `make deploy-dev` が `--parameter-overrides` を組み立てて注入** する。詳細は [deployment-guide-prod.md](./deployment-guide-prod.md) を参照。
 
-```toml
-[dev.deploy.parameters]
-stack_name = "memoru-backend-dev"
-capabilities = "CAPABILITY_IAM CAPABILITY_AUTO_EXPAND"
-confirm_changeset = false
-resolve_s3 = true
-region = "ap-northeast-1"
-parameter_overrides = "Environment=dev OidcIssuer=https://cognito-idp.ap-northeast-1.amazonaws.com/<UserPoolId> OidcAudience=<UserPoolClientId>"
+Step 2 で取得した Cognito の値を環境変数として設定する:
+
+```bash
+cd backend
+export OIDC_ISSUER="https://cognito-idp.ap-northeast-1.amazonaws.com/<UserPoolId>"
+export OIDC_AUDIENCE="<UserPoolClientId>"
+# 任意: LINE ID トークン検証を有効にする場合
+export LINE_CHANNEL_ID="<LINE Login Channel ID>"
 ```
 
 - `<UserPoolId>`: Step 2 の `UserPoolId`（例: `ap-northeast-1_XXXXXXXXX`）
 - `<UserPoolClientId>`: Step 2 の `UserPoolClientId`
 
-> **重要**: Cognito の場合、API Gateway JWT Authorizer の `audience` は **Client ID** と一致させる必要がある。`OidcAudience` パラメータにも `UserPoolClientId` を指定すること。`template.yaml` のデフォルト値は `liff-client`（Keycloak 用）なので、上書きが必要。
+> **重要**: Cognito の場合、API Gateway JWT Authorizer の `audience` は **Client ID** と一致させる必要がある。`OIDC_AUDIENCE` にも `UserPoolClientId` を指定すること。`template.yaml` のデフォルト値は `liff-client`（Keycloak 用）なので、上書きが必要。
+>
+> `OIDC_ISSUER` / `OIDC_AUDIENCE` が未設定のまま `make deploy-dev` を実行すると、不足変数名を表示して fail-fast する。
 
 #### オプション: AgentCore Memory を使用する場合
 
-チューターセッションの会話履歴管理に Bedrock AgentCore Memory を使用する場合は、`parameter_overrides` に以下を追加する:
+チューターセッションの会話履歴管理に Bedrock AgentCore Memory を使用する場合は、以下の環境変数を追加する:
 
-```toml
-parameter_overrides = "Environment=dev OidcIssuer=... OidcAudience=... TutorSessionBackend=agentcore AgentCoreMemoryId=<AgentCore Memory ID>"
+```bash
+export TUTOR_SESSION_BACKEND="agentcore"
+export AGENTCORE_MEMORY_ID="<AgentCore Memory ID>"
 ```
 
-| パラメータ | デフォルト | 説明 |
+| 環境変数 | デフォルト | 説明 |
 |-----------|-----------|------|
-| `TutorSessionBackend` | `dynamodb` | チューターセッション履歴のバックエンド。`dynamodb`（デフォルト）または `agentcore` |
-| `AgentCoreMemoryId` | （空文字列） | AgentCore Memory ID。`TutorSessionBackend=agentcore` の場合に必須 |
+| `TUTOR_SESSION_BACKEND` | `dynamodb` | チューターセッション履歴のバックエンド。`dynamodb`（デフォルト）または `agentcore` |
+| `AGENTCORE_MEMORY_ID` | （空文字列） | AgentCore Memory ID。`TUTOR_SESSION_BACKEND=agentcore` の場合に必須 |
 
-> **注意**: AgentCore Memory を使用するには、事前に Step 10b で Memory を作成し、Memory ID を取得しておく必要がある。デフォルトの `dynamodb` バックエンドであればこれらのパラメータは不要。
+> **注意**: AgentCore Memory を使用するには、事前に Step 10b で Memory を作成し、Memory ID を取得しておく必要がある。デフォルトの `dynamodb` バックエンドであればこれらの環境変数は不要。設定した環境変数のみが `--parameter-overrides` に渡され、未設定の任意変数は `template.yaml` の既定値が使われる。
 
 ### 6.2 ビルドとデプロイ
 
@@ -379,11 +384,12 @@ cd backend
 make deploy-dev
 ```
 
-内部的に以下が実行される:
+内部的に以下が実行される（環境変数から `--parameter-overrides` を組み立て）:
 
 ```bash
 sam build --use-container
-sam deploy --config-env dev
+sam deploy --config-env dev \
+  --parameter-overrides "Environment=dev OidcIssuer=$OIDC_ISSUER OidcAudience=$OIDC_AUDIENCE ..."
 ```
 
 > **注意**: 初回デプロイ時、Docker で `python:3.12` ベースイメージのダウンロードに時間がかかる場合がある。
@@ -409,26 +415,16 @@ aws cloudformation describe-stacks \
 
 CloudFront ドメインを Cognito のコールバック URL に追加する必要がある。
 
-### 7.1 app.ts の編集
+### 7.1 環境変数で追加の callback URL を注入
 
-`infrastructure/cdk/bin/app.ts` を編集:
+CloudFront ドメインのような実環境固有の URL は app.ts に直接書かず、環境変数で注入する（public リポジトリ方針）。dev の callback/logout URL は `localhost` 既定値に加えて、以下の環境変数（カンマ区切り）で追加できる:
 
-```typescript
-new CognitoStack(app, 'MemoruCognitoDev', {
-  environment: 'dev',
-  cognitoDomainPrefix: 'memoru-dev',
-  callbackUrls: [
-    'http://localhost:3000/callback',
-    'https://localhost:3000/callback',
-    'https://<CloudFront Domain>/callback',  // ← Step 4 の DistributionDomainName
-  ],
-  logoutUrls: [
-    'http://localhost:3000/',
-    'https://localhost:3000/',
-    'https://<CloudFront Domain>/',           // ← Step 4 の DistributionDomainName
-  ],
-});
+```bash
+export MEMORU_DEV_EXTRA_CALLBACK_URLS="https://<CloudFront Domain>/callback"
+export MEMORU_DEV_EXTRA_LOGOUT_URLS="https://<CloudFront Domain>/"
 ```
+
+`<CloudFront Domain>` は Step 4 の `DistributionDomainName`。
 
 ### 7.2 再デプロイ
 
@@ -575,11 +571,12 @@ aws bedrock-agentcore create-memory \
 
 ### 10b.2 バックエンドの再デプロイ
 
-`samconfig.toml` の `parameter_overrides` に AgentCore パラメータを追加し、再デプロイする:
+AgentCore 用の環境変数を設定し、再デプロイする:
 
 ```bash
 cd backend
-# samconfig.toml を編集して TutorSessionBackend=agentcore AgentCoreMemoryId=<memoryId> を追加
+export TUTOR_SESSION_BACKEND="agentcore"
+export AGENTCORE_MEMORY_ID="<memoryId>"
 make deploy-dev
 ```
 
