@@ -307,12 +307,19 @@ class CardService:
 
         if deck_id is None:
             # Explicit null → REMOVE deck_id from DynamoDB
+            # GSI 用の派生キー deck_index_key も併せて REMOVE し、
+            # スパースインデックスから外す (PR #47 [P2])。
             remove_parts.append("deck_id")
+            remove_parts.append("deck_index_key")
             card.deck_id = None
         elif deck_id is not _UNSET:
             # New value → SET deck_id
+            # deck-cards-index GSI の HASH キー deck_index_key も "<user_id>#<deck_id>"
+            # で更新する。ユーザー境界を含めることで他ユーザーのカードと混ざらない (PR #47 [P2])。
             update_parts.append("deck_id = :deck_id")
             expression_values[":deck_id"] = deck_id
+            update_parts.append("deck_index_key = :deck_index_key")
+            expression_values[":deck_index_key"] = Card.deck_index_key(user_id, deck_id)
             card.deck_id = deck_id
         # deck_id is _UNSET → no change
 

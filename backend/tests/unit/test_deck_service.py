@@ -44,7 +44,7 @@ def dynamodb_tables():
                 {"AttributeName": "user_id", "AttributeType": "S"},
                 {"AttributeName": "card_id", "AttributeType": "S"},
                 {"AttributeName": "next_review_at", "AttributeType": "S"},
-                {"AttributeName": "deck_id", "AttributeType": "S"},
+                {"AttributeName": "deck_index_key", "AttributeType": "S"},
             ],
             GlobalSecondaryIndexes=[
                 {
@@ -56,9 +56,9 @@ def dynamodb_tables():
                     "Projection": {"ProjectionType": "ALL"},
                 },
                 {
-                    "IndexName": "deck_id-due-index",
+                    "IndexName": "deck-cards-index",
                     "KeySchema": [
-                        {"AttributeName": "deck_id", "KeyType": "HASH"},
+                        {"AttributeName": "deck_index_key", "KeyType": "HASH"},
                         {"AttributeName": "next_review_at", "KeyType": "RANGE"},
                     ],
                     "Projection": {"ProjectionType": "KEYS_ONLY"},
@@ -271,6 +271,7 @@ class TestDeleteDeck:
                 "front": "Q1",
                 "back": "A1",
                 "deck_id": deck.deck_id,
+                "deck_index_key": f"user-1#{deck.deck_id}",
                 "interval": 1,
                 "ease_factor": "2.5",
                 "repetitions": 0,
@@ -284,6 +285,7 @@ class TestDeleteDeck:
                 "front": "Q2",
                 "back": "A2",
                 "deck_id": deck.deck_id,
+                "deck_index_key": f"user-1#{deck.deck_id}",
                 "interval": 1,
                 "ease_factor": "2.5",
                 "repetitions": 0,
@@ -299,6 +301,9 @@ class TestDeleteDeck:
         card2 = cards_table.get_item(Key={"user_id": "user-1", "card_id": "card-2"})
         assert "deck_id" not in card1["Item"]
         assert "deck_id" not in card2["Item"]
+        # GSI 用派生キーも併せて削除される (PR #47 [P2])。
+        assert "deck_index_key" not in card1["Item"]
+        assert "deck_index_key" not in card2["Item"]
 
 
 class TestGetDeckCardCounts:
@@ -322,8 +327,10 @@ class TestGetDeckCardCounts:
                     "front": f"Q{i}",
                     "back": f"A{i}",
                     "deck_id": deck_id,
+                    # GSI 用複合キー (PR #47 [P2])。card_service 経由なら自動付与される。
+                    "deck_index_key": f"user-1#{deck_id}",
                     # 実カードは常に next_review_at を持つ (card_service が作成時に設定)。
-                    # deck_id-due-index は next_review_at を RANGE キーとするため必須。
+                    # deck-cards-index は next_review_at を RANGE キーとするため必須。
                     "next_review_at": datetime.now(timezone.utc).isoformat(),
                     "interval": 1,
                     "ease_factor": "2.5",
@@ -350,6 +357,7 @@ class TestGetDeckCardCounts:
                 "front": "Q",
                 "back": "A",
                 "deck_id": "deck-1",
+                "deck_index_key": "user-1#deck-1",
                 "next_review_at": datetime.now(timezone.utc).isoformat(),
                 "interval": 1,
                 "ease_factor": "2.5",
@@ -379,6 +387,38 @@ class TestGetDeckCardCounts:
         """deck_ids が空の場合は空 dict を返す."""
         assert deck_service.get_deck_card_counts("user-1", []) == {}
 
+    def test_card_counts_isolated_by_user(self, deck_service, dynamodb_tables):
+        """[P2 回帰] 異なるユーザーが同一 deck_id を持っても自分のカードのみ集計される.
+
+        user-1 と user-2 が同じ deck_id のカードを 1 枚ずつ持つとき、
+        user-1 のカウントは自分の 1 枚のみ (= 1) であること。
+        deck_index_key (= "<user_id>#<deck_id>") により集計が混ざらないことを検証する。
+        """
+        cards_table = dynamodb_tables.Table("memoru-cards-test")
+        shared_deck_id = "deck-shared"
+
+        for user_id, card_id in [("user-1", "card-u1"), ("user-2", "card-u2")]:
+            cards_table.put_item(
+                Item={
+                    "user_id": user_id,
+                    "card_id": card_id,
+                    "front": "Q",
+                    "back": "A",
+                    "deck_id": shared_deck_id,
+                    "deck_index_key": f"{user_id}#{shared_deck_id}",
+                    "next_review_at": datetime.now(timezone.utc).isoformat(),
+                    "interval": 1,
+                    "ease_factor": "2.5",
+                    "repetitions": 0,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+
+        counts_u1 = deck_service.get_deck_card_counts("user-1", [shared_deck_id])
+        counts_u2 = deck_service.get_deck_card_counts("user-2", [shared_deck_id])
+        assert counts_u1[shared_deck_id] == 1
+        assert counts_u2[shared_deck_id] == 1
+
 
 class TestGetDeckDueCounts:
     """DeckService.get_deck_due_counts テスト."""
@@ -401,6 +441,7 @@ class TestGetDeckDueCounts:
                 "front": "Q",
                 "back": "A",
                 "deck_id": "deck-1",
+                "deck_index_key": "user-1#deck-1",
                 "next_review_at": past.isoformat(),
                 "interval": 1,
                 "ease_factor": "2.5",
@@ -415,6 +456,7 @@ class TestGetDeckDueCounts:
                 "front": "Q2",
                 "back": "A2",
                 "deck_id": "deck-2",
+                "deck_index_key": "user-1#deck-2",
                 "next_review_at": "2099-12-31T00:00:00+00:00",
                 "interval": 1,
                 "ease_factor": "2.5",
@@ -439,6 +481,7 @@ class TestGetDeckDueCounts:
                 "front": "Q",
                 "back": "A",
                 "deck_id": "deck-1",
+                "deck_index_key": "user-1#deck-1",
                 "next_review_at": "2000-01-01T00:00:00+00:00",
                 "interval": 1,
                 "ease_factor": "2.5",
@@ -454,6 +497,7 @@ class TestGetDeckDueCounts:
                 "front": "Q",
                 "back": "A",
                 "deck_id": "deck-1",
+                "deck_index_key": "user-1#deck-1",
                 "next_review_at": "2999-01-01T00:00:00+00:00",
                 "interval": 1,
                 "ease_factor": "2.5",
@@ -469,6 +513,32 @@ class TestGetDeckDueCounts:
     def test_due_counts_empty_deck_ids(self, deck_service):
         """deck_ids が空の場合は空 dict を返す."""
         assert deck_service.get_deck_due_counts("user-1", []) == {}
+
+    def test_due_counts_isolated_by_user(self, deck_service, dynamodb_tables):
+        """[P2 回帰] 同一 deck_id でも due 集計が他ユーザーと混ざらない."""
+        cards_table = dynamodb_tables.Table("memoru-cards-test")
+        shared_deck_id = "deck-shared"
+        past = datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+        for user_id, card_id in [("user-1", "card-u1"), ("user-2", "card-u2")]:
+            cards_table.put_item(
+                Item={
+                    "user_id": user_id,
+                    "card_id": card_id,
+                    "front": "Q",
+                    "back": "A",
+                    "deck_id": shared_deck_id,
+                    "deck_index_key": f"{user_id}#{shared_deck_id}",
+                    "next_review_at": past.isoformat(),
+                    "interval": 1,
+                    "ease_factor": "2.5",
+                    "repetitions": 0,
+                    "created_at": past.isoformat(),
+                }
+            )
+
+        counts_u1 = deck_service.get_deck_due_counts("user-1", [shared_deck_id])
+        assert counts_u1[shared_deck_id] == 1
 
 
 class TestDeckCountsPagination:
@@ -486,7 +556,7 @@ class TestDeckCountsPagination:
             calls["n"] += 1
             if "ExclusiveStartKey" not in kwargs:
                 # 1 ページ目: Count=2, 続きあり
-                return {"Count": 2, "LastEvaluatedKey": {"deck_id": "deck-1"}}
+                return {"Count": 2, "LastEvaluatedKey": {"deck_index_key": "user-1#deck-1"}}
             # 2 ページ目: Count=3, 続きなし
             return {"Count": 3}
 
@@ -504,7 +574,7 @@ class TestDeckCountsPagination:
             assert kwargs.get("Select") == "COUNT"
             assert ":now" in kwargs["ExpressionAttributeValues"]
             if "ExclusiveStartKey" not in kwargs:
-                return {"Count": 1, "LastEvaluatedKey": {"deck_id": "deck-1"}}
+                return {"Count": 1, "LastEvaluatedKey": {"deck_index_key": "user-1#deck-1"}}
             return {"Count": 4}
 
         monkeypatch.setattr(deck_service.cards_table, "query", fake_query)
@@ -549,7 +619,7 @@ def dynamodb_tables_with_deck():
                 {"AttributeName": "user_id", "AttributeType": "S"},
                 {"AttributeName": "card_id", "AttributeType": "S"},
                 {"AttributeName": "next_review_at", "AttributeType": "S"},
-                {"AttributeName": "deck_id", "AttributeType": "S"},
+                {"AttributeName": "deck_index_key", "AttributeType": "S"},
             ],
             GlobalSecondaryIndexes=[
                 {
@@ -561,9 +631,9 @@ def dynamodb_tables_with_deck():
                     "Projection": {"ProjectionType": "ALL"},
                 },
                 {
-                    "IndexName": "deck_id-due-index",
+                    "IndexName": "deck-cards-index",
                     "KeySchema": [
-                        {"AttributeName": "deck_id", "KeyType": "HASH"},
+                        {"AttributeName": "deck_index_key", "KeyType": "HASH"},
                         {"AttributeName": "next_review_at", "KeyType": "RANGE"},
                     ],
                     "Projection": {"ProjectionType": "KEYS_ONLY"},

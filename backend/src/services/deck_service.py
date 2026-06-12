@@ -344,20 +344,25 @@ class DeckService:
     ) -> Dict[str, int]:
         """Get card counts per deck.
 
-        デッキごとに deck_id-due-index GSI へ COUNT クエリを発行して集計する。
+        デッキごとに deck-cards-index GSI へ COUNT クエリを発行して集計する。
         旧実装はユーザーの全カードを Query してアプリ側で deck_id 別に数えていたため、
         コスト・レイテンシがユーザーの総カード数に線形比例していた (review #11)。
         本実装ではデッキ数 N に対して N 回のクエリになるが、各クエリは対象デッキの
         カード数にのみ比例し、Select="COUNT" によりカード本体の読み取りも発生しない。
 
-        注意 (スパースインデックス): deck_id 属性を持たないカード (未分類) は GSI に
-        投影されないため、deck_ids に渡されたデッキのカードのみが対象となる。これは
-        旧実装が deck_id を持たないカードを除外していた挙動と一致する。
+        ユーザー境界 (PR #47 [P2]): GSI の HASH キーは "<user_id>#<deck_id>" の複合
+        キー deck_index_key を使う。deck_id 単体だと異なるユーザーが同じ deck_id を
+        持つ場合 (移行・インポート・手動操作・UUID 衝突) に他ユーザーのカードまで
+        集計してしまうため、user_id をキーに含めて境界を保証する。
+
+        注意 (スパースインデックス): deck_id 属性を持たないカード (未分類) は
+        deck_index_key を持たず GSI に投影されないため、deck_ids に渡されたデッキの
+        カードのみが対象となる。これは旧実装が deck_id を持たないカードを除外していた
+        挙動と一致する。
 
         Args:
-            user_id: The user's ID. (互換性維持のため受け取るが、GSI は deck_id を
-                HASH キーとするため絞り込みには使用しない。デッキは user 固有のため
-                deck_id だけでユーザー境界は保たれる。)
+            user_id: The user's ID. deck_index_key (= "<user_id>#<deck_id>") の構築に
+                使用し、ユーザー境界を保証する。
             deck_ids: List of deck IDs to count for.
 
         Returns:
@@ -371,9 +376,11 @@ class DeckService:
         for deck_id in deck_ids:
             try:
                 query_kwargs: Dict[str, Any] = {
-                    "IndexName": "deck_id-due-index",
-                    "KeyConditionExpression": "deck_id = :deck_id",
-                    "ExpressionAttributeValues": {":deck_id": deck_id},
+                    "IndexName": "deck-cards-index",
+                    "KeyConditionExpression": "deck_index_key = :deck_index_key",
+                    "ExpressionAttributeValues": {
+                        ":deck_index_key": f"{user_id}#{deck_id}",
+                    },
                     "Select": "COUNT",
                 }
 
@@ -390,7 +397,7 @@ class DeckService:
                 # 等で失敗し得る。フォールバックは行わず、原因を明示してログに残す。
                 logger.warning(
                     "Failed to get deck card count for deck "
-                    f"{deck_id} (deck_id-due-index GSI が必要): {e}"
+                    f"{deck_id} (deck-cards-index GSI が必要): {e}"
                 )
 
         return counts
@@ -400,12 +407,16 @@ class DeckService:
     ) -> Dict[str, int]:
         """Get due card counts per deck.
 
-        デッキごとに deck_id-due-index GSI へ COUNT クエリを発行し、
+        デッキごとに deck-cards-index GSI へ COUNT クエリを発行し、
         next_review_at <= 現在時刻 のカードのみを集計する。
         旧実装は user_id-due-index を全件読みしてアプリ側で deck_id 別に数えていたため、
         ユーザーの due カード総数に線形比例していた (review #11)。本実装は GSI の
         RANGE キー (next_review_at) を KeyCondition で絞り込み、Select="COUNT" で
         カード本体を読まずに件数のみ取得する。
+
+        ユーザー境界 (PR #47 [P2]): get_deck_card_counts と同様、GSI の HASH キーは
+        複合キー deck_index_key (= "<user_id>#<deck_id>") を使い、他ユーザーが同一
+        deck_id を持っても集計が混ざらないようにする。
 
         due の定義 (旧実装とのセマンティクス一致):
           - 現在時刻は datetime.now(timezone.utc) (UTC) で生成する (旧実装と同一)。
@@ -415,8 +426,7 @@ class DeckService:
             (旧実装も user_id-due-index 上で同じ文字列 <= 比較を行っていた。)
 
         Args:
-            user_id: The user's ID. (get_deck_card_counts と同様、互換性維持のため
-                受け取るが GSI の絞り込みには使用しない。)
+            user_id: The user's ID. deck_index_key の構築に使用し、ユーザー境界を保証する。
             deck_ids: List of deck IDs to count for.
 
         Returns:
@@ -432,12 +442,12 @@ class DeckService:
         for deck_id in deck_ids:
             try:
                 query_kwargs: Dict[str, Any] = {
-                    "IndexName": "deck_id-due-index",
+                    "IndexName": "deck-cards-index",
                     "KeyConditionExpression": (
-                        "deck_id = :deck_id AND next_review_at <= :now"
+                        "deck_index_key = :deck_index_key AND next_review_at <= :now"
                     ),
                     "ExpressionAttributeValues": {
-                        ":deck_id": deck_id,
+                        ":deck_index_key": f"{user_id}#{deck_id}",
                         ":now": now_iso,
                     },
                     "Select": "COUNT",
@@ -453,7 +463,7 @@ class DeckService:
             except ClientError as e:
                 logger.warning(
                     "Failed to get deck due count for deck "
-                    f"{deck_id} (deck_id-due-index GSI が必要): {e}"
+                    f"{deck_id} (deck-cards-index GSI が必要): {e}"
                 )
 
         return counts
@@ -517,9 +527,12 @@ class DeckService:
             now = datetime.now(timezone.utc)
             for key in card_keys:
                 try:
+                    # deck_id と GSI 用派生キー deck_index_key を併せて REMOVE する。
+                    # deck_index_key を残すとデッキ削除後も deck-cards-index に
+                    # 投影され続けてしまうため (PR #47 [P2])。
                     self.cards_table.update_item(
                         Key=key,
-                        UpdateExpression="REMOVE deck_id SET updated_at = :updated_at",
+                        UpdateExpression="REMOVE deck_id, deck_index_key SET updated_at = :updated_at",
                         ExpressionAttributeValues={
                             ":updated_at": now.isoformat(),
                         },
