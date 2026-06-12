@@ -54,18 +54,30 @@ _IPV6_BRACKET_RE = re.compile(r"^\[(.+)\]$")
 
 
 def is_private_ip_address(addr_str: str) -> bool:
-    """Check if an IP address string is private/loopback/reserved/link-local.
+    """Check if an IP address string is *not* an explicitly-global address.
 
     Public helper so that the content-fetch layer can re-use the exact same
     blocklist logic when pinning a connection to an already-resolved IP
     (SSRF / DNS-rebinding defence). Returns False for strings that are not
     valid IP literals.
+
+    This uses an **allowlist** posture: only addresses that the stdlib
+    ``ipaddress`` module reports as ``is_global`` are treated as safe; every
+    other address is rejected. ``not is_global`` collapses private, loopback,
+    reserved, link-local, CGNAT (``100.64.0.0/10`` — used by AWS VPC and shared
+    NAT), multicast and the unspecified address (``0.0.0.0`` / ``::``) into a
+    single deny rule. This closes gaps in a blocklist built from individual
+    ``is_private`` / ``is_loopback`` / ``is_reserved`` / ``is_link_local`` flags
+    (CGNAT and multicast are False for all of those) and automatically tracks
+    any future reserved-range additions that update ``is_global``. ``is_private``
+    and ``is_multicast`` are kept as explicit, redundant checks to make the
+    intent unmistakable. Works for both IPv4 and IPv6.
     """
     try:
         addr = ipaddress.ip_address(addr_str)
-        return addr.is_private or addr.is_loopback or addr.is_reserved or addr.is_link_local
     except ValueError:
         return False
+    return not addr.is_global or addr.is_private or addr.is_multicast
 
 
 # Backwards-compatible private alias (kept for any internal references).

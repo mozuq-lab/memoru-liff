@@ -116,9 +116,28 @@ class TestIsPrivateIpAddress:
     def test_private_addresses(self, addr: str) -> None:
         assert is_private_ip_address(addr) is True
 
-    @pytest.mark.parametrize("addr", ["93.184.216.34", "8.8.8.8", "2606:2800:220:1:248:1893:25c8:1946"])
+    @pytest.mark.parametrize(
+        "addr", ["93.184.216.34", "8.8.8.8", "2606:2800:220:1:248:1893:25c8:1946", "2606:4700::1"]
+    )
     def test_public_addresses(self, addr: str) -> None:
         assert is_private_ip_address(addr) is False
+
+    @pytest.mark.parametrize(
+        "addr",
+        [
+            "100.64.0.1",  # CGNAT (100.64.0.0/10) — used by AWS VPC / shared NAT
+            "100.127.255.254",  # CGNAT upper bound
+            "224.0.0.1",  # IPv4 multicast
+            "239.255.255.255",  # IPv4 multicast upper bound
+            "0.0.0.0",  # unspecified
+            "::",  # IPv6 unspecified
+            "fc00::1",  # IPv6 unique-local (ULA)
+            "ff02::1",  # IPv6 multicast
+        ],
+    )
+    def test_non_global_addresses_rejected(self, addr: str) -> None:
+        """is_global-based allowlist rejects CGNAT, multicast, unspecified, ULA."""
+        assert is_private_ip_address(addr) is True
 
     def test_non_ip_string_is_false(self) -> None:
         assert is_private_ip_address("not-an-ip") is False

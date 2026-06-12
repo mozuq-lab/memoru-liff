@@ -405,6 +405,259 @@ class TestIpPinning:
         assert result.url == "https://final.example.com/dest"
 
 
+class TestConnectionPoolIsolation:
+    """Each redirect hop must use a fresh httpx.Client (TLS re-verification)."""
+
+    def setup_method(self) -> None:
+        self.service = UrlContentService()
+
+    @patch("services.url_content_service.httpx.Client")
+    def test_each_hop_uses_new_client_instance(self, mock_client_cls: MagicMock) -> None:
+        """2 hops resolving to the same IP must instantiate two separate clients.
+
+        Sharing one client would let httpcore reuse the first hop's TLS
+        connection (keyed on IP:port) and skip the second hop's certificate
+        verification. A new client per hop forces a fresh TLS handshake.
+        """
+        # Two distinct client instances; record which client each stream runs on.
+        client_a = MagicMock()
+        client_a.__enter__ = MagicMock(return_value=client_a)
+        client_a.__exit__ = MagicMock(return_value=False)
+        client_b = MagicMock()
+        client_b.__enter__ = MagicMock(return_value=client_b)
+        client_b.__exit__ = MagicMock(return_value=False)
+        mock_client_cls.side_effect = [client_a, client_b]
+
+        redirect_resp = MagicMock()
+        redirect_resp.is_redirect = True
+        redirect_resp.status_code = 302
+        redirect_resp.headers = {"location": "https://final.example.com/dest"}
+
+        ok_resp = MagicMock()
+        ok_resp.is_redirect = False
+        ok_resp.status_code = 200
+        ok_resp.headers = {"content-type": "text/html; charset=utf-8"}
+        ok_resp.encoding = "utf-8"
+        ok_resp.url = "https://final.example.com/dest"
+        ok_resp.iter_bytes.return_value = [
+            b"<html><head><title>F</title></head><body>"
+            b"<p>Plenty of meaningful destination content present here now.</p>"
+            b"</body></html>"
+        ]
+
+        def make_cm(resp):
+            cm = MagicMock()
+            cm.__enter__ = MagicMock(return_value=resp)
+            cm.__exit__ = MagicMock(return_value=False)
+            return cm
+
+        client_a.stream.return_value = make_cm(redirect_resp)
+        client_a.build_request.side_effect = lambda *a, **k: httpx.Request(
+            "GET", "https://93.184.216.34/x", headers={"Host": "h"}, extensions={}
+        )
+        client_b.stream.return_value = make_cm(ok_resp)
+        client_b.build_request.side_effect = lambda *a, **k: httpx.Request(
+            "GET", "https://93.184.216.34/dest", headers={"Host": "h"}, extensions={}
+        )
+
+        # Both hops resolve to the SAME IP — the dangerous shared-CDN case.
+        with patch(
+            "services.url_content_service.resolve_and_validate_host",
+            return_value=["93.184.216.34"],
+        ):
+            result = self.service.fetch_content("https://start.example.com/a")
+
+        # Two separate httpx.Client instances were created (one per hop)…
+        assert mock_client_cls.call_count == 2
+        # …and each hop's stream() ran on its own client instance.
+        assert client_a.stream.call_count == 1
+        assert client_b.stream.call_count == 1
+        assert result.url == "https://final.example.com/dest"
+
+    @patch("services.url_content_service.httpx.Client")
+    def test_existing_redirect_repin_still_resolves_each_hop(
+        self, mock_client_cls: MagicMock
+    ) -> None:
+        """Regression: per-hop resolve+validate is preserved after pool split."""
+        redirect_resp = MagicMock()
+        redirect_resp.is_redirect = True
+        redirect_resp.status_code = 302
+        redirect_resp.headers = {"location": "https://final.example.com/dest"}
+
+        ok_resp = MagicMock()
+        ok_resp.is_redirect = False
+        ok_resp.status_code = 200
+        ok_resp.headers = {"content-type": "text/html; charset=utf-8"}
+        ok_resp.encoding = "utf-8"
+        ok_resp.url = "https://final.example.com/dest"
+        ok_resp.iter_bytes.return_value = [
+            b"<html><head><title>F</title></head><body>"
+            b"<p>Plenty of meaningful destination content present here now.</p>"
+            b"</body></html>"
+        ]
+
+        def make_cm(resp):
+            cm = MagicMock()
+            cm.__enter__ = MagicMock(return_value=resp)
+            cm.__exit__ = MagicMock(return_value=False)
+            return cm
+
+        # Same mock returned for every Client() — stream side_effect yields hops.
+        mock_client = MagicMock()
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client.stream.side_effect = [make_cm(redirect_resp), make_cm(ok_resp)]
+        mock_client.build_request.side_effect = lambda *a, **k: httpx.Request(
+            "GET", "https://1.2.3.4/x", headers={"Host": "h"}, extensions={}
+        )
+        mock_client_cls.return_value = mock_client
+
+        with patch(
+            "services.url_content_service.resolve_and_validate_host",
+            return_value=["93.184.216.34"],
+        ) as mock_resolve:
+            result = self.service.fetch_content("https://start.example.com/a")
+
+        hosts = [c.args[0] for c in mock_resolve.call_args_list]
+        assert hosts == ["start.example.com", "final.example.com"]
+        assert result.url == "https://final.example.com/dest"
+
+
+class TestMultiIpFallback:
+    """Validated IPs are tried in order; connection failures fall back (#P2)."""
+
+    def setup_method(self) -> None:
+        self.service = UrlContentService()
+
+    @patch("services.url_content_service.httpx.Client")
+    def test_falls_back_to_second_ip_on_connect_error(
+        self, mock_client_cls: MagicMock
+    ) -> None:
+        """First IP ConnectError → second IP succeeds."""
+        ok_resp = MagicMock()
+        ok_resp.is_redirect = False
+        ok_resp.status_code = 200
+        ok_resp.headers = {"content-type": "text/html; charset=utf-8"}
+        ok_resp.encoding = "utf-8"
+        ok_resp.url = "https://example.com/a"
+        ok_resp.iter_bytes.return_value = [
+            b"<html><head><title>F</title></head><body>"
+            b"<p>Plenty of meaningful content present here for extraction now.</p>"
+            b"</body></html>"
+        ]
+
+        def make_ok_cm():
+            cm = MagicMock()
+            cm.__enter__ = MagicMock(return_value=ok_resp)
+            cm.__exit__ = MagicMock(return_value=False)
+            return cm
+
+        # First Client: stream's __enter__ raises ConnectError.
+        failing_cm = MagicMock()
+        failing_cm.__enter__ = MagicMock(side_effect=httpx.ConnectError("no route"))
+        failing_cm.__exit__ = MagicMock(return_value=False)
+
+        client_fail = MagicMock()
+        client_fail.__enter__ = MagicMock(return_value=client_fail)
+        client_fail.__exit__ = MagicMock(return_value=False)
+        client_fail.stream.return_value = failing_cm
+        client_fail.build_request.side_effect = lambda *a, **k: httpx.Request(
+            "GET", "https://1.1.1.1/a", headers={"Host": "h"}, extensions={}
+        )
+
+        client_ok = MagicMock()
+        client_ok.__enter__ = MagicMock(return_value=client_ok)
+        client_ok.__exit__ = MagicMock(return_value=False)
+        client_ok.stream.return_value = make_ok_cm()
+        client_ok.build_request.side_effect = lambda *a, **k: httpx.Request(
+            "GET", "https://2.2.2.2/a", headers={"Host": "h"}, extensions={}
+        )
+
+        mock_client_cls.side_effect = [client_fail, client_ok]
+
+        with patch(
+            "services.url_content_service.resolve_and_validate_host",
+            return_value=["1.1.1.1", "2.2.2.2"],
+        ):
+            result = self.service.fetch_content("https://example.com/a")
+
+        assert "meaningful content" in result.text_content
+        # Both IPs were attempted (two clients created, two streams opened).
+        assert client_fail.stream.call_count == 1
+        assert client_ok.stream.call_count == 1
+
+    @patch("services.url_content_service.httpx.Client")
+    def test_all_ips_fail_raises_content_fetch_error(
+        self, mock_client_cls: MagicMock
+    ) -> None:
+        """Every IP ConnectError → ContentFetchError."""
+        failing_cm = MagicMock()
+        failing_cm.__enter__ = MagicMock(
+            side_effect=httpx.ConnectTimeout("connect timeout")
+        )
+        failing_cm.__exit__ = MagicMock(return_value=False)
+
+        def make_failing_client(*a, **k):
+            c = MagicMock()
+            c.__enter__ = MagicMock(return_value=c)
+            c.__exit__ = MagicMock(return_value=False)
+            c.stream.return_value = failing_cm
+            c.build_request.side_effect = lambda *aa, **kk: httpx.Request(
+                "GET", "https://1.1.1.1/a", headers={"Host": "h"}, extensions={}
+            )
+            return c
+
+        mock_client_cls.side_effect = make_failing_client
+
+        with patch(
+            "services.url_content_service.resolve_and_validate_host",
+            return_value=["1.1.1.1", "2.2.2.2"],
+        ):
+            with pytest.raises(ContentFetchError, match="connect|Failed"):
+                self.service.fetch_content("https://example.com/a")
+
+    @patch("services.url_content_service.httpx.Client")
+    def test_http_error_does_not_fall_back(self, mock_client_cls: MagicMock) -> None:
+        """A 4xx after a successful connection is NOT retried on the next IP."""
+        err_resp = MagicMock()
+        err_resp.is_redirect = False
+        err_resp.status_code = 404
+        err_resp.headers = {"content-type": "text/html"}
+        err_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "404", request=MagicMock(), response=MagicMock()
+        )
+
+        err_cm = MagicMock()
+        err_cm.__enter__ = MagicMock(return_value=err_resp)
+        err_cm.__exit__ = MagicMock(return_value=False)
+
+        client_first = MagicMock()
+        client_first.__enter__ = MagicMock(return_value=client_first)
+        client_first.__exit__ = MagicMock(return_value=False)
+        client_first.stream.return_value = err_cm
+        client_first.build_request.side_effect = lambda *a, **k: httpx.Request(
+            "GET", "https://1.1.1.1/a", headers={"Host": "h"}, extensions={}
+        )
+
+        # Second client should never be used; make it explode if it is.
+        client_second = MagicMock()
+        client_second.__enter__ = MagicMock(return_value=client_second)
+        client_second.__exit__ = MagicMock(return_value=False)
+        client_second.stream.side_effect = AssertionError("must not fall back on HTTP error")
+
+        mock_client_cls.side_effect = [client_first, client_second]
+
+        with patch(
+            "services.url_content_service.resolve_and_validate_host",
+            return_value=["1.1.1.1", "2.2.2.2"],
+        ):
+            with pytest.raises(ContentFetchError):
+                self.service.fetch_content("https://example.com/a")
+
+        assert client_first.stream.call_count == 1
+        assert client_second.stream.call_count == 0
+
+
 class TestSpaDetection:
     """Tests for SPA detection logic (T021)."""
 

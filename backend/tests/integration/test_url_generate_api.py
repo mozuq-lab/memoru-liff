@@ -53,16 +53,28 @@ class TestGenerateFromUrlRequest:
 class TestGenerateFromUrlApiFlow:
     """Integration tests for the full generate-from-url flow with mocked AI."""
 
+    @patch("services.url_content_service.resolve_and_validate_host")
     @patch("services.url_content_service.httpx.Client")
     @patch("services.ai_service.create_ai_service")
     def test_full_flow_returns_cards(
         self,
         mock_create_ai: MagicMock,
         mock_client_cls: MagicMock,
+        mock_resolve: MagicMock,
     ) -> None:
-        """Full flow: URL → fetch → chunk → generate → response."""
+        """Full flow: URL → fetch → chunk → generate → response.
+
+        DNS resolution is pinned to a fixed public IP via the patched
+        ``resolve_and_validate_host`` so the test never performs a real DNS
+        lookup (the fetch path resolves+validates the host before pinning the
+        connection — see UrlContentService._resolve_pinned_addresses). This keeps
+        the test hermetic and deterministic in CI / sandboxed environments.
+        """
         from services.ai_service import GeneratedCard, GenerationResult
         from services.url_content_service import UrlContentService
+
+        # Pin DNS to a fixed public IP — no external resolver is contacted.
+        mock_resolve.return_value = ["93.184.216.34"]
 
         # Mock HTTP response (streamed — matches UrlContentService.client.stream usage)
         mock_response = MagicMock()
