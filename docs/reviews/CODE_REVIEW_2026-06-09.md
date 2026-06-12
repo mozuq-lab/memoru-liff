@@ -150,7 +150,8 @@ except httpx.HTTPError as e:   # RequestError と HTTPStatusError の共通親
 | N-8 / C-6 / C-7 | ✅ **2026-06-10 対応済み**。N-8: 通知を claim → push 順に変更。C-6: link_line/unlink_line を TransactWriteItems + ロックアイテム（`LINELINK#<line_user_id>`）で排他。C-7: card の deck_id 存在・所有検証を追加（不正時 400 invalid_deck） |
 | C-2 | ✅ **解消済みと確認** (PR #33 が 2026-05-29 にマージ済み)。BrowserService はスタブ化され profile_id は早期 501、静的 HTML 経路は正常動作。本実装はデプロイ環境整備後に判断（A案採用）。2026-06-11 にフロントのプロファイル UI を「準備中」表示化 |
 | C-3 / C-4 / C-5 | ✅ **2026-06-11 対応済み**。C-3: postback を reference key 方式化（保存時の再生成も廃止）。C-4: Bedrock 呼び出しに MAX_CHUNK_CALLS=8 + 早期 break。C-5: 重複警告を全カード走査に変更（contains FilterExpression が常に空を返す潜在バグも修正） |
-| N-5 / #9〜#16 | ⬜ 未対応のまま（N-9 は #41 で解消済み） |
+| N-5 | ✅ **2026-06-12 対応済み**。URL カード生成を SQS ワーカーへ非同期化（受付は進捗 reply + enqueue で即 200）。インラインフォールバック付き（ローカル/enqueue 失敗時）。MaximumConcurrency=2 で Bedrock 同時実行も制御 |
+| #9 / #11 | ⬜ 未対応のまま（N-9 は #41 で解消済み） |
 | CDK H-1 / H-2 / M-1〜M-4 / L-1〜L-3 | ⬜ すべて未対応のまま |
 | フロント S-1 / S-2 / A-1〜A-3 | ✅ **2026-06-10 対応済み**（下記「対応状況」参照）。⚠️ **S-1 は指摘自体を訂正**: oidc-client-ts の `userStore` 既定値は localStorage ではなく **sessionStorage**（旧 `oidc-client` との混同による誤指摘）。トークンは元々タブ単位の sessionStorage 保存だった。対応としては既定依存をやめ `userStore` を明示設定 |
 | フロント E-3 / Q-3 / #16 | ⬜ 未対応（E-1 のみ部分対応: `GeneratePage.tsx:175` と `TutorContext.tsx:119,167` に生メッセージ露出が残存） |

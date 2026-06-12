@@ -692,6 +692,10 @@ Resources:
               Action:
                 - secretsmanager:GetSecretValue
               Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:memoru-${Environment}-line-credentials-*
+        # NOTE (N-5): URL カード生成は SQS ワーカー (UrlGenerateWorkerFunction) へ
+        # 非同期化したが、Bedrock 権限は残す。legacy postback フォールバック
+        # (handle_save_url_cards_legacy) が古い形式の保存 postback でカードを再生成
+        # するため、受付 Lambda でも Bedrock invoke が必要になりうる。
         - Version: '2012-10-17'
           Statement:
             - Effect: Allow
@@ -703,11 +707,20 @@ Resources:
                 - !Sub
                   - arn:aws:bedrock:*::foundation-model/${FoundationModelId}
                   - FoundationModelId: !Select [1, !Split ["global.", !Ref BedrockModelId]]
+        # N-5: 受付 Lambda は URL カード生成リクエストをワーカーキューへ enqueue する。
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - sqs:SendMessage
+              Resource: !GetAtt UrlGenerateQueue.Arn
       Environment:
         Variables:
           LINE_CHANNEL_SECRET_ARN: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:memoru-${Environment}-line-credentials
           BEDROCK_MODEL_ID: !Ref BedrockModelId
           PROCESSED_EVENTS_TABLE: !Ref ProcessedEventsTable
+          # N-5: 設定されていれば URL カード生成を SQS ワーカーへ非同期化する。
+          URL_GENERATE_QUEUE_URL: !Ref UrlGenerateQueue
       Events:
         LineWebhook:
           Type: HttpApi
@@ -942,6 +955,114 @@ Resources:
         Application: memoru
 
   #============================================================
+  # N-5: URL カード生成の SQS 非同期化
+  #============================================================
+
+  # Dead Letter Queue for UrlGenerateWorkerFunction.
+  # After maxReceiveCount (3) failed deliveries a message lands here so failed
+  # URL card generations are retained for inspection instead of being lost.
+  # NOTE: A CloudWatch Alarm on ApproximateNumberOfMessagesVisible is out of
+  # scope for this change and should be added in a follow-up (matches the
+  # DuePushJobDLQ convention).
+  UrlGenerateWorkerDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub memoru-url-generate-dlq-${Environment}
+      # 14 days (in seconds) — maximum retention to allow ample time to
+      # inspect/replay failed URL card generation messages.
+      MessageRetentionPeriod: 1209600
+      # Encrypt with the AWS-managed KMS key for SQS, consistent with the
+      # KMS-encrypted DynamoDB tables and DuePushJobDLQ used elsewhere.
+      SqsManagedSseEnabled: false
+      KmsMasterKeyId: alias/aws/sqs
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: memoru
+
+  # Main work queue: webhook Lambda enqueues; UrlGenerateWorkerFunction consumes.
+  UrlGenerateQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub memoru-url-generate-${Environment}
+      # VisibilityTimeout must exceed the worker Timeout (120s) so a slow-but-
+      # alive invocation is not redelivered mid-flight.
+      VisibilityTimeout: 180
+      SqsManagedSseEnabled: false
+      KmsMasterKeyId: alias/aws/sqs
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt UrlGenerateWorkerDLQ.Arn
+        maxReceiveCount: 3
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: memoru
+
+  # URL Card Generation Worker (SQS-triggered, async N-5).
+  # Fetch → chunk → Bedrock → store → preview push. Uses ReportBatchItemFailures
+  # so a failed message is retried by SQS (up to maxReceiveCount) instead of
+  # being dropped or re-running the whole batch.
+  UrlGenerateWorkerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub memoru-url-generate-worker-${Environment}
+      CodeUri: src/
+      Handler: jobs.url_generate_worker_handler.handler
+      Description: SQS worker for asynchronous URL card generation (N-5)
+      Timeout: 120
+      MemorySize: 512
+      Policies:
+        # ProcessedEventsTable: ワーカー側冪等クレーム (URLGENWORK#<event_id>) の
+        # 読み書き + URL カードストア (URLCARDS#) の保存に使用。
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProcessedEventsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UsersTable
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:memoru-${Environment}-line-credentials-*
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              # inference profile + 配下の foundation-model ("global." 除去で導出)
+              Resource:
+                - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
+                - !Sub
+                  - arn:aws:bedrock:*::foundation-model/${FoundationModelId}
+                  - FoundationModelId: !Select [1, !Split ["global.", !Ref BedrockModelId]]
+      Environment:
+        Variables:
+          LINE_CHANNEL_SECRET_ARN: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:memoru-${Environment}-line-credentials
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+          PROCESSED_EVENTS_TABLE: !Ref ProcessedEventsTable
+      Events:
+        UrlGenerateSqs:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt UrlGenerateQueue.Arn
+            # 1 件の処理時間 (60〜100 秒級) が Lambda Timeout (120s) に近いため、
+            # BatchSize を 1 にしてバッチ途中のタイムアウトによる未処理メッセージの
+            # 巻き込み (receive count 増加 → 不当な DLQ 送り) を防ぐ。
+            BatchSize: 1
+            # 部分失敗を SQS に返し、失敗メッセージのみリトライさせる
+            # （BatchSize 1 でも防御として残す）。
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+            # Bedrock 同時実行を抑えるためワーカーの最大同時実行を制限する。
+            ScalingConfig:
+              MaximumConcurrency: 2
+      Tags:
+        Environment: !Ref Environment
+        Application: memoru
+
+  #============================================================
   # CloudWatch Logs - LogGroups with Retention
   #============================================================
 
@@ -978,6 +1099,13 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub "/aws/lambda/${AdviceFunction}"
+      RetentionInDays: !If [IsProd, 90, 14]
+
+  # URL Generate Worker Function LogGroup (N-5)
+  UrlGenerateWorkerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${UrlGenerateWorkerFunction}"
       RetentionInDays: !If [IsProd, 90, 14]
 
   #============================================================

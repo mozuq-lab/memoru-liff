@@ -7,6 +7,7 @@ import re
 from typing import Any, Dict, Optional
 from urllib.parse import parse_qs, unquote
 
+import boto3
 from aws_lambda_powertools import Logger, Tracer
 from aws_lambda_powertools.utilities.typing import LambdaContext
 
@@ -23,17 +24,17 @@ from services.flex_messages import (
     create_link_required_message,
     create_error_message,
     create_url_generation_progress_message,
-    create_card_preview_carousel,
     create_url_generation_error_message,
 )
 from models.card import Reference
 from services.card_service import CardService, CardNotFoundError
 from services.review_service import ReviewService
-from services.url_content_service import UrlContentService, ContentFetchError
+from services.url_content_service import UrlContentService
 from services.content_chunker import chunk_content
-from services.ai_service import create_ai_service, AIServiceError
+from services.ai_service import create_ai_service
 from services.webhook_idempotency import WebhookIdempotencyService
 from services.url_cards_store import UrlCardsStore
+from services.url_generation_service import generate_and_push_url_cards
 from utils.url_validator import validate_url, UrlValidationError
 
 logger = Logger()
@@ -48,6 +49,39 @@ url_cards_store = UrlCardsStore()
 
 # LIFF URL for account linking
 LIFF_URL = os.environ.get("LIFF_URL", "https://liff.line.me/your-liff-id")
+
+# N-5: URL カード生成の非同期化。
+# 受付（本 webhook Lambda）は進捗 reply まで行い、重い生成本体は SQS へ enqueue して
+# 即 return することで API Gateway の 30 秒上限による LINE 側タイムアウトを解消する。
+# URL_GENERATE_QUEUE_URL が設定され、かつ URL_WORKER_MODE != "inline" のときのみ enqueue。
+# それ以外（ローカル開発・テスト）はその場で同期実行する（インライン）。
+# enqueue 失敗時はインライン同期実行へフォールバックしない（30 秒上限問題の再発を防ぐ）。
+# 代わりにエラーをユーザーへ通知して即 200 を返す。
+# NOTE(ローカル): sam local は SQS → Lambda トリガーを再現できないため、env.json で
+# URL_WORKER_MODE="inline" を設定し、ローカルは常に同期実行する。
+URL_GENERATE_QUEUE_URL = os.environ.get("URL_GENERATE_QUEUE_URL", "")
+URL_WORKER_MODE = os.environ.get("URL_WORKER_MODE", "")
+
+# Lazy 初期化（インラインのみの環境では SQS クライアントを生成しない）。
+_sqs_client = None
+
+
+def _get_sqs_client() -> Any:
+    """SQS クライアントを遅延生成して返す。"""
+    global _sqs_client
+    if _sqs_client is None:
+        _sqs_client = boto3.client("sqs")
+    return _sqs_client
+
+
+def _should_enqueue() -> bool:
+    """URL カード生成を SQS ワーカーへ非同期ディスパッチすべきか判定する。
+
+    Returns:
+        True  — キュー URL があり、かつ inline モードでない（→ enqueue）。
+        False — それ以外（→ その場で同期実行＝インライン）。
+    """
+    return bool(URL_GENERATE_QUEUE_URL) and URL_WORKER_MODE != "inline"
 
 # URL detection pattern
 _URL_PATTERN = re.compile(
@@ -192,18 +226,24 @@ def handle_url_card_generation(
     line_user_id: str,
     url: str,
     reply_token: str,
+    webhook_event_id: Optional[str] = None,
 ) -> None:
-    """Handle URL card generation from LINE chat.
+    """Handle URL card generation from LINE chat (N-5: receive + dispatch).
 
-    Fetches content → generates cards → sends carousel preview.
+    受付側の責務はバリデーション → 進捗 reply → ディスパッチに簡素化されている。
+    重い生成本体（取得 → chunk → Bedrock → 保存 → push）は
+    ``services.url_generation_service`` に切り出され、SQS ワーカーで非同期実行される
+    （queue 未設定 / inline モード時のみその場で同期実行）。enqueue 失敗時はインライン
+    へフォールバックせず、エラーを通知して 200 を返す。
 
     Args:
         user_id: System user ID.
         line_user_id: LINE user ID.
         url: URL to generate cards from.
-        reply_token: Reply token for response.
+        reply_token: Reply token for response (進捗メッセージでここで消費する)。
+        webhook_event_id: ワーカー側冪等に使う LINE webhookEventId（enqueue 時に同梱）。
     """
-    logger.info(f"Generating cards from URL for user: {user_id}, url: {url}")
+    logger.info(f"Dispatching URL card generation for user: {user_id}, url: {url}")
 
     # Validate URL before processing (M-1: SSRF prevention)
     try:
@@ -218,7 +258,7 @@ def handle_url_card_generation(
         )
         return
 
-    # Send progress message first
+    # Send progress message first (reply token はここで消費される)。
     try:
         line_service.reply_message(
             reply_token,
@@ -227,99 +267,70 @@ def handle_url_card_generation(
     except LineApiError:
         logger.warning("Failed to send progress message")
 
-    try:
-        # Fetch content
-        content_service = UrlContentService()
-        page = content_service.fetch_content(url)
-
-        # Chunk content
-        chunks = chunk_content(page.text_content, page_title=page.title)
-        chunk_texts = [c.text for c in chunks]
-
-        if not chunk_texts:
-            line_service.push_message(
-                line_user_id,
-                [create_url_generation_error_message(
-                    "ページからテキストを抽出できませんでした。"
-                )],
+    # ディスパッチ: 非同期（SQS）かインライン（同期）か。
+    if _should_enqueue():
+        try:
+            _enqueue_url_generation(
+                user_id=user_id,
+                line_user_id=line_user_id,
+                url=url,
+                webhook_event_id=webhook_event_id or "",
             )
-            return
+        except Exception as e:
+            # enqueue 失敗時にインライン同期実行へフォールバックすると 30 秒上限問題が
+            # 再発するため、フォールバックは廃止。error ログを残し、best-effort で
+            # ユーザーにエラーを通知して受付は 200 で返す（受付は決して落とさない）。
+            logger.error(f"Failed to enqueue URL generation: {e}")
+            try:
+                line_service.push_message(
+                    line_user_id,
+                    [create_url_generation_error_message(
+                        "エラーが発生しました。しばらくしてからもう一度 URL を送信してください。"
+                    )],
+                )
+            except Exception as push_err:
+                logger.warning(
+                    f"Failed to push enqueue-failure notification: {push_err}"
+                )
+        return
 
-        # Generate cards
-        ai_service = create_ai_service()
-        result = ai_service.generate_cards_from_chunks(
-            chunks=chunk_texts,
-            card_type="qa",
-            target_count=10,
-            difficulty="medium",
-            language="ja",
-            page_title=page.title,
-        )
+    # インライン同期実行（_should_enqueue() == False の場合のみ：
+    # queue 未設定 or URL_WORKER_MODE=inline）。ローカル開発・テスト相当。
+    generate_and_push_url_cards(
+        user_id=user_id,
+        line_user_id=line_user_id,
+        url=url,
+    )
 
-        if not result.cards:
-            line_service.push_message(
-                line_user_id,
-                [create_url_generation_error_message(
-                    "カードを生成できませんでした。"
-                )],
-            )
-            return
 
-        # Build card data for carousel
-        cards_data = [
-            {
-                "front": card.front,
-                "back": card.back,
-                "suggested_tags": card.suggested_tags,
-            }
-            for card in result.cards
-        ]
+def _enqueue_url_generation(
+    user_id: str,
+    line_user_id: str,
+    url: str,
+    webhook_event_id: str,
+) -> None:
+    """URL カード生成リクエストを SQS ワーカーキューへ送信する。
 
-        # C-3: Persist the generated cards under a short reference key so the
-        # save postback can stay within LINE's 300-char limit (the URL itself
-        # may be up to 2048 chars) and so saving does NOT re-fetch/re-generate
-        # (avoids double Bedrock cost + preview/saved mismatch).
-        ref_key = url_cards_store.store_pending_cards(
-            cards=cards_data,
-            page_url=page.url,
-            page_title=page.title,
-        )
-
-        # Send carousel with card previews
-        carousel = create_card_preview_carousel(
-            cards=cards_data,
-            page_title=page.title,
-            page_url=page.url,
-            user_id=user_id,
-            ref_key=ref_key,
-        )
-        line_service.push_message(line_user_id, [carousel])
-
-        logger.info(
-            f"URL card generation complete: {len(result.cards)} cards, "
-            f"url={url}"
-        )
-
-    except ContentFetchError as e:
-        logger.warning(f"Content fetch error: {e}")
-        line_service.push_message(
-            line_user_id,
-            [create_url_generation_error_message(str(e))],
-        )
-    except AIServiceError as e:
-        logger.error(f"AI service error: {e}")
-        line_service.push_message(
-            line_user_id,
-            [create_url_generation_error_message(
-                "AI処理中にエラーが発生しました。"
-            )],
-        )
-    except Exception as e:
-        logger.error(f"Unexpected error in URL card generation: {e}")
-        line_service.push_message(
-            line_user_id,
-            [create_error_message()],
-        )
+    Args:
+        user_id: System user ID.
+        line_user_id: LINE user ID.
+        url: 生成元 URL（バリデーション済み）。
+        webhook_event_id: ワーカー側冪等用の LINE webhookEventId。
+    """
+    payload = {
+        "user_id": user_id,
+        "line_user_id": line_user_id,
+        "url": url,
+        "webhook_event_id": webhook_event_id,
+    }
+    _get_sqs_client().send_message(
+        QueueUrl=URL_GENERATE_QUEUE_URL,
+        MessageBody=json.dumps(payload, ensure_ascii=False),
+    )
+    logger.info(
+        "Enqueued URL card generation",
+        extra={"user_id": user_id, "webhook_event_id": webhook_event_id},
+    )
 
 
 @tracer.capture_method
@@ -509,12 +520,14 @@ def handle_message(event: LineEvent) -> None:
         line_service.reply_message(event.reply_token, [message])
         return
 
-    # Trigger URL card generation
+    # Trigger URL card generation (受付 → ディスパッチ)。
+    # webhook_event_id はワーカー側冪等のために enqueue 時に同梱する。
     handle_url_card_generation(
         user_id=user_id,
         line_user_id=event.source_user_id,
         url=url,
         reply_token=event.reply_token,
+        webhook_event_id=event.webhook_event_id,
     )
 
 
