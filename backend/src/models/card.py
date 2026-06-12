@@ -137,7 +137,18 @@ class Card(BaseModel):
         )
 
     def to_dynamodb_item(self) -> dict:
-        """Convert to DynamoDB item."""
+        """Convert to DynamoDB item.
+
+        【deck_index_key（GSI 用複合キー）】: deck-cards-index GSI の HASH キーとして
+        "<user_id>#<deck_id>" を派生属性に持たせ、ユーザー境界をキーに含める。
+        異なるユーザーが同一 deck_id を持ち得ても集計が混ざらないようにするため
+        (PR #47 [P2])。deck_id が無いカードは属性を書かないことでスパースインデックス
+        を維持する（未分類カードは GSI に投影されない）。
+
+        【マイグレーション注意】: 既存カードには deck_index_key 属性が無いため、
+        当該カードは GSI に投影されない。再保存（create/update）時に属性が投影される。
+        本番は現状デプロイ環境・既存データが無い前提のため移行スクリプトは不要。
+        """
         item = {
             "user_id": self.user_id,
             "card_id": self.card_id,
@@ -153,11 +164,21 @@ class Card(BaseModel):
             item["references"] = [ref.model_dump() for ref in self.references]
         if self.deck_id:
             item["deck_id"] = self.deck_id
+            # GSI 用複合キー（永続化専用。CardResponse には出さない）。
+            item["deck_index_key"] = self.deck_index_key(self.user_id, self.deck_id)
         if self.next_review_at:
             item["next_review_at"] = self.next_review_at.isoformat()
         if self.updated_at:
             item["updated_at"] = self.updated_at.isoformat()
         return item
+
+    @staticmethod
+    def deck_index_key(user_id: str, deck_id: str) -> str:
+        """Build the deck-cards-index GSI HASH key from user_id and deck_id.
+
+        ユーザー境界を含めた複合キー "<user_id>#<deck_id>" を生成する (PR #47 [P2])。
+        """
+        return f"{user_id}#{deck_id}"
 
     @classmethod
     def from_dynamodb_item(cls, item: dict) -> "Card":

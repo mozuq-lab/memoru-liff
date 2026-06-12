@@ -53,44 +53,109 @@ _load_domain_lists()
 _IPV6_BRACKET_RE = re.compile(r"^\[(.+)\]$")
 
 
-def _is_private_ip_address(addr_str: str) -> bool:
-    """Check if an IP address string is private/loopback/reserved."""
+def is_private_ip_address(addr_str: str) -> bool:
+    """Check if an IP address string is *not* an explicitly-global address.
+
+    Public helper so that the content-fetch layer can re-use the exact same
+    blocklist logic when pinning a connection to an already-resolved IP
+    (SSRF / DNS-rebinding defence). Returns False for strings that are not
+    valid IP literals.
+
+    This uses an **allowlist** posture: only addresses that the stdlib
+    ``ipaddress`` module reports as ``is_global`` are treated as safe; every
+    other address is rejected. ``not is_global`` collapses private, loopback,
+    reserved, link-local, CGNAT (``100.64.0.0/10`` — used by AWS VPC and shared
+    NAT), multicast and the unspecified address (``0.0.0.0`` / ``::``) into a
+    single deny rule. This closes gaps in a blocklist built from individual
+    ``is_private`` / ``is_loopback`` / ``is_reserved`` / ``is_link_local`` flags
+    (CGNAT and multicast are False for all of those) and automatically tracks
+    any future reserved-range additions that update ``is_global``. ``is_private``
+    and ``is_multicast`` are kept as explicit, redundant checks to make the
+    intent unmistakable. Works for both IPv4 and IPv6.
+    """
     try:
         addr = ipaddress.ip_address(addr_str)
-        return addr.is_private or addr.is_loopback or addr.is_reserved or addr.is_link_local
     except ValueError:
         return False
+    return not addr.is_global or addr.is_private or addr.is_multicast
+
+
+# Backwards-compatible private alias (kept for any internal references).
+_is_private_ip_address = is_private_ip_address
+
+
+def resolve_host(hostname: str) -> list[str]:
+    """Resolve a hostname to all of its IP addresses.
+
+    If ``hostname`` is already an IP literal (optionally bracketed IPv6) it is
+    returned as a single-element list without a DNS lookup.
+
+    Returns an empty list if DNS resolution fails (NXDOMAIN / no records); the
+    caller treats this as a connection error, matching the prior behaviour.
+    """
+    # Strip brackets from IPv6 literals
+    match = _IPV6_BRACKET_RE.match(hostname)
+    if match:
+        hostname = match.group(1)
+
+    # Raw IP literal — no DNS lookup needed.
+    try:
+        ipaddress.ip_address(hostname)
+        return [hostname]
+    except ValueError:
+        pass
+
+    try:
+        addrinfos = socket.getaddrinfo(hostname, None, proto=socket.IPPROTO_TCP)
+    except socket.gaierror:
+        return []
+
+    seen: list[str] = []
+    for _family, _type, _proto, _canon, sockaddr in addrinfos:
+        ip_str = str(sockaddr[0])  # IPv6 sockaddr tuples may type as str | int
+        if ip_str not in seen:
+            seen.append(ip_str)
+    return seen
+
+
+def resolve_and_validate_host(hostname: str) -> list[str]:
+    """Resolve ``hostname`` once and verify *every* resolved IP is public.
+
+    This performs a single DNS lookup and checks all returned addresses against
+    the private/loopback/reserved blocklist. Checking *all* results (rather than
+    just the first) is what gives DNS-rebinding resistance: a malicious resolver
+    cannot hide a private IP behind a public one.
+
+    Args:
+        hostname: The host part of the URL (IP literal or DNS name).
+
+    Returns:
+        The list of resolved IP address strings (non-empty) when all are public.
+        Returns an empty list when DNS resolution yields no records, so the
+        caller can surface a connection error.
+
+    Raises:
+        UrlValidationError: If any resolved address is private/internal.
+    """
+    addresses = resolve_host(hostname)
+    for ip_str in addresses:
+        if is_private_ip_address(ip_str):
+            raise UrlValidationError(
+                f"Access to private/internal IP addresses is blocked: {hostname}"
+            )
+    return addresses
 
 
 def _is_private_ip(hostname: str) -> bool:
     """Check if a hostname resolves to a private/loopback IP address.
 
-    Checks both raw IP literals and DNS-resolved addresses.
+    Checks both raw IP literals and DNS-resolved addresses. DNS failure is
+    treated as "not private" here; the HTTP client raises a connection error
+    if the host truly doesn't exist.
     """
-    # Strip brackets from IPv6
-    match = _IPV6_BRACKET_RE.match(hostname)
-    if match:
-        hostname = match.group(1)
-
-    # Check raw IP literal
-    try:
-        addr = ipaddress.ip_address(hostname)
-        return addr.is_private or addr.is_loopback or addr.is_reserved or addr.is_link_local
-    except ValueError:
-        pass
-
-    # DNS resolution check — resolve hostname and verify all addresses
-    try:
-        addrinfos = socket.getaddrinfo(hostname, None, proto=socket.IPPROTO_TCP)
-        for family, _, _, _, sockaddr in addrinfos:
-            ip_str = str(sockaddr[0])  # IPv6 sockaddr tuples may type as str | int
-            if _is_private_ip_address(ip_str):
-                return True
-    except socket.gaierror:
-        # DNS resolution failed — allow it here; the HTTP client will
-        # raise a connection error if the host truly doesn't exist.
-        return False
-
+    for ip_str in resolve_host(hostname):
+        if is_private_ip_address(ip_str):
+            return True
     return False
 
 

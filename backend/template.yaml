@@ -159,6 +159,8 @@ Resources:
           AttributeType: S
         - AttributeName: next_review_at
           AttributeType: S
+        - AttributeName: deck_index_key
+          AttributeType: S
       KeySchema:
         - AttributeName: user_id
           KeyType: HASH
@@ -173,6 +175,29 @@ Resources:
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
+        # deck-cards-index: デッキ別カード集計 (get_deck_card_counts / get_deck_due_counts) を
+        # COUNT クエリ化するための GSI。カウント用途のみのため Projection は KEYS_ONLY で最小化する。
+        # next_review_at を RANGE キーに置くことで due 集計を KeyCondition (deck_index_key = :k AND
+        # next_review_at <= :now) で絞り込める。next_review_at は ISO8601 文字列で、辞書順比較が
+        # 時刻順と一致する (review #11)。
+        # HASH キー deck_index_key は "<user_id>#<deck_id>" の複合キー (PR #47 [P2])。
+        # deck_id 単体だと異なるユーザーが同一 deck_id を持つ場合に他ユーザーのカードまで
+        # 集計してしまうため、user_id をキーに含めてユーザー境界を保証する。
+        # 注意 1 (スパースインデックス): deck_id を持たないカードは deck_index_key も持たず
+        # この GSI に投影されないため、未分類カードは集計対象に含まれない。
+        # 注意 2 (マイグレーション): 既存カードには deck_index_key 属性が無く GSI に投影されない。
+        #   再保存 (create/update) 時に属性が投影される。本番は現状デプロイ環境・既存データが
+        #   無い前提のため移行スクリプトは不要。
+        # 注意 3 (オンラインバックフィル): 既存テーブルへの GSI 追加は DynamoDB が
+        # バックフィルを自動実行する。バックフィル完了までは GSI クエリが不完全な結果を返し得る。
+        - IndexName: deck-cards-index
+          KeySchema:
+            - AttributeName: deck_index_key
+              KeyType: HASH
+            - AttributeName: next_review_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: KEYS_ONLY
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
       SSESpecification:

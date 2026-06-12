@@ -44,6 +44,7 @@ def dynamodb_tables():
                 {"AttributeName": "user_id", "AttributeType": "S"},
                 {"AttributeName": "card_id", "AttributeType": "S"},
                 {"AttributeName": "next_review_at", "AttributeType": "S"},
+                {"AttributeName": "deck_index_key", "AttributeType": "S"},
             ],
             GlobalSecondaryIndexes=[
                 {
@@ -53,7 +54,15 @@ def dynamodb_tables():
                         {"AttributeName": "next_review_at", "KeyType": "RANGE"},
                     ],
                     "Projection": {"ProjectionType": "ALL"},
-                }
+                },
+                {
+                    "IndexName": "deck-cards-index",
+                    "KeySchema": [
+                        {"AttributeName": "deck_index_key", "KeyType": "HASH"},
+                        {"AttributeName": "next_review_at", "KeyType": "RANGE"},
+                    ],
+                    "Projection": {"ProjectionType": "KEYS_ONLY"},
+                },
             ],
             BillingMode="PAY_PER_REQUEST",
         )
@@ -262,6 +271,7 @@ class TestDeleteDeck:
                 "front": "Q1",
                 "back": "A1",
                 "deck_id": deck.deck_id,
+                "deck_index_key": f"user-1#{deck.deck_id}",
                 "interval": 1,
                 "ease_factor": "2.5",
                 "repetitions": 0,
@@ -275,6 +285,7 @@ class TestDeleteDeck:
                 "front": "Q2",
                 "back": "A2",
                 "deck_id": deck.deck_id,
+                "deck_index_key": f"user-1#{deck.deck_id}",
                 "interval": 1,
                 "ease_factor": "2.5",
                 "repetitions": 0,
@@ -290,6 +301,9 @@ class TestDeleteDeck:
         card2 = cards_table.get_item(Key={"user_id": "user-1", "card_id": "card-2"})
         assert "deck_id" not in card1["Item"]
         assert "deck_id" not in card2["Item"]
+        # GSI 用派生キーも併せて削除される (PR #47 [P2])。
+        assert "deck_index_key" not in card1["Item"]
+        assert "deck_index_key" not in card2["Item"]
 
 
 class TestGetDeckCardCounts:
@@ -313,6 +327,11 @@ class TestGetDeckCardCounts:
                     "front": f"Q{i}",
                     "back": f"A{i}",
                     "deck_id": deck_id,
+                    # GSI 用複合キー (PR #47 [P2])。card_service 経由なら自動付与される。
+                    "deck_index_key": f"user-1#{deck_id}",
+                    # 実カードは常に next_review_at を持つ (card_service が作成時に設定)。
+                    # deck-cards-index は next_review_at を RANGE キーとするため必須。
+                    "next_review_at": datetime.now(timezone.utc).isoformat(),
                     "interval": 1,
                     "ease_factor": "2.5",
                     "repetitions": 0,
@@ -323,6 +342,82 @@ class TestGetDeckCardCounts:
         counts = deck_service.get_deck_card_counts("user-1", ["deck-1", "deck-2"])
         assert counts["deck-1"] == 2
         assert counts["deck-2"] == 1
+
+    def test_card_counts_excludes_cards_without_deck_id(
+        self, deck_service, dynamodb_tables
+    ):
+        """deck_id を持たない (未分類) カードは集計に含まれない (スパースインデックス)."""
+        cards_table = dynamodb_tables.Table("memoru-cards-test")
+
+        # deck-1 に紐付くカード 1 枚
+        cards_table.put_item(
+            Item={
+                "user_id": "user-1",
+                "card_id": "card-with-deck",
+                "front": "Q",
+                "back": "A",
+                "deck_id": "deck-1",
+                "deck_index_key": "user-1#deck-1",
+                "next_review_at": datetime.now(timezone.utc).isoformat(),
+                "interval": 1,
+                "ease_factor": "2.5",
+                "repetitions": 0,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        # deck_id を持たないカード (GSI に投影されない)
+        cards_table.put_item(
+            Item={
+                "user_id": "user-1",
+                "card_id": "card-no-deck",
+                "front": "Q2",
+                "back": "A2",
+                "next_review_at": datetime.now(timezone.utc).isoformat(),
+                "interval": 1,
+                "ease_factor": "2.5",
+                "repetitions": 0,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        counts = deck_service.get_deck_card_counts("user-1", ["deck-1"])
+        assert counts["deck-1"] == 1
+
+    def test_card_counts_empty_deck_ids(self, deck_service):
+        """deck_ids が空の場合は空 dict を返す."""
+        assert deck_service.get_deck_card_counts("user-1", []) == {}
+
+    def test_card_counts_isolated_by_user(self, deck_service, dynamodb_tables):
+        """[P2 回帰] 異なるユーザーが同一 deck_id を持っても自分のカードのみ集計される.
+
+        user-1 と user-2 が同じ deck_id のカードを 1 枚ずつ持つとき、
+        user-1 のカウントは自分の 1 枚のみ (= 1) であること。
+        deck_index_key (= "<user_id>#<deck_id>") により集計が混ざらないことを検証する。
+        """
+        cards_table = dynamodb_tables.Table("memoru-cards-test")
+        shared_deck_id = "deck-shared"
+
+        for user_id, card_id in [("user-1", "card-u1"), ("user-2", "card-u2")]:
+            cards_table.put_item(
+                Item={
+                    "user_id": user_id,
+                    "card_id": card_id,
+                    "front": "Q",
+                    "back": "A",
+                    "deck_id": shared_deck_id,
+                    "deck_index_key": f"{user_id}#{shared_deck_id}",
+                    "next_review_at": datetime.now(timezone.utc).isoformat(),
+                    "interval": 1,
+                    "ease_factor": "2.5",
+                    "repetitions": 0,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+
+        counts_u1 = deck_service.get_deck_card_counts("user-1", [shared_deck_id])
+        counts_u2 = deck_service.get_deck_card_counts("user-2", [shared_deck_id])
+        assert counts_u1[shared_deck_id] == 1
+        assert counts_u2[shared_deck_id] == 1
 
 
 class TestGetDeckDueCounts:
@@ -346,6 +441,7 @@ class TestGetDeckDueCounts:
                 "front": "Q",
                 "back": "A",
                 "deck_id": "deck-1",
+                "deck_index_key": "user-1#deck-1",
                 "next_review_at": past.isoformat(),
                 "interval": 1,
                 "ease_factor": "2.5",
@@ -360,6 +456,7 @@ class TestGetDeckDueCounts:
                 "front": "Q2",
                 "back": "A2",
                 "deck_id": "deck-2",
+                "deck_index_key": "user-1#deck-2",
                 "next_review_at": "2099-12-31T00:00:00+00:00",
                 "interval": 1,
                 "ease_factor": "2.5",
@@ -371,6 +468,119 @@ class TestGetDeckDueCounts:
         counts = deck_service.get_deck_due_counts("user-1", ["deck-1", "deck-2"])
         assert counts["deck-1"] == 1
         assert counts["deck-2"] == 0
+
+    def test_due_counts_boundary_inclusive(self, deck_service, dynamodb_tables):
+        """next_review_at <= now の境界は包含 (<=)。過去/現在は due、未来は非 due."""
+        cards_table = dynamodb_tables.Table("memoru-cards-test")
+
+        # 過去 (due)
+        cards_table.put_item(
+            Item={
+                "user_id": "user-1",
+                "card_id": "card-past",
+                "front": "Q",
+                "back": "A",
+                "deck_id": "deck-1",
+                "deck_index_key": "user-1#deck-1",
+                "next_review_at": "2000-01-01T00:00:00+00:00",
+                "interval": 1,
+                "ease_factor": "2.5",
+                "repetitions": 0,
+                "created_at": "2000-01-01T00:00:00+00:00",
+            }
+        )
+        # 遠い未来 (非 due)
+        cards_table.put_item(
+            Item={
+                "user_id": "user-1",
+                "card_id": "card-future",
+                "front": "Q",
+                "back": "A",
+                "deck_id": "deck-1",
+                "deck_index_key": "user-1#deck-1",
+                "next_review_at": "2999-01-01T00:00:00+00:00",
+                "interval": 1,
+                "ease_factor": "2.5",
+                "repetitions": 0,
+                "created_at": "2000-01-01T00:00:00+00:00",
+            }
+        )
+
+        counts = deck_service.get_deck_due_counts("user-1", ["deck-1"])
+        # 過去の 1 枚のみ due
+        assert counts["deck-1"] == 1
+
+    def test_due_counts_empty_deck_ids(self, deck_service):
+        """deck_ids が空の場合は空 dict を返す."""
+        assert deck_service.get_deck_due_counts("user-1", []) == {}
+
+    def test_due_counts_isolated_by_user(self, deck_service, dynamodb_tables):
+        """[P2 回帰] 同一 deck_id でも due 集計が他ユーザーと混ざらない."""
+        cards_table = dynamodb_tables.Table("memoru-cards-test")
+        shared_deck_id = "deck-shared"
+        past = datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+        for user_id, card_id in [("user-1", "card-u1"), ("user-2", "card-u2")]:
+            cards_table.put_item(
+                Item={
+                    "user_id": user_id,
+                    "card_id": card_id,
+                    "front": "Q",
+                    "back": "A",
+                    "deck_id": shared_deck_id,
+                    "deck_index_key": f"{user_id}#{shared_deck_id}",
+                    "next_review_at": past.isoformat(),
+                    "interval": 1,
+                    "ease_factor": "2.5",
+                    "repetitions": 0,
+                    "created_at": past.isoformat(),
+                }
+            )
+
+        counts_u1 = deck_service.get_deck_due_counts("user-1", [shared_deck_id])
+        assert counts_u1[shared_deck_id] == 1
+
+
+class TestDeckCountsPagination:
+    """LastEvaluatedKey ループでの Count 合算テスト (COUNT クエリのページング)."""
+
+    def test_card_counts_sums_count_across_pages(
+        self, deck_service, dynamodb_tables, monkeypatch
+    ):
+        """複数ページにまたがる COUNT クエリの Count が合算される."""
+        # cards_table.query をモックして 2 ページ分の COUNT 応答を返す。
+        calls = {"n": 0}
+
+        def fake_query(**kwargs):
+            assert kwargs.get("Select") == "COUNT"
+            calls["n"] += 1
+            if "ExclusiveStartKey" not in kwargs:
+                # 1 ページ目: Count=2, 続きあり
+                return {"Count": 2, "LastEvaluatedKey": {"deck_index_key": "user-1#deck-1"}}
+            # 2 ページ目: Count=3, 続きなし
+            return {"Count": 3}
+
+        monkeypatch.setattr(deck_service.cards_table, "query", fake_query)
+
+        counts = deck_service.get_deck_card_counts("user-1", ["deck-1"])
+        assert counts["deck-1"] == 5
+        assert calls["n"] == 2
+
+    def test_due_counts_sums_count_across_pages(
+        self, deck_service, dynamodb_tables, monkeypatch
+    ):
+        """due COUNT クエリも複数ページの Count を合算する."""
+        def fake_query(**kwargs):
+            assert kwargs.get("Select") == "COUNT"
+            assert ":now" in kwargs["ExpressionAttributeValues"]
+            if "ExclusiveStartKey" not in kwargs:
+                return {"Count": 1, "LastEvaluatedKey": {"deck_index_key": "user-1#deck-1"}}
+            return {"Count": 4}
+
+        monkeypatch.setattr(deck_service.cards_table, "query", fake_query)
+
+        counts = deck_service.get_deck_due_counts("user-1", ["deck-1"])
+        assert counts["deck-1"] == 5
 
 
 # =============================================================================
@@ -409,6 +619,7 @@ def dynamodb_tables_with_deck():
                 {"AttributeName": "user_id", "AttributeType": "S"},
                 {"AttributeName": "card_id", "AttributeType": "S"},
                 {"AttributeName": "next_review_at", "AttributeType": "S"},
+                {"AttributeName": "deck_index_key", "AttributeType": "S"},
             ],
             GlobalSecondaryIndexes=[
                 {
@@ -418,7 +629,15 @@ def dynamodb_tables_with_deck():
                         {"AttributeName": "next_review_at", "KeyType": "RANGE"},
                     ],
                     "Projection": {"ProjectionType": "ALL"},
-                }
+                },
+                {
+                    "IndexName": "deck-cards-index",
+                    "KeySchema": [
+                        {"AttributeName": "deck_index_key", "KeyType": "HASH"},
+                        {"AttributeName": "next_review_at", "KeyType": "RANGE"},
+                    ],
+                    "Projection": {"ProjectionType": "KEYS_ONLY"},
+                },
             ],
             BillingMode="PAY_PER_REQUEST",
         )

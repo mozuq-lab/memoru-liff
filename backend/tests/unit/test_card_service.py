@@ -277,6 +277,80 @@ class TestCardServiceCreate:
         assert card.repetitions == 0
 
 
+class TestDeckIndexKey:
+    """PR #47 [P2]: GSI 用複合キー deck_index_key の書き込み/更新/削除テスト.
+
+    deck-cards-index GSI の HASH キー deck_index_key (= "<user_id>#<deck_id>") が
+    create/update/解除で正しく永続化されることを、DynamoDB の生アイテムで検証する。
+    """
+
+    def test_create_writes_deck_index_key(self, card_service, dynamodb_table):
+        """deck_id 付きカード作成で deck_index_key が "<user_id>#<deck_id>" で書かれる."""
+        cards_table = dynamodb_table.Table("memoru-cards-test")
+        card = card_service.create_card(
+            user_id="user-1",
+            front="Q",
+            back="A",
+            deck_id="deck-1",
+        )
+        item = cards_table.get_item(
+            Key={"user_id": "user-1", "card_id": card.card_id}
+        )["Item"]
+        assert item["deck_index_key"] == "user-1#deck-1"
+
+    def test_create_without_deck_omits_key(self, card_service, dynamodb_table):
+        """deck_id 無しカードは deck_index_key を書かない (スパースインデックス維持)."""
+        cards_table = dynamodb_table.Table("memoru-cards-test")
+        card = card_service.create_card(
+            user_id="user-1",
+            front="Q",
+            back="A",
+        )
+        item = cards_table.get_item(
+            Key={"user_id": "user-1", "card_id": card.card_id}
+        )["Item"]
+        assert "deck_index_key" not in item
+
+    def test_update_sets_deck_index_key(self, card_service, dynamodb_table):
+        """deck_id を新規付与する更新で deck_index_key が SET される."""
+        cards_table = dynamodb_table.Table("memoru-cards-test")
+        card = card_service.create_card(user_id="user-1", front="Q", back="A")
+
+        card_service.update_card("user-1", card.card_id, deck_id="deck-9")
+        item = cards_table.get_item(
+            Key={"user_id": "user-1", "card_id": card.card_id}
+        )["Item"]
+        assert item["deck_id"] == "deck-9"
+        assert item["deck_index_key"] == "user-1#deck-9"
+
+    def test_update_changes_deck_index_key(self, card_service, dynamodb_table):
+        """deck_id 変更で deck_index_key も新しい値に更新される."""
+        cards_table = dynamodb_table.Table("memoru-cards-test")
+        card = card_service.create_card(
+            user_id="user-1", front="Q", back="A", deck_id="deck-1"
+        )
+
+        card_service.update_card("user-1", card.card_id, deck_id="deck-2")
+        item = cards_table.get_item(
+            Key={"user_id": "user-1", "card_id": card.card_id}
+        )["Item"]
+        assert item["deck_index_key"] == "user-1#deck-2"
+
+    def test_update_removes_deck_index_key_on_unset(self, card_service, dynamodb_table):
+        """deck_id=None (解除) で deck_index_key も REMOVE される."""
+        cards_table = dynamodb_table.Table("memoru-cards-test")
+        card = card_service.create_card(
+            user_id="user-1", front="Q", back="A", deck_id="deck-1"
+        )
+
+        card_service.update_card("user-1", card.card_id, deck_id=None)
+        item = cards_table.get_item(
+            Key={"user_id": "user-1", "card_id": card.card_id}
+        )["Item"]
+        assert "deck_id" not in item
+        assert "deck_index_key" not in item
+
+
 class TestCardServiceGet:
     """Tests for CardService.get_card method."""
 
