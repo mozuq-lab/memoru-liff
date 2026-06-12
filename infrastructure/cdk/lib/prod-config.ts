@@ -20,6 +20,8 @@ export interface ProdConfig {
   cognitoDomainPrefix: string;
   callbackUrls: string[];
   logoutUrls: string[];
+  lineLoginChannelId: string;
+  lineLoginChannelSecretName: string;
 }
 
 /** 値が「未設定 or プレースホルダ」かを判定するためのパターン。 */
@@ -63,6 +65,11 @@ const REQUIRED_VARS: VarSpec[] = [
   { env: 'MEMORU_PROD_COGNITO_DOMAIN_PREFIX', key: 'cognitoDomainPrefix' },
   { env: 'MEMORU_PROD_CALLBACK_URLS', key: 'callbackUrls', list: true },
   { env: 'MEMORU_PROD_LOGOUT_URLS', key: 'logoutUrls', list: true },
+  // LINE Login IdP の 2 値も prod では必須。cognito-stack.ts は両方そろわないと
+  // LINE IdP を作成しないため、ガード無しだと「LINE ログインが抜けた User Pool」を
+  // 気づかずにデプロイできてしまう。
+  { env: 'LINE_LOGIN_CHANNEL_ID', key: 'lineLoginChannelId' },
+  { env: 'LINE_LOGIN_CHANNEL_SECRET_NAME', key: 'lineLoginChannelSecretName' },
 ];
 
 function isPlaceholder(value: string): boolean {
@@ -155,5 +162,7 @@ export function resolveProdConfig(
     cognitoDomainPrefix: resolved.cognitoDomainPrefix as string,
     callbackUrls: resolved.callbackUrls as string[],
     logoutUrls: resolved.logoutUrls as string[],
+    lineLoginChannelId: resolved.lineLoginChannelId as string,
+    lineLoginChannelSecretName: resolved.lineLoginChannelSecretName as string,
   };
 }

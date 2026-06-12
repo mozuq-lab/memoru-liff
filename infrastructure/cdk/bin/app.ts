@@ -87,9 +87,10 @@ if (stage === 'prod') {
       cognitoDomainPrefix: prod.cognitoDomainPrefix,
       callbackUrls: prod.callbackUrls,
       logoutUrls: prod.logoutUrls,
-      lineLoginChannelId: process.env.LINE_LOGIN_CHANNEL_ID,
+      // LINE Login の 2 値も resolveProdConfig の必須ガードを通った値を使う
+      lineLoginChannelId: prod.lineLoginChannelId,
       // prod は Secrets Manager 必須 (CognitoStack 側で平文を弾く)
-      lineLoginChannelSecretName: process.env.LINE_LOGIN_CHANNEL_SECRET_NAME,
+      lineLoginChannelSecretName: prod.lineLoginChannelSecretName,
     }),
 
     new KeycloakStack(app, 'MemoruKeycloakProd', {

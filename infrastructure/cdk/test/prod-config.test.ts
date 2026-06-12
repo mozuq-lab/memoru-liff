@@ -15,6 +15,8 @@ function validEnv(): NodeJS.ProcessEnv {
     MEMORU_PROD_CALLBACK_URLS:
       'https://liff.memoru.app/callback,https://liff.memoru.app/',
     MEMORU_PROD_LOGOUT_URLS: 'https://liff.memoru.app/',
+    LINE_LOGIN_CHANNEL_ID: '2001234567',
+    LINE_LOGIN_CHANNEL_SECRET_NAME: 'memoru-prod-line-channel-secret',
   };
 }
 
@@ -27,6 +29,30 @@ describe('resolveProdConfig', () => {
       expect(cfg.keycloakDomain).toBe('keycloak.memoru.app');
       expect(cfg.liffDomain).toBe('liff.memoru.app');
       expect(cfg.cognitoDomainPrefix).toBe('memoru-prod-app');
+      expect(cfg.lineLoginChannelId).toBe('2001234567');
+      expect(cfg.lineLoginChannelSecretName).toBe(
+        'memoru-prod-line-channel-secret',
+      );
+    });
+
+    test('LINE Login の 2 値が未設定なら不足として列挙される', () => {
+      // cognito-stack は両値が揃わないと LINE IdP を作成しないため、
+      // ガード無しでは「LINE ログイン抜けの User Pool」を黙ってデプロイできてしまう
+      const env = validEnv();
+      delete env.LINE_LOGIN_CHANNEL_ID;
+      delete env.LINE_LOGIN_CHANNEL_SECRET_NAME;
+      expect(() => resolveProdConfig(env)).toThrow(/LINE_LOGIN_CHANNEL_ID/);
+      expect(() => resolveProdConfig(env)).toThrow(
+        /LINE_LOGIN_CHANNEL_SECRET_NAME/,
+      );
+    });
+
+    test('LINE Login シークレット名のプレースホルダは拒否される', () => {
+      const env = validEnv();
+      env.LINE_LOGIN_CHANNEL_SECRET_NAME = '<your-secret-name>';
+      expect(() => resolveProdConfig(env)).toThrow(
+        /プレースホルダ[\s\S]*LINE_LOGIN_CHANNEL_SECRET_NAME/,
+      );
     });
 
     test('カンマ区切りの URL がリストに分割される', () => {
