@@ -20,7 +20,7 @@ class TestResponseConsistency:
         """PUT /users/me/settings と POST /users/me/unlink-line が同じ User 構造を返す.
 
         【テスト目的】: 変更対象の2エンドポイントが同一の UserResponse フィールドセットを返すことを検証
-        【期待される動作】: 両方のレスポンスの data に同一の8フィールドが含まれる
+        【期待される動作】: 両方のレスポンスの data に同一の9フィールドが含まれる
         青 信頼性レベル: EARS-045-021, EARS-045-022
 
         RED フェーズ失敗理由:
@@ -31,8 +31,15 @@ class TestResponseConsistency:
             - 両エンドポイントでフィールドセットが不一致
         """
         user_response_fields = {
-            "user_id", "display_name", "picture_url", "line_linked",
-            "notification_time", "timezone", "created_at", "updated_at",
+            "user_id",
+            "display_name",
+            "picture_url",
+            "line_linked",
+            "notification_time",
+            "timezone",
+            "day_start_hour",
+            "created_at",
+            "updated_at",
         }
 
         # --- PUT /users/me/settings ---
@@ -53,15 +60,20 @@ class TestResponseConsistency:
                 "line_linked": True,
                 "notification_time": "21:00",
                 "timezone": "Asia/Tokyo",
+                "day_start_hour": 4,
                 "created_at": "2024-01-01T00:00:00+00:00",
                 "updated_at": "2024-01-02T00:00:00+00:00",
             }
             mock_user.to_response.return_value = mock_response
-            mock_user.settings = {"notification_time": "21:00", "timezone": "Asia/Tokyo"}
+            mock_user.settings = {
+                "notification_time": "21:00",
+                "timezone": "Asia/Tokyo",
+            }
             mock_user_service.get_or_create_user.return_value = mock_user
             mock_user_service.update_settings.return_value = mock_user
 
             from api.handler import handler
+
             settings_response = handler(settings_event, lambda_context)
 
         settings_body = json.loads(settings_response["body"])
@@ -88,6 +100,7 @@ class TestResponseConsistency:
                 "line_linked": False,
                 "notification_time": "09:00",
                 "timezone": "Asia/Tokyo",
+                "day_start_hour": 4,
                 "created_at": "2024-01-01T00:00:00+00:00",
                 "updated_at": "2024-01-02T00:00:00+00:00",
             }
