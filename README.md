@@ -226,6 +226,9 @@ npx cdk synth
 
 ## デプロイ
 
+> **環境別手順書**: 開発環境は [deployment-guide-dev.md](docs/deployment-guide-dev.md)、本番環境は [deployment-guide-prod.md](docs/deployment-guide-prod.md) を参照。
+> public リポジトリのため、実環境固有の値（ドメイン・証明書 ARN・UserPool ID 等）は Git にコミットせず、GitHub Environments とローカル環境変数から外部注入する。
+
 ### 環境変数 (Secrets Manager)
 
 以下のシークレットを AWS Secrets Manager に作成してください：
@@ -243,6 +246,11 @@ npx cdk synth
 ```bash
 # バックエンド
 cd backend
+
+# 必須: OIDC 値を環境変数で設定（未設定なら fail-fast）
+export OIDC_ISSUER="https://cognito-idp.ap-northeast-1.amazonaws.com/<UserPoolId>"
+export OIDC_AUDIENCE="<UserPool Client ID>"
+# 任意: LINE_CHANNEL_ID / USE_STRANDS / TUTOR_SESSION_BACKEND / AGENTCORE_MEMORY_ID / BEDROCK_MODEL_ID
 
 # 開発環境
 make deploy-dev
@@ -282,10 +290,19 @@ GitHub Actions で CI/CD が設定されています。
 
 #### 必要な GitHub Secrets/Variables
 
+> **方針（public リポジトリ）**: 実環境固有の値はリポジトリにコミットせず、**GitHub Environments（環境別 Variables / Secrets）** に登録する。`deploy-backend` job はこれらの Variables から `--parameter-overrides` を組み立てて `sam deploy` に渡す。必須 Variables が未設定の場合は job が fail する。詳細は [本番デプロイ手順書](docs/deployment-guide-prod.md) を参照。
+
 **Secrets:**
 - `AWS_DEPLOY_ROLE_ARN` - OIDC 認証用 IAM ロール ARN
 
-**Variables (環境別):**
+**Variables (環境別) — バックエンドデプロイ用:**
+- `OIDC_ISSUER`（必須） - OIDC Issuer URL（Cognito: `https://cognito-idp.<region>.amazonaws.com/<UserPoolId>`）
+- `OIDC_AUDIENCE`（必須） - OIDC Audience（Cognito の場合は UserPool Client ID）
+- `LINE_CHANNEL_ID`（任意） - LINE ID トークン検証用 Channel ID
+- `USE_STRANDS`（任意） - Strands Agents SDK 有効化（prod は `true` 推奨）
+- `TUTOR_SESSION_BACKEND` / `AGENTCORE_MEMORY_ID` / `BEDROCK_MODEL_ID`（任意）
+
+**Variables (環境別) — フロントエンドデプロイ用:**
 - `API_URL` - バックエンド API URL
 - `LIFF_ID` - LINE LIFF ID
 - `OIDC_AUTHORITY` - OIDC プロバイダ Authority URL

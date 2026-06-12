@@ -131,10 +131,40 @@ jobs:
       - name: Build SAM application
         run: sam build --use-container
 
+      # 実環境固有の値は GitHub Environment Variables から注入する（public リポジトリ方針）。
+      # environment: コンテキスト（下記 environment:）により環境ごとの Variables が解決される。
+      # 必須 vars (OIDC_ISSUER, OIDC_AUDIENCE) が未設定なら job を fail させる。
       - name: Deploy to AWS
+        env:
+          ENVIRONMENT: ${{ github.event.inputs.environment || 'dev' }}
+          OIDC_ISSUER: ${{ vars.OIDC_ISSUER }}
+          OIDC_AUDIENCE: ${{ vars.OIDC_AUDIENCE }}
+          LINE_CHANNEL_ID: ${{ vars.LINE_CHANNEL_ID }}
+          USE_STRANDS: ${{ vars.USE_STRANDS }}
+          TUTOR_SESSION_BACKEND: ${{ vars.TUTOR_SESSION_BACKEND }}
+          AGENTCORE_MEMORY_ID: ${{ vars.AGENTCORE_MEMORY_ID }}
+          BEDROCK_MODEL_ID: ${{ vars.BEDROCK_MODEL_ID }}
         run: |
+          if [ -z "$OIDC_ISSUER" ] || [ -z "$OIDC_AUDIENCE" ]; then
+            echo "::error::必須の GitHub Environment Variables が未設定です（environment=$ENVIRONMENT）。"
+            [ -z "$OIDC_ISSUER" ] && echo "::error::  - OIDC_ISSUER"
+            [ -z "$OIDC_AUDIENCE" ] && echo "::error::  - OIDC_AUDIENCE"
+            echo "::error::設定方法は docs/deployment-guide-prod.md を参照してください。"
+            exit 1
+          fi
+          if [ -z "$LINE_CHANNEL_ID" ]; then
+            echo "::warning::LINE_CHANNEL_ID が未設定です。template.yaml の既定値(空)を使用します。"
+          fi
+          OVERRIDES="Environment=$ENVIRONMENT OidcIssuer=$OIDC_ISSUER OidcAudience=$OIDC_AUDIENCE"
+          [ -n "$LINE_CHANNEL_ID" ]       && OVERRIDES="$OVERRIDES LineChannelId=$LINE_CHANNEL_ID"
+          [ -n "$USE_STRANDS" ]           && OVERRIDES="$OVERRIDES UseStrands=$USE_STRANDS"
+          [ -n "$TUTOR_SESSION_BACKEND" ] && OVERRIDES="$OVERRIDES TutorSessionBackend=$TUTOR_SESSION_BACKEND"
+          [ -n "$AGENTCORE_MEMORY_ID" ]   && OVERRIDES="$OVERRIDES AgentCoreMemoryId=$AGENTCORE_MEMORY_ID"
+          [ -n "$BEDROCK_MODEL_ID" ]      && OVERRIDES="$OVERRIDES BedrockModelId=$BEDROCK_MODEL_ID"
+          echo "parameter-overrides: $OVERRIDES"
           sam deploy \
-            --config-env ${{ github.event.inputs.environment || 'dev' }} \
+            --config-env "$ENVIRONMENT" \
+            --parameter-overrides "$OVERRIDES" \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset
 
