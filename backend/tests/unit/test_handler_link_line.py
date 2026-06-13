@@ -27,15 +27,20 @@ class TestLinkLineHandler:
         )
 
         # 【実際の処理実行】: handler を呼び出す
-        with patch("api.handlers.user_handler.user_service") as mock_user_service, \
-             patch("api.handlers.user_handler.line_service"):
+        with (
+            patch("api.handlers.user_handler.user_service") as mock_user_service,
+            patch("api.handlers.user_handler.line_service"),
+        ):
             mock_user_service.get_or_create_user.return_value = MagicMock()
 
             from api.handler import handler
+
             response = handler(event, lambda_context)
 
         # 【結果検証】: 400 ステータスコードが返ることを確認
-        assert response["statusCode"] == 400  # 【確認内容】: id_token なしで 400 Bad Request が返る 🔵
+        assert (
+            response["statusCode"] == 400
+        )  # 【確認内容】: id_token なしで 400 Bad Request が返る 🔵
 
         # 【確認内容】: レスポンスボディに id_token に関するエラーメッセージが含まれる
         body = json.loads(response["body"])
@@ -60,17 +65,24 @@ class TestLinkLineHandler:
         )
 
         # 【実際の処理実行】: handler を呼び出す
-        with patch("api.handlers.user_handler.user_service") as mock_user_service, \
-             patch("api.handlers.user_handler.line_service"):
+        with (
+            patch("api.handlers.user_handler.user_service") as mock_user_service,
+            patch("api.handlers.user_handler.line_service"),
+        ):
             mock_user_service.get_or_create_user.return_value = MagicMock()
 
             from api.handler import handler
+
             response = handler(event, lambda_context)
 
         # 【結果検証】: 400 ステータスコードが返ることを確認
-        assert response["statusCode"] == 400  # 【確認内容】: 空文字の id_token で 400 Bad Request が返る 🔵
+        assert (
+            response["statusCode"] == 400
+        )  # 【確認内容】: 空文字の id_token で 400 Bad Request が返る 🔵
 
-    def test_link_line_success_with_id_token(self, api_gateway_event, lambda_context):
+    def test_link_line_success_with_id_token(
+        self, api_gateway_event, lambda_context, user_response_factory
+    ):
         """TC-09: 有効な id_token を検証して LINE 連携が成功する.
 
         【テスト目的】: ID トークン検証フローが正しく実装されていることを検証する
@@ -85,25 +97,41 @@ class TestLinkLineHandler:
         event = api_gateway_event(
             method="POST",
             path="/users/link-line",
-            body={"id_token": "valid-liff-id-token"},  # 【初期条件設定】: 有効な id_token
+            body={
+                "id_token": "valid-liff-id-token"
+            },  # 【初期条件設定】: 有効な id_token
             user_id="test-user-id",
         )
 
         # 【実際の処理実行】: handler を呼び出す
-        with patch("api.handlers.user_handler.user_service") as mock_user_service, \
-             patch("api.handlers.user_handler.line_service") as mock_line_service:
+        with (
+            patch("api.handlers.user_handler.user_service") as mock_user_service,
+            patch("api.handlers.user_handler.line_service") as mock_line_service,
+        ):
             # verify_id_token が line_user_id を返すようにモック
-            mock_line_service.verify_id_token.return_value = "U1234567890abcdef1234567890abcdef"
+            mock_line_service.verify_id_token.return_value = (
+                "U1234567890abcdef1234567890abcdef"
+            )
             mock_user_service.get_or_create_user.return_value = MagicMock()
+            linked_user = MagicMock()
+            linked_user.to_response.return_value = user_response_factory(
+                line_linked=True
+            )
+            mock_user_service.link_line.return_value = linked_user
 
             from api.handler import handler
+
             response = handler(event, lambda_context)
 
         # 【結果検証】: 200 ステータスコードが返ることを確認
-        assert response["statusCode"] == 200  # 【確認内容】: LINE 連携成功で 200 が返る 🔵
+        assert (
+            response["statusCode"] == 200
+        )  # 【確認内容】: LINE 連携成功で 200 が返る 🔵
 
         # 【確認内容】: verify_id_token が正しい id_token で呼ばれたことを確認
-        mock_line_service.verify_id_token.assert_called_once_with("valid-liff-id-token")  # 🔵
+        mock_line_service.verify_id_token.assert_called_once_with(
+            "valid-liff-id-token"
+        )  # 🔵
 
         # 【確認内容】: link_line が検証済み line_user_id で呼ばれたことを確認
         mock_user_service.link_line.assert_called_once_with(
@@ -111,7 +139,14 @@ class TestLinkLineHandler:
             "U1234567890abcdef1234567890abcdef",
         )  # 🔵
 
-    def test_link_line_unauthorized_on_verification_failure(self, api_gateway_event, lambda_context):
+        body = json.loads(response["body"])
+        assert body["success"] is True
+        assert body["data"]["user_id"] == "test-user-id"
+        assert body["data"]["line_linked"] is True
+
+    def test_link_line_unauthorized_on_verification_failure(
+        self, api_gateway_event, lambda_context
+    ):
         """TC-10: ID トークン検証失敗時に 401 エラーが返る.
 
         【テスト目的】: ID トークン検証失敗時に 401 が返ることを検証する
@@ -131,8 +166,10 @@ class TestLinkLineHandler:
         )
 
         # 【実際の処理実行】: handler を呼び出す
-        with patch("api.handlers.user_handler.user_service") as mock_user_service, \
-             patch("api.handlers.user_handler.line_service") as mock_line_service:
+        with (
+            patch("api.handlers.user_handler.user_service") as mock_user_service,
+            patch("api.handlers.user_handler.line_service") as mock_line_service,
+        ):
             mock_user_service.get_or_create_user.return_value = MagicMock()
             # verify_id_token が UnauthorizedError を発生させるようにモック
             mock_line_service.verify_id_token.side_effect = UnauthorizedError(
@@ -140,10 +177,13 @@ class TestLinkLineHandler:
             )
 
             from api.handler import handler
+
             response = handler(event, lambda_context)
 
         # 【結果検証】: 401 ステータスコードが返ることを確認
-        assert response["statusCode"] == 401  # 【確認内容】: ID トークン検証失敗で 401 が返る 🔵
+        assert (
+            response["statusCode"] == 401
+        )  # 【確認内容】: ID トークン検証失敗で 401 が返る 🔵
 
         # 【確認内容】: レスポンスボディに適切なエラーメッセージが含まれる（任意確認）
         body = json.loads(response["body"])

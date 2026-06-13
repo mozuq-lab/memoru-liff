@@ -75,7 +75,9 @@ def api_gateway_event():
             event["body"] = json.dumps(body)
         if query_string_parameters:
             event["queryStringParameters"] = query_string_parameters
-            event["rawQueryString"] = "&".join(f"{k}={v}" for k, v in query_string_parameters.items())
+            event["rawQueryString"] = "&".join(
+                f"{k}={v}" for k, v in query_string_parameters.items()
+            )
         return event
 
     return _create_event
@@ -88,7 +90,32 @@ def lambda_context():
     class MockContext:
         function_name = "memoru-api-test"
         memory_limit_in_mb = 256
-        invoked_function_arn = "arn:aws:lambda:ap-northeast-1:123456789012:function:memoru-api-test"
+        invoked_function_arn = (
+            "arn:aws:lambda:ap-northeast-1:123456789012:function:memoru-api-test"
+        )
         aws_request_id = "test-request-id"
 
     return MockContext()
+
+
+@pytest.fixture
+def user_response_factory():
+    """Create UserResponse models for handler tests."""
+    from models.user import UserResponse
+
+    def _create(**overrides):
+        values = {
+            "user_id": "test-user-id",
+            "display_name": None,
+            "picture_url": None,
+            "line_linked": False,
+            "notification_time": "09:00",
+            "timezone": "Asia/Tokyo",
+            "day_start_hour": 4,
+            "created_at": "2024-01-01T00:00:00+00:00",
+            "updated_at": "2024-01-02T00:00:00+00:00",
+        }
+        values.update(overrides)
+        return UserResponse(**values)
+
+    return _create

@@ -78,10 +78,12 @@ LinkLineEvent:
   "success": true,
   "data": {
     "user_id": "keycloak-sub-uuid",
-    "line_user_id": "U1234567890abcdef",
-    "card_count": 150,
+    "display_name": "Memoru User",
+    "picture_url": "https://example.com/profile.png",
+    "line_linked": true,
     "notification_time": "09:00",
     "timezone": "Asia/Tokyo",
+    "day_start_hour": 4,
     "created_at": "2026-01-01T00:00:00Z",
     "updated_at": "2026-02-17T10:00:00Z"
   }
@@ -173,10 +175,12 @@ UpdateSettingsEvent:
   "success": true,
   "data": {
     "user_id": "keycloak-sub-uuid",
-    "line_user_id": "U1234567890abcdef",
-    "card_count": 150,
+    "display_name": "Memoru User",
+    "picture_url": "https://example.com/profile.png",
+    "line_linked": true,
     "notification_time": "21:00",
     "timezone": "Asia/Tokyo",
+    "day_start_hour": 4,
     "created_at": "2026-01-01T00:00:00Z",
     "updated_at": "2026-02-17T10:00:00Z"
   }
@@ -241,9 +245,10 @@ SubmitReviewEvent:
 ```typescript
 // frontend/src/services/api.ts に追加
 async unlinkLine(): Promise<User> {
-  return this.request<User>('/users/me/unlink-line', {
+  const response = await this.request<{ success: boolean; data: User }>('/users/me/unlink-line', {
     method: 'POST',
   });
+  return response.data;
 }
 ```
 
@@ -265,10 +270,12 @@ const updatedUser = await usersApi.unlinkLine();
   "success": true,
   "data": {
     "user_id": "keycloak-sub-uuid",
-    "line_user_id": null,
-    "card_count": 150,
+    "display_name": "Memoru User",
+    "picture_url": "https://example.com/profile.png",
+    "line_linked": false,
     "notification_time": "09:00",
     "timezone": "Asia/Tokyo",
+    "day_start_hour": 4,
     "created_at": "2026-01-01T00:00:00Z",
     "updated_at": "2026-02-17T10:00:00Z"
   }
@@ -286,16 +293,18 @@ const updatedUser = await usersApi.unlinkLine();
 ```typescript
 interface User {
   user_id: string;
-  line_user_id: string | null;
-  card_count: number;
-  notification_time: string;  // HH:mm
-  timezone: string;           // IANA timezone name（新規追加）
-  created_at: string;         // ISO 8601
-  updated_at: string;         // ISO 8601
+  display_name: string | null;
+  picture_url: string | null;
+  line_linked: boolean;
+  notification_time: string | null; // HH:mm
+  timezone: string;                 // IANA timezone name
+  day_start_hour: number;           // 0-23
+  created_at: string;               // ISO 8601
+  updated_at: string | null;        // ISO 8601
 }
 ```
 
-**新規フィールド**: `timezone` — H-03 対応で追加
+更新系エンドポイントは共通して `{ success: true, data: User }` を返却する。
 
 ---
 

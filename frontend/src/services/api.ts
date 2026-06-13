@@ -284,23 +284,26 @@ class ApiClient {
   }
 
   async updateUser(data: UpdateUserRequest): Promise<User> {
-    return this.request<User>("/users/me/settings", {
+    const response = await this.request<{ success: boolean; data: User }>("/users/me/settings", {
       method: "PUT",
       body: JSON.stringify(data),
     });
+    return response.data;
   }
 
   async linkLine(data: LinkLineRequest): Promise<User> {
-    return this.request<User>("/users/link-line", {
+    const response = await this.request<{ success: boolean; data: User }>("/users/link-line", {
       method: "POST",
       body: JSON.stringify(data),
     });
+    return response.data;
   }
 
   async unlinkLine(): Promise<User> {
-    return this.request<User>("/users/me/unlink-line", {
+    const response = await this.request<{ success: boolean; data: User }>("/users/me/unlink-line", {
       method: "POST",
     });
+    return response.data;
   }
 
   // デッキ API

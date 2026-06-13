@@ -19,13 +19,6 @@ class LinkLineRequest(BaseModel):
     id_token: str = Field(..., min_length=1, description="LIFF ID Token for server-side verification")
 
 
-class LinkLineResponse(BaseModel):
-    """Response model for linking LINE account."""
-
-    success: bool
-    message: str
-
-
 class UserSettingsRequest(BaseModel):
     """Request model for updating user settings."""
 
@@ -95,6 +88,13 @@ class UserResponse(BaseModel):
     day_start_hour: int = 4
     created_at: datetime
     updated_at: Optional[datetime] = None
+
+
+class UserMutationResponse(BaseModel):
+    """Response model shared by user mutation endpoints."""
+
+    success: bool
+    data: UserResponse
 
 
 class User(BaseModel):
