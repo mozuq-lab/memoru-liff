@@ -278,7 +278,7 @@ class TestSendMessage:
 
         # 先行リクエストが in-flight 中の状態を擬似再現:
         # processing_started_at が直近 (stale ではない) に書かれている = lock held
-        tutor_service.table.update_item(
+        tutor_service._repo.table.update_item(
             Key={"user_id": "test-user", "session_id": session.session_id},
             UpdateExpression="SET processing_started_at = :now",
             ExpressionAttributeValues={
@@ -356,7 +356,7 @@ class TestSendMessage:
             datetime.now(timezone.utc)
             - timedelta(seconds=tutor_service.LOCK_TIMEOUT_SECONDS * 2 + 1)
         ).isoformat()
-        tutor_service.table.update_item(
+        tutor_service._repo.table.update_item(
             Key={"user_id": "test-user", "session_id": session.session_id},
             UpdateExpression="SET processing_started_at = :stale",
             ExpressionAttributeValues={":stale": stale_time},
@@ -392,7 +392,7 @@ class TestSendMessage:
                 "test-user", session.session_id, "q-fail"
             )
 
-        item = tutor_service.table.get_item(
+        item = tutor_service._repo.table.get_item(
             Key={"user_id": "test-user", "session_id": session.session_id}
         )["Item"]
         # message_count は進めない (失敗したラウンドはカウントしない)
