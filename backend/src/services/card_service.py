@@ -561,12 +561,34 @@ class CardService:
                 query_kwargs["FilterExpression"] = "deck_id = :deck_id"
                 query_kwargs["ExpressionAttributeValues"][":deck_id"] = deck_id
 
-            response = self.table.query(**query_kwargs)
-            cards = [Card.from_dynamodb_item(item) for item in response.get("Items", [])]
-
+            cards: List[Card] = []
+            response: Dict[str, Any] = {}
             next_cursor = None
-            if "LastEvaluatedKey" in response:
-                next_cursor = response["LastEvaluatedKey"]["card_id"]
+            while True:
+                response = self.table.query(**query_kwargs)
+                items = response.get("Items", [])
+                remaining = limit - len(cards)
+                cards.extend(
+                    Card.from_dynamodb_item(item) for item in items[:remaining]
+                )
+
+                last_key = response.get("LastEvaluatedKey")
+                if len(items) > remaining:
+                    # The continuation query evaluates a full page for efficiency.
+                    # Resume after the last card actually returned so extra matches
+                    # from this response remain available on the next request.
+                    next_cursor = items[remaining - 1]["card_id"]
+                    break
+
+                if not deck_id or len(cards) >= limit or not last_key:
+                    if last_key:
+                        next_cursor = last_key["card_id"]
+                    break
+
+                # DynamoDB applies Limit before FilterExpression. Continue scanning
+                # until a filtered page is full so an existing deck never appears
+                # empty merely because its cards were outside the first evaluated page.
+                query_kwargs["ExclusiveStartKey"] = last_key
 
             return cards, next_cursor
         except ClientError as e:
