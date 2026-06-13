@@ -222,7 +222,7 @@ def card_service(dynamodb_table):
 
         return {}
 
-    service._client.transact_write_items = mock_transact_write_items
+    service._repo._client.transact_write_items = mock_transact_write_items
 
     # C-7: 既存テストは deck_id の実在検証を対象としないため、検証を素通しする
     # スタブ DeckService を注入する（deck 検証専用テストは別フィクスチャで行う）。
@@ -561,7 +561,7 @@ class TestCardServiceList:
                 }
             return {"Items": [matching_item]}
 
-        monkeypatch.setattr(card_service.table, "query", query)
+        monkeypatch.setattr(card_service._repo.table, "query", query)
 
         cards, cursor = card_service.list_cards(
             "test-user-id", limit=1, deck_id="deck-1"
@@ -604,7 +604,7 @@ class TestCardServiceList:
                 }
             return {"Items": [item("matching-b"), item("matching-c")]}
 
-        monkeypatch.setattr(card_service.table, "query", query)
+        monkeypatch.setattr(card_service._repo.table, "query", query)
 
         cards, cursor = card_service.list_cards(
             "test-user-id", limit=2, deck_id="deck-1"
@@ -730,7 +730,7 @@ class TestCardServiceRaceConditionPrevention:
 
         # Mock transact_write_items to simulate successful transaction
         # (moto has bugs with transact_write_items, so we mock it)
-        original_client = card_service._client
+        original_client = card_service._repo._client
 
         def mock_transact_write_items(*args, **kwargs):
             # Simulate the transaction: update card_count and create card
@@ -774,7 +774,7 @@ class TestCardServiceRaceConditionPrevention:
         )
 
         # Mock transact_write_items to raise TransactionCanceledException (condition failed)
-        original_client = card_service._client
+        original_client = card_service._repo._client
 
         def mock_transact_write_items(*args, **kwargs):
             raise ClientError(
@@ -822,7 +822,7 @@ class TestCardServiceRaceConditionPrevention:
         )
 
         # Mock transact_write_items to raise TransactionCanceledException
-        original_client = card_service._client
+        original_client = card_service._repo._client
 
         def mock_transact_write_items(*args, **kwargs):
             raise ClientError(
@@ -864,7 +864,7 @@ class TestCardServiceRaceConditionPrevention:
         )
 
         # Mock transact_write_items to raise TransactionCanceledException
-        original_client = card_service._client
+        original_client = card_service._repo._client
 
         def mock_transact_write_items(*args, **kwargs):
             raise ClientError(
@@ -976,7 +976,7 @@ class TestTransactionErrorClassification:
         from botocore.exceptions import ClientError
 
         # 【テストデータ準備】: CardLimit超過を模擬するモックを設定する
-        original_client = card_service._client
+        original_client = card_service._repo._client
 
         def mock_transact(*args, **kwargs):
             # 【処理内容】: card_count >= 2000 のConditionalCheckFailed を模擬する
@@ -1026,7 +1026,7 @@ class TestTransactionErrorClassification:
         # このテストは InternalError が追加されるまで ImportError で失敗する
         from services.card_service import InternalError  # noqa: F401
 
-        original_client = card_service._client
+        original_client = card_service._repo._client
 
         def mock_transact(*args, **kwargs):
             # 【処理内容】: ValidationError (非ConditionalCheckFailed) を模擬する
@@ -1071,7 +1071,7 @@ class TestTransactionErrorClassification:
         from botocore.exceptions import ClientError
         from services.card_service import InternalError  # noqa: F401
 
-        original_client = card_service._client
+        original_client = card_service._repo._client
 
         def mock_transact(*args, **kwargs):
             # 【処理内容】: CancellationReasons キーなしのTransactionCanceledExceptionを模擬する
@@ -1114,7 +1114,7 @@ class TestTransactionErrorClassification:
         from botocore.exceptions import ClientError
         from services.card_service import InternalError  # noqa: F401
 
-        original_client = card_service._client
+        original_client = card_service._repo._client
 
         def mock_transact(*args, **kwargs):
             # 【処理内容】: CancellationReasons が空リストのTransactionCanceledExceptionを模擬する
@@ -1224,7 +1224,7 @@ class TestDeleteCardTransaction:
         monkeypatch.setattr(card_service, "get_card", lambda uid, cid: mock_card)
 
         # 【初期条件設定】: transact_write_items がカードが既に削除された状態を模擬する
-        original_client = card_service._client
+        original_client = card_service._repo._client
 
         def mock_transact(*args, **kwargs):
             # 【処理内容】: Index 0 (Cards Delete) でConditionalCheckFailed (レースコンディション)
@@ -1277,7 +1277,7 @@ class TestDeleteCardTransaction:
         monkeypatch.setattr(card_service, "get_card", lambda uid, cid: mock_card)
 
         # 【初期条件設定】: card_count = 0 の条件チェック失敗を模擬する
-        original_client = card_service._client
+        original_client = card_service._repo._client
 
         def mock_transact(*args, **kwargs):
             # 【処理内容】: Index 1 (Users Update) でConditionalCheckFailed (card_count > 0 が偽)
@@ -1395,7 +1395,7 @@ class TestGetDueCardsPagination:
             else:
                 return {"Items": [item2]}
 
-        monkeypatch.setattr(card_service.table, "query", mock_query)
+        monkeypatch.setattr(card_service._repo.table, "query", mock_query)
 
         result = card_service.get_due_cards("u1", limit=None)
 
@@ -1425,7 +1425,7 @@ class TestGetDueCardsPagination:
             else:
                 return {"Items": []}
 
-        monkeypatch.setattr(card_service.table, "query", mock_query)
+        monkeypatch.setattr(card_service._repo.table, "query", mock_query)
 
         card_service.get_due_cards("u1", limit=None)
 
@@ -1448,7 +1448,7 @@ class TestGetDueCardsPagination:
             # Return LastEvaluatedKey even though limit is set
             return {"Items": [item], "LastEvaluatedKey": {"pk": "dummy"}}
 
-        monkeypatch.setattr(card_service.table, "query", mock_query)
+        monkeypatch.setattr(card_service._repo.table, "query", mock_query)
 
         result = card_service.get_due_cards("u1", limit=5)
 
@@ -1471,7 +1471,7 @@ class TestDeleteCardReviewCleanup:
         monkeypatch.setattr(card_service, "get_card", lambda uid, cid: mock_card)
 
         # Mock transact_write_items to succeed (card deletion transaction)
-        monkeypatch.setattr(card_service._client, "transact_write_items", lambda **kw: None)
+        monkeypatch.setattr(card_service._repo._client, "transact_write_items", lambda **kw: None)
 
         reviews_table = dynamodb_table.Table("memoru-reviews-test")
         deleted_keys = []
@@ -1510,14 +1510,14 @@ class TestDeleteCardReviewCleanup:
         monkeypatch.setattr(reviews_table, "batch_writer", lambda: MockBatchWriter())
 
         # Override dynamodb.Table to return our patched reviews_table
-        original_table_fn = card_service.dynamodb.Table
+        original_table_fn = card_service._repo.dynamodb.Table
 
         def patched_table(name):
-            if name == card_service.reviews_table_name:
+            if name == card_service._repo.reviews_table_name:
                 return reviews_table
             return original_table_fn(name)
 
-        monkeypatch.setattr(card_service.dynamodb, "Table", patched_table)
+        monkeypatch.setattr(card_service._repo.dynamodb, "Table", patched_table)
 
         card_service.delete_card("test-user-id", "c1")
 
@@ -1537,19 +1537,19 @@ class TestDeleteCardReviewCleanup:
         monkeypatch.setattr(card_service, "get_card", lambda uid, cid: mock_card)
 
         # Mock transact_write_items to succeed (card deletion transaction)
-        monkeypatch.setattr(card_service._client, "transact_write_items", lambda **kw: None)
+        monkeypatch.setattr(card_service._repo._client, "transact_write_items", lambda **kw: None)
 
         # Make Table() raise for reviews table
-        original_table_fn = card_service.dynamodb.Table
+        original_table_fn = card_service._repo.dynamodb.Table
 
         def exploding_table(name):
-            if name == card_service.reviews_table_name:
+            if name == card_service._repo.reviews_table_name:
                 raise RuntimeError("DynamoDB connection error")
             return original_table_fn(name)
 
-        monkeypatch.setattr(card_service.dynamodb, "Table", exploding_table)
+        monkeypatch.setattr(card_service._repo.dynamodb, "Table", exploding_table)
 
-        with patch("services.card_service.logger") as mock_logger:
+        with patch("services.card_repository.logger") as mock_logger:
             card_service.delete_card("test-user-id", "some-card")
 
             # C-5: エラーハンドリング強化により、レビュー削除失敗は logger.error で記録される
@@ -1700,7 +1700,7 @@ class TestCardServiceReferences:
     def test_get_card_backward_compat_no_references_field(self, card_service):
         """Test that cards without references field in DynamoDB return empty list."""
         # Directly insert a card item without references field (simulating old data)
-        cards_table = card_service.dynamodb.Table("memoru-cards-test")
+        cards_table = card_service._repo.dynamodb.Table("memoru-cards-test")
         from datetime import datetime, timezone
 
         now = datetime.now(timezone.utc)

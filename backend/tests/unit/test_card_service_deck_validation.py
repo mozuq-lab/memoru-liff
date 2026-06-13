@@ -107,7 +107,7 @@ def card_service(dynamodb_table, deck_service):
                 table.put_item(Item=item_dict)
         return {}
 
-    service._client.transact_write_items = mock_transact_write_items
+    service._repo._client.transact_write_items = mock_transact_write_items
     return service
 
 
