@@ -15,13 +15,8 @@ interface SpeechButtonProps {
   label?: string;
 }
 
-export const SpeechButton = ({
-  text: _text,
-  isSpeaking,
-  onClick,
-  disabled = false,
-  label,
-}: SpeechButtonProps) => {
+export const SpeechButton = (props: SpeechButtonProps) => {
+  const { isSpeaking, onClick, disabled = false, label } = props;
   const ariaLabel = label
     ? isSpeaking
       ? `${label}の読み上げを停止`

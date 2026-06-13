@@ -1,4 +1,4 @@
-import { useState, useEffect, type ReactNode } from 'react';
+import { useState, useEffect, useRef, type ReactNode } from 'react';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { Loading } from './Loading';
 import { Error } from './Error';
@@ -9,17 +9,17 @@ interface ProtectedRouteProps {
 
 export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
   const { isLoading, isAuthenticated, error, login } = useAuthContext();
-  const [loginAttempted, setLoginAttempted] = useState(false);
+  const loginAttemptedRef = useRef(false);
   const [loginError, setLoginError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isLoading && !isAuthenticated && !loginAttempted) {
-      setLoginAttempted(true);
+    if (!isLoading && !isAuthenticated && !loginAttemptedRef.current) {
+      loginAttemptedRef.current = true;
       login().catch(() => {
         setLoginError('ログインに失敗しました');
       });
     }
-  }, [isLoading, isAuthenticated, loginAttempted, login]);
+  }, [isLoading, isAuthenticated, login]);
 
   if (loginError) {
     return <Error message={loginError} />;

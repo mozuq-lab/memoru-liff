@@ -34,15 +34,15 @@ export const TutorPage = () => {
 
   const [view, setView] = useState<PageView>("mode-select");
   const [showEndConfirm, setShowEndConfirm] = useState(false);
-  const [resumeChecked, setResumeChecked] = useState(false);
+  const resumeCheckedDeckRef = useRef<string | null>(null);
   // F-2: 直前に選択したモードを保持し、開始失敗時の「再試行」で再実行する
   const [lastMode, setLastMode] = useState<LearningMode | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // T020: セッション継続ロジック — マウント時にアクティブセッションを確認
   useEffect(() => {
-    if (!deckId || resumeChecked) return;
-    setResumeChecked(true);
+    if (!deckId || resumeCheckedDeckRef.current === deckId) return;
+    resumeCheckedDeckRef.current = deckId;
     resumeSession(deckId).then((resumed) => {
       if (resumed) {
         setView("chat");
@@ -50,20 +50,16 @@ export const TutorPage = () => {
     }).catch(() => {
       // セッション復元失敗時はモード選択画面に留まる
     });
-  }, [deckId, resumeChecked, resumeSession]);
+  }, [deckId, resumeSession]);
 
   // Auto-scroll when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // When session starts (not via mode switch), switch to chat view
   const [pendingModeSwitch, setPendingModeSwitch] = useState(false);
-  useEffect(() => {
-    if (session && view === "mode-select" && !pendingModeSwitch) {
-      setView("chat");
-    }
-  }, [session, view, pendingModeSwitch]);
+  const activeView: PageView =
+    session && view === "mode-select" && !pendingModeSwitch ? "chat" : view;
 
   if (!deckId) {
     return (
@@ -117,7 +113,7 @@ export const TutorPage = () => {
   };
 
   // T022: セッション履歴ビュー
-  if (view === "history") {
+  if (activeView === "history") {
     return (
       <div className="flex flex-col h-screen">
         <header className="bg-white shadow-sm p-4 flex items-center gap-3">
@@ -152,7 +148,7 @@ export const TutorPage = () => {
   }
 
   // Mode selection view
-  if (view === "mode-select") {
+  if (activeView === "mode-select") {
     return (
       <div className="flex flex-col h-screen">
         <header className="bg-white shadow-sm p-4 flex items-center justify-between">

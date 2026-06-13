@@ -35,7 +35,7 @@ export const LinkLinePage = () => {
     try {
       const data = await usersApi.getCurrentUser();
       setUser(data);
-    } catch (err) {
+    } catch {
       setError('LINE連携状態の取得に失敗しました');
     } finally {
       setIsLoading(false);
@@ -85,7 +85,7 @@ export const LinkLinePage = () => {
 
       setUser(updatedUser);
       setSuccessMessage('LINE連携が完了しました');
-    } catch (err: unknown) {
+    } catch {
       setError('LINE連携に失敗しました');
     } finally {
       setIsLinking(false);
@@ -101,7 +101,7 @@ export const LinkLinePage = () => {
       const updatedUser = await usersApi.unlinkLine();
       setUser(updatedUser);
       setSuccessMessage('LINE連携を解除しました');
-    } catch (err) {
+    } catch {
       setError('LINE連携の解除に失敗しました');
     } finally {
       setIsUnlinking(false);

@@ -58,7 +58,7 @@ export const CardDetailPage = () => {
     try {
       const data = await cardsApi.getCard(id);
       setCard(data);
-    } catch (err) {
+    } catch {
       setError('カードの取得に失敗しました');
     } finally {
       setIsLoading(false);
@@ -89,7 +89,7 @@ export const CardDetailPage = () => {
       setCard(updatedCard);
       setIsEditing(false);
       setSuccessMessage('カードを保存しました');
-    } catch (err) {
+    } catch {
       setError('カードの保存に失敗しました');
     } finally {
       setIsSaving(false);
@@ -106,7 +106,7 @@ export const CardDetailPage = () => {
     try {
       await cardsApi.deleteCard(id);
       navigate('/cards', { state: { message: 'カードを削除しました' } });
-    } catch (err) {
+    } catch {
       setError('カードの削除に失敗しました');
       setShowDeleteConfirm(false);
     } finally {
@@ -136,7 +136,7 @@ export const CardDetailPage = () => {
       // 【成功処理】: 更新後のカードデータで画面を更新し、成功メッセージを表示する 🔵
       setCard(updatedCard);
       setSuccessMessage('復習間隔を更新しました');
-    } catch (_err) {
+    } catch {
       // 【エラー処理】: 更新失敗時はカードデータを変更せず、エラーメッセージのみ表示する 🔵
       setError('復習間隔の更新に失敗しました');
     } finally {
@@ -163,7 +163,7 @@ export const CardDetailPage = () => {
       setSuccessMessage('デッキを変更しました');
       // 【REQ-203】: デッキの card_count / due_count を更新するため fetchDecks を呼び出す 🔵
       fetchDecks();
-    } catch (_err) {
+    } catch {
       setError('デッキの変更に失敗しました');
     }
   }, [id, fetchDecks]);
