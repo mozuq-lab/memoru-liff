@@ -14,7 +14,7 @@ from services.line_service import LineEvent, SignatureVerificationError
 class TestHandlerSignatureVerification:
     """Tests for the Lambda handler's signature verification logic."""
 
-    @patch("webhook.line_handler.line_service")
+    @patch("webhook.dependencies.line_service")
     def test_handler_returns_200_on_valid_signature(self, mock_line_service):
         """Valid signature and empty events returns 200."""
         from webhook.line_handler import handler
@@ -31,7 +31,7 @@ class TestHandlerSignatureVerification:
         assert response["statusCode"] == 200
         mock_line_service.verify_request.assert_called_once()
 
-    @patch("webhook.line_handler.line_service")
+    @patch("webhook.dependencies.line_service")
     def test_handler_returns_400_on_missing_signature(self, mock_line_service):
         """Missing signature header returns 400."""
         from webhook.line_handler import handler
@@ -46,7 +46,7 @@ class TestHandlerSignatureVerification:
         body = json.loads(response["body"])
         assert "signature" in body["error"].lower()
 
-    @patch("webhook.line_handler.line_service")
+    @patch("webhook.dependencies.line_service")
     def test_handler_returns_400_on_invalid_signature(self, mock_line_service):
         """Invalid signature returns 400."""
         from webhook.line_handler import handler
@@ -63,7 +63,7 @@ class TestHandlerSignatureVerification:
         body = json.loads(response["body"])
         assert "signature" in body["error"].lower()
 
-    @patch("webhook.line_handler.line_service")
+    @patch("webhook.dependencies.line_service")
     def test_handler_returns_500_on_signature_verification_error(self, mock_line_service):
         """SignatureVerificationError returns 500."""
         from webhook.line_handler import handler
@@ -78,7 +78,7 @@ class TestHandlerSignatureVerification:
 
         assert response["statusCode"] == 500
 
-    @patch("webhook.line_handler.line_service")
+    @patch("webhook.dependencies.line_service")
     def test_handler_decodes_base64_body(self, mock_line_service):
         """Base64-encoded body is decoded before verification."""
         import base64
@@ -105,7 +105,7 @@ class TestHandlerSignatureVerification:
 class TestHandlerEventRouting:
     """Tests for event type routing in handler."""
 
-    @patch("webhook.line_handler.line_service")
+    @patch("webhook.dependencies.line_service")
     @patch("webhook.line_handler.handle_postback")
     def test_handler_routes_postback_events(self, mock_handle_postback, mock_line_service):
         """Postback events are routed to handle_postback."""
@@ -129,7 +129,7 @@ class TestHandlerEventRouting:
 
         mock_handle_postback.assert_called_once_with(postback_event)
 
-    @patch("webhook.line_handler.line_service")
+    @patch("webhook.dependencies.line_service")
     @patch("webhook.line_handler.handle_message")
     def test_handler_routes_message_events(self, mock_handle_message, mock_line_service):
         """Message events are routed to handle_message."""
@@ -154,7 +154,7 @@ class TestHandlerEventRouting:
 
         mock_handle_message.assert_called_once_with(message_event)
 
-    @patch("webhook.line_handler.line_service")
+    @patch("webhook.dependencies.line_service")
     def test_handler_ignores_unknown_event_types(self, mock_line_service):
         """Unknown event types are silently ignored."""
         from webhook.line_handler import handler
@@ -181,7 +181,7 @@ class TestHandlerEventRouting:
 class TestHandlePostback:
     """Tests for postback event handling and action routing."""
 
-    @patch("webhook.line_handler.line_service")
+    @patch("webhook.dependencies.line_service")
     @patch("webhook.line_handler.handle_start_action")
     def test_postback_start_action(self, mock_start, mock_line_service):
         """Postback with action=start routes to handle_start_action."""
@@ -200,7 +200,7 @@ class TestHandlePostback:
 
         mock_start.assert_called_once_with("user-123", "line-user-1", "reply-token")
 
-    @patch("webhook.line_handler.line_service")
+    @patch("webhook.dependencies.line_service")
     @patch("webhook.line_handler.handle_reveal_action")
     def test_postback_reveal_action(self, mock_reveal, mock_line_service):
         """Postback with action=reveal routes to handle_reveal_action."""
@@ -219,7 +219,7 @@ class TestHandlePostback:
 
         mock_reveal.assert_called_once_with("user-123", "card-abc", "reply-token")
 
-    @patch("webhook.line_handler.line_service")
+    @patch("webhook.dependencies.line_service")
     @patch("webhook.line_handler.handle_grade_action")
     def test_postback_grade_action(self, mock_grade, mock_line_service):
         """Postback with action=grade routes to handle_grade_action."""
@@ -238,7 +238,7 @@ class TestHandlePostback:
 
         mock_grade.assert_called_once_with("user-123", "card-abc", 4, "reply-token")
 
-    @patch("webhook.line_handler.line_service")
+    @patch("webhook.dependencies.line_service")
     def test_postback_unlinked_user_gets_link_message(self, mock_line_service):
         """Unlinked user gets account link prompt on postback."""
         from webhook.line_handler import handle_postback
@@ -256,7 +256,7 @@ class TestHandlePostback:
 
         mock_line_service.reply_message.assert_called_once()
 
-    @patch("webhook.line_handler.line_service")
+    @patch("webhook.dependencies.line_service")
     def test_postback_missing_data_returns_early(self, mock_line_service):
         """Missing postback_data returns early without error."""
         from webhook.line_handler import handle_postback
@@ -272,7 +272,7 @@ class TestHandlePostback:
 
         mock_line_service.get_user_id_from_line.assert_not_called()
 
-    @patch("webhook.line_handler.line_service")
+    @patch("webhook.dependencies.line_service")
     def test_postback_unknown_action(self, mock_line_service):
         """Unknown postback action sends fallback message."""
         from webhook.line_handler import handle_postback
@@ -290,7 +290,7 @@ class TestHandlePostback:
 
         mock_line_service.reply_message.assert_called_once()
 
-    @patch("webhook.line_handler.line_service")
+    @patch("webhook.dependencies.line_service")
     def test_postback_grade_invalid_value_sends_error(self, mock_line_service):
         """Invalid grade value (>5) sends error message."""
         from webhook.line_handler import handle_postback
@@ -313,8 +313,8 @@ class TestHandlerIdempotency:
     """Idempotency guard for LINE webhook redelivery (N-6)."""
 
     @patch("webhook.line_handler.handle_postback")
-    @patch("webhook.line_handler.idempotency_service")
-    @patch("webhook.line_handler.line_service")
+    @patch("webhook.dependencies.idempotency_service")
+    @patch("webhook.dependencies.line_service")
     def test_duplicate_event_is_skipped(
         self, mock_line_service, mock_idem, mock_handle_postback
     ):
@@ -343,8 +343,8 @@ class TestHandlerIdempotency:
         mock_handle_postback.assert_not_called()
 
     @patch("webhook.line_handler.handle_postback")
-    @patch("webhook.line_handler.idempotency_service")
-    @patch("webhook.line_handler.line_service")
+    @patch("webhook.dependencies.idempotency_service")
+    @patch("webhook.dependencies.line_service")
     def test_first_event_is_processed(
         self, mock_line_service, mock_idem, mock_handle_postback
     ):
@@ -374,8 +374,8 @@ class TestHandlerIdempotency:
         mock_idem.release.assert_not_called()
 
     @patch("webhook.line_handler.handle_postback")
-    @patch("webhook.line_handler.idempotency_service")
-    @patch("webhook.line_handler.line_service")
+    @patch("webhook.dependencies.idempotency_service")
+    @patch("webhook.dependencies.line_service")
     def test_failed_event_is_released(
         self, mock_line_service, mock_idem, mock_handle_postback
     ):
