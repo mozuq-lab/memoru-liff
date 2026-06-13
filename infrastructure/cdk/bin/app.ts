@@ -62,6 +62,8 @@ if (!stage || stage === 'dev') {
       domainName: 'keycloak-dev.example.com', // dev はカスタムドメイン未使用（プレースホルダ可）
       // certificateArn: not required for dev
       // hostedZoneId: not required for dev
+      // H-1: 指定すると dev Keycloak ALB の受信を当該 CIDR のみに制限する（未指定なら全公開）。
+      albIngressCidr: process.env.MEMORU_DEV_KEYCLOAK_ALLOWED_CIDR,
     }),
 
     new LiffHostingStack(app, 'MemoruLiffHostingDev', {

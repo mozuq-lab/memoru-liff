@@ -149,6 +149,10 @@ export class LiffHostingStack extends cdk.Stack {
       httpVersion: cloudfront.HttpVersion.HTTP2_AND_3,
       enableIpv6: true,
       priceClass: cloudfront.PriceClass.PRICE_CLASS_200,
+      // M-1: カスタム証明書使用時 (prod) は最低 TLS バージョンを 1.2_2021 に強制する。
+      // dev はデフォルト CloudFront ドメイン (*.cloudfront.net) を使うため、CloudFront 側の
+      // 制約により本設定は無視され TLSv1 となる（プラットフォーム制約・カスタムドメインでのみ有効）。
+      minimumProtocolVersion: cloudfront.SecurityPolicyProtocol.TLS_V1_2_2021,
       // Default behavior (CachingOptimized)
       defaultBehavior: {
         origin: s3Origin,

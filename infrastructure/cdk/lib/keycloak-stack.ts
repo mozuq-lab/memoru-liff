@@ -24,6 +24,13 @@ export interface KeycloakStackProps extends cdk.StackProps {
   keycloakAdminUser?: string;
   dbInstanceClass?: ec2.InstanceType;
   dbAllocatedStorage?: number;
+  /**
+   * H-1: 指定すると Keycloak ALB の受信を当該 CIDR のみに制限する（既定は全公開）。
+   * dev の Keycloak（IdP）は平文 HTTP かつ公開サブネット直結のため、運用者の固定 IP /
+   * 社内 CIDR に絞れるよう env (MEMORU_DEV_KEYCLOAK_ALLOWED_CIDR) から注入できる。
+   * 未指定時は従来どおり 0.0.0.0/0 を許可する（後方互換）。
+   */
+  albIngressCidr?: string;
 }
 
 export class KeycloakStack extends cdk.Stack {
@@ -34,6 +41,8 @@ export class KeycloakStack extends cdk.Stack {
     super(scope, id, props);
 
     const isProd = props.environment === 'prod';
+    // H-1: ALB ingress CIDR が指定された場合のみ受信を制限する（openListener を無効化して手動付与）。
+    const restrictAlbIngress = !!props.albIngressCidr;
     const keycloakImage = props.keycloakImage ?? 'quay.io/keycloak/keycloak:24.0';
     const keycloakAdminUser = props.keycloakAdminUser ?? 'admin';
     const dbAllocatedStorage = props.dbAllocatedStorage ?? 20;
@@ -176,6 +185,8 @@ export class KeycloakStack extends cdk.Stack {
           ? elbv2.ApplicationProtocol.HTTPS
           : elbv2.ApplicationProtocol.HTTP,
         redirectHTTP: !!certificate,
+        // H-1: CIDR 制限する場合は自動の 0.0.0.0/0 ingress を抑止し、下で明示付与する。
+        openListener: !restrictAlbIngress,
         // Task image options
         taskImageOptions: {
           image: ecs.ContainerImage.fromRegistry(keycloakImage),
@@ -207,6 +218,17 @@ export class KeycloakStack extends cdk.Stack {
         healthCheckGracePeriod: cdk.Duration.seconds(180),
       },
     );
+
+    // H-1: ingress CIDR 制限が指定された場合、ALB のリスナーポートを当該 CIDR のみに許可する。
+    // (certificate 有 → 443, 無 → 80。dev は通常 80。)
+    if (restrictAlbIngress) {
+      const listenerPort = certificate ? 443 : 80;
+      service.loadBalancer.connections.allowFrom(
+        ec2.Peer.ipv4(props.albIngressCidr!),
+        ec2.Port.tcp(listenerPort),
+        'Restricted Keycloak ALB ingress (MEMORU_DEV_KEYCLOAK_ALLOWED_CIDR)',
+      );
+    }
 
     // Configure ALB target group health check
     service.targetGroup.configureHealthCheck({

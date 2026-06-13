@@ -111,6 +111,8 @@ MemoruKeycloakDev      ← 今回は使用しない
 MemoruLiffHostingDev
 ```
 
+> **任意（Keycloak を dev で起動する場合のハードニング）**: `MemoruKeycloakDev` は平文 HTTP・公開サブネット直結で起動するため、デプロイするなら受信元を絞ることを推奨する。環境変数 `MEMORU_DEV_KEYCLOAK_ALLOWED_CIDR=<自分の固定 IP>/32`（例 `203.0.113.10/32`）を `export` すると、ALB の受信を当該 CIDR のみに制限する。未指定時は従来どおり `0.0.0.0/0`（全公開）。
+
 ---
 
 ## Step 2: CDK — Cognito スタックのデプロイ
