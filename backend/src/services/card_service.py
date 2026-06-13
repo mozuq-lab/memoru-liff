@@ -652,6 +652,7 @@ class CardService:
                    deck_id フィルタを上位層で行う場合は None を渡すこと。
             before: Get cards due before this time (defaults to now).
             include_future: Return every scheduled card regardless of due date.
+                            Cards without next_review_at are not part of the due-date GSI.
 
         Returns:
             List of cards due for review, oldest due first.

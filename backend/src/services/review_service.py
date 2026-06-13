@@ -488,7 +488,8 @@ class ReviewService:
             user_id: The user's ID.
             limit: Maximum number of cards to return in due_cards.
                    total_due_count はこの値に影響されず、フィルタ後の全件数を返す。
-            include_future: Include cards with future due dates.
+            include_future: Include scheduled cards with future due dates.
+                            When true, total_due_count includes those future cards.
             deck_id: Optional filter by deck ID.
                      指定した場合、total_due_count はそのデッキ内の復習対象カード総数を返す。
 
