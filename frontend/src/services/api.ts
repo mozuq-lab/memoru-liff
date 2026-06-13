@@ -34,6 +34,23 @@ import { authService } from "./auth";
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
 
 /**
+ * クエリパラメータからクエリ文字列を構築する。
+ * undefined / null / 空文字の値はスキップする。
+ * パラメータが 1 件以上ある場合のみ先頭に "?" を付与し、無ければ空文字を返す。
+ */
+export function buildQueryString(
+  params: Record<string, string | number | undefined | null>,
+): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null || value === "") continue;
+    search.set(key, String(value));
+  }
+  const qs = search.toString();
+  return qs ? `?${qs}` : "";
+}
+
+/**
  * API エラー応答を構造化して保持する Error。
  * E-3: status / code を捨てずに保持し、呼び出し側がメッセージ文字列に依存せず
  * 業務エラー（4xx + code）と想定外エラー（5xx・ネットワーク等）を判別できるようにする。
@@ -171,16 +188,14 @@ class ApiClient {
     let cursor: string | undefined;
 
     do {
-      const searchParams = new URLSearchParams({ limit: "100" });
-      if (deckId) searchParams.set("deck_id", deckId);
-      if (cursor) searchParams.set("cursor", cursor);
+      const qs = buildQueryString({ limit: 100, deck_id: deckId, cursor });
 
       // The cards screen performs client-side search and sorting, so it needs
       // every page rather than silently limiting the visible collection.
       const response = await this.request<{
         cards: Card[];
         next_cursor?: string | null;
-      }>(`/cards?${searchParams.toString()}`, {
+      }>(`/cards${qs}`, {
         signal: options?.signal,
       });
       cards.push(...response.cards);
@@ -249,12 +264,9 @@ class ApiClient {
     deckId?: string,
     options?: { signal?: AbortSignal },
   ): Promise<DueCardsResponse> {
-    const searchParams = new URLSearchParams();
-    if (limit) searchParams.set("limit", String(limit));
-    if (deckId) searchParams.set("deck_id", deckId);
-    const qs = searchParams.toString();
+    const qs = buildQueryString({ limit, deck_id: deckId });
     // F-3: signal を fetch まで伝播し、古いリクエストを実際にキャンセルする
-    return this.request<DueCardsResponse>(`/cards/due${qs ? `?${qs}` : ""}`, {
+    return this.request<DueCardsResponse>(`/cards/due${qs}`, {
       signal: options?.signal,
     });
   }
@@ -338,21 +350,13 @@ class ApiClient {
   }
 
   async getWeakCards(limit?: number): Promise<WeakCardsResponse> {
-    const searchParams = new URLSearchParams();
-    if (limit) searchParams.set("limit", String(limit));
-    const qs = searchParams.toString();
-    return this.request<WeakCardsResponse>(
-      `/stats/weak-cards${qs ? `?${qs}` : ""}`,
-    );
+    const qs = buildQueryString({ limit });
+    return this.request<WeakCardsResponse>(`/stats/weak-cards${qs}`);
   }
 
   async getForecast(days?: number): Promise<ForecastResponse> {
-    const searchParams = new URLSearchParams();
-    if (days) searchParams.set("days", String(days));
-    const qs = searchParams.toString();
-    return this.request<ForecastResponse>(
-      `/stats/forecast${qs ? `?${qs}` : ""}`,
-    );
+    const qs = buildQueryString({ days });
+    return this.request<ForecastResponse>(`/stats/forecast${qs}`);
   }
 
   // Tutor API
@@ -389,13 +393,8 @@ class ApiClient {
     status?: string,
     deckId?: string,
   ): Promise<SessionListResponse> {
-    const params = new URLSearchParams();
-    if (status) params.set("status", status);
-    if (deckId) params.set("deck_id", deckId);
-    const qs = params.toString();
-    return this.request<SessionListResponse>(
-      `/tutor/sessions${qs ? `?${qs}` : ""}`,
-    );
+    const qs = buildQueryString({ status, deck_id: deckId });
+    return this.request<SessionListResponse>(`/tutor/sessions${qs}`);
   }
 
   async getTutorSession(sessionId: string): Promise<TutorSession> {
