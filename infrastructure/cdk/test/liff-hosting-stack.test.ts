@@ -59,6 +59,19 @@ describe('LiffHostingStack', () => {
     });
   });
 
+  describe('M-1: CloudFront TLS 最低バージョン', () => {
+    test('prod: カスタム証明書使用時に MinimumProtocolVersion が TLSv1.2_2021 である', () => {
+      const template = Template.fromStack(createStack(prodProps));
+      template.hasResourceProperties('AWS::CloudFront::Distribution', {
+        DistributionConfig: Match.objectLike({
+          ViewerCertificate: Match.objectLike({
+            MinimumProtocolVersion: 'TLSv1.2_2021',
+          }),
+        }),
+      });
+    });
+  });
+
   describe('セキュリティ', () => {
     test('S3 BlockPublicAccess が BLOCK_ALL である', () => {
       const template = Template.fromStack(createStack(devProps));

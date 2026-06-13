@@ -42,6 +42,64 @@ describe('KeycloakStack', () => {
     });
   });
 
+  describe('H-1: ALB ingress CIDR 制限', () => {
+    test('albIngressCidr 未指定時は 0.0.0.0/0 を許可する（後方互換）', () => {
+      const template = Template.fromStack(createStack(devProps));
+      template.hasResourceProperties('AWS::EC2::SecurityGroup', {
+        SecurityGroupIngress: Match.arrayWith([
+          Match.objectLike({ CidrIp: '0.0.0.0/0', FromPort: 80, ToPort: 80 }),
+        ]),
+      });
+    });
+
+    test('albIngressCidr 指定時は当該 CIDR のみを許可し 0.0.0.0/0 は付与しない', () => {
+      const template = Template.fromStack(
+        createStack({ ...devProps, albIngressCidr: '203.0.113.0/24' }),
+      );
+      // 指定 CIDR が ALB のリスナーポート(80)に許可されている
+      template.hasResourceProperties('AWS::EC2::SecurityGroup', {
+        SecurityGroupIngress: Match.arrayWith([
+          Match.objectLike({ CidrIp: '203.0.113.0/24', FromPort: 80, ToPort: 80 }),
+        ]),
+      });
+      // 全公開 (0.0.0.0/0) のポート80 ingress は存在しない
+      const sgs = template.findResources('AWS::EC2::SecurityGroup');
+      const hasOpenIngress = Object.values(sgs).some((sg) =>
+        ((sg.Properties?.SecurityGroupIngress as Array<Record<string, unknown>>) ?? []).some(
+          (rule) =>
+            rule.CidrIp === '0.0.0.0/0' && rule.FromPort === 80 && rule.ToPort === 80,
+        ),
+      );
+      expect(hasOpenIngress).toBe(false);
+    });
+
+    test('証明書あり + albIngressCidr 指定時は HTTP(80) と HTTPS(443) の両方を当該 CIDR に許可する', () => {
+      // redirectHTTP が生成する 80 リダイレクト listener も許可しないと
+      // 許可 CIDR からの HTTP→HTTPS リダイレクトがタイムアウトする。
+      const template = Template.fromStack(
+        createStack({ ...prodProps, albIngressCidr: '203.0.113.0/24' }),
+      );
+      template.hasResourceProperties('AWS::EC2::SecurityGroup', {
+        SecurityGroupIngress: Match.arrayWith([
+          Match.objectLike({ CidrIp: '203.0.113.0/24', FromPort: 443, ToPort: 443 }),
+        ]),
+      });
+      template.hasResourceProperties('AWS::EC2::SecurityGroup', {
+        SecurityGroupIngress: Match.arrayWith([
+          Match.objectLike({ CidrIp: '203.0.113.0/24', FromPort: 80, ToPort: 80 }),
+        ]),
+      });
+      // 全公開 (0.0.0.0/0) の ingress は存在しない
+      const sgs = template.findResources('AWS::EC2::SecurityGroup');
+      const hasOpenIngress = Object.values(sgs).some((sg) =>
+        ((sg.Properties?.SecurityGroupIngress as Array<Record<string, unknown>>) ?? []).some(
+          (rule) => rule.CidrIp === '0.0.0.0/0',
+        ),
+      );
+      expect(hasOpenIngress).toBe(false);
+    });
+  });
+
   describe('環境別設定', () => {
     test('dev: NAT Gateway がない', () => {
       const template = Template.fromStack(createStack(devProps));
