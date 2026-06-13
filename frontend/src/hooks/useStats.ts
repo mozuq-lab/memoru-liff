@@ -7,6 +7,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import type { StatsResponse, WeakCardsResponse, ForecastResponse } from '@/types';
 import { statsApi } from '@/services/api';
+import { toError } from '@/utils/error';
 
 interface UseStatsReturn {
   stats: StatsResponse | null;
@@ -37,7 +38,7 @@ export const useStats = (): UseStatsReturn => {
       setWeakCards(weakCardsData);
       setForecast(forecastData);
     } catch (err) {
-      setError(err instanceof Error ? err : new Error(String(err)));
+      setError(toError(err));
     } finally {
       setIsLoading(false);
     }

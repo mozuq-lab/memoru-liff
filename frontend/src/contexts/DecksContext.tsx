@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useCallback, useMemo, type ReactNode } from 'react';
 import type { Deck, CreateDeckRequest, UpdateDeckRequest } from '@/types';
 import { decksApi } from '@/services/api';
+import { toError } from '@/utils/error';
 
 /**
  * DecksContext が提供する値の型定義
@@ -47,7 +48,7 @@ export const DecksProvider = ({ children }: DecksProviderProps) => {
       const data = await decksApi.getDecks();
       setDecks(data);
     } catch (err) {
-      setError(err instanceof Error ? err : new Error(String(err)));
+      setError(toError(err));
     } finally {
       setIsLoading(false);
     }
