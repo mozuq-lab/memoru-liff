@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import time
 from contextlib import contextmanager
 from typing import Generator, List
@@ -53,6 +52,7 @@ from services.prompts.url_generate import (
     URL_CARD_GENERATION_SYSTEM_PROMPT,
     get_url_card_generation_prompt,
 )
+from utils.ai_json import extract_json_from_text
 
 # Bedrock のデフォルトモデル ID
 _DEFAULT_BEDROCK_MODEL_ID = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
@@ -212,13 +212,7 @@ class StrandsAIService:
         """
         try:
             # Markdown コードブロックを検出して JSON を抽出
-            json_match = re.search(r"```json\s*([\s\S]*?)\s*```", response_text)
-            if json_match:
-                json_str = json_match.group(1)
-            else:
-                json_str = response_text.strip()
-
-            data = json.loads(json_str)
+            data = extract_json_from_text(response_text)
 
         except json.JSONDecodeError as e:
             raise AIParseError(f"Failed to parse JSON response: {e}") from e
@@ -431,13 +425,7 @@ class StrandsAIService:
         """
         try:
             # Markdown コードブロックを検出して JSON を抽出
-            json_match = re.search(r"```json\s*([\s\S]*?)\s*```", response_text)
-            if json_match:
-                json_str = json_match.group(1)
-            else:
-                json_str = response_text.strip()
-
-            data = json.loads(json_str)
+            data = extract_json_from_text(response_text)
 
         except json.JSONDecodeError as e:
             raise AIParseError(f"Failed to parse JSON response: {e}") from e
@@ -572,13 +560,7 @@ class StrandsAIService:
             AIParseError: JSON の解析に失敗した場合、または必須フィールドが欠落している場合。
         """
         try:
-            json_match = re.search(r"```json\s*([\s\S]*?)\s*```", response_text)
-            if json_match:
-                json_str = json_match.group(1)
-            else:
-                json_str = response_text.strip()
-
-            data = json.loads(json_str)
+            data = extract_json_from_text(response_text)
 
         except json.JSONDecodeError as e:
             raise AIParseError(f"Failed to parse JSON response: {e}") from e
@@ -610,13 +592,7 @@ class StrandsAIService:
         """
         try:
             # Markdown コードブロックを検出して JSON を抽出
-            json_match = re.search(r"```json\s*([\s\S]*?)\s*```", response_text)
-            if json_match:
-                json_str = json_match.group(1)
-            else:
-                json_str = response_text.strip()
-
-            data = json.loads(json_str)
+            data = extract_json_from_text(response_text)
 
         except json.JSONDecodeError as e:
             raise AIParseError(f"Failed to parse JSON response: {e}") from e

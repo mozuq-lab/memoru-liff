@@ -3,7 +3,6 @@
 import json
 import os
 import random
-import re
 import time
 from typing import List, Optional
 
@@ -27,6 +26,7 @@ from services.ai_service import (
     LearningAdvice,
     RefineResult,
 )
+from utils.ai_json import extract_json_from_text
 
 logger = Logger()
 
@@ -405,13 +405,7 @@ class BedrockService:
             BedrockParseError: If the response cannot be parsed or is missing required fields.
         """
         try:
-            json_match = re.search(r"```json\s*([\s\S]*?)\s*```", response_text)
-            if json_match:
-                json_str = json_match.group(1)
-            else:
-                json_str = response_text.strip()
-
-            data = json.loads(json_str)
+            data = extract_json_from_text(response_text)
 
             missing = [f for f in required_fields if f not in data]
             if missing:
@@ -550,15 +544,7 @@ class BedrockService:
             BedrockParseError: If response cannot be parsed.
         """
         try:
-            # Try to extract JSON from markdown code block
-            json_match = re.search(r"```json\s*([\s\S]*?)\s*```", response_text)
-            if json_match:
-                json_str = json_match.group(1)
-            else:
-                # Try to parse the whole response as JSON
-                json_str = response_text.strip()
-
-            data = json.loads(json_str)
+            data = extract_json_from_text(response_text)
 
             if "cards" not in data:
                 raise BedrockParseError("Response missing 'cards' field")
