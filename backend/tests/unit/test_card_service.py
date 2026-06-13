@@ -571,6 +571,49 @@ class TestCardServiceList:
         assert cursor is None
         assert calls[1]["ExclusiveStartKey"]["card_id"] == "non-matching-card"
 
+    def test_list_cards_by_deck_keeps_full_query_limit_without_skipping_matches(
+        self, card_service, monkeypatch
+    ):
+        """Continuation queries stay efficient without skipping extra matches."""
+
+        def item(card_id):
+            return {
+                "user_id": "test-user-id",
+                "card_id": card_id,
+                "front": card_id,
+                "back": card_id,
+                "deck_id": "deck-1",
+                "ease_factor": "2.5",
+                "interval": 0,
+                "repetitions": 0,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+
+        calls = []
+
+        def query(**kwargs):
+            calls.append(kwargs.copy())
+            if len(calls) == 1:
+                return {
+                    "Items": [item("matching-a")],
+                    "LastEvaluatedKey": {
+                        "user_id": "test-user-id",
+                        "card_id": "non-matching-card",
+                    },
+                }
+            return {"Items": [item("matching-b"), item("matching-c")]}
+
+        monkeypatch.setattr(card_service.table, "query", query)
+
+        cards, cursor = card_service.list_cards(
+            "test-user-id", limit=2, deck_id="deck-1"
+        )
+
+        assert [card.card_id for card in cards] == ["matching-a", "matching-b"]
+        assert cursor == "matching-b"
+        assert calls[1]["Limit"] == 2
+
 
 class TestCardServiceDueCards:
     """Tests for CardService.get_due_cards method."""
