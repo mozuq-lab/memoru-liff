@@ -72,6 +72,32 @@ describe('KeycloakStack', () => {
       );
       expect(hasOpenIngress).toBe(false);
     });
+
+    test('証明書あり + albIngressCidr 指定時は HTTP(80) と HTTPS(443) の両方を当該 CIDR に許可する', () => {
+      // redirectHTTP が生成する 80 リダイレクト listener も許可しないと
+      // 許可 CIDR からの HTTP→HTTPS リダイレクトがタイムアウトする。
+      const template = Template.fromStack(
+        createStack({ ...prodProps, albIngressCidr: '203.0.113.0/24' }),
+      );
+      template.hasResourceProperties('AWS::EC2::SecurityGroup', {
+        SecurityGroupIngress: Match.arrayWith([
+          Match.objectLike({ CidrIp: '203.0.113.0/24', FromPort: 443, ToPort: 443 }),
+        ]),
+      });
+      template.hasResourceProperties('AWS::EC2::SecurityGroup', {
+        SecurityGroupIngress: Match.arrayWith([
+          Match.objectLike({ CidrIp: '203.0.113.0/24', FromPort: 80, ToPort: 80 }),
+        ]),
+      });
+      // 全公開 (0.0.0.0/0) の ingress は存在しない
+      const sgs = template.findResources('AWS::EC2::SecurityGroup');
+      const hasOpenIngress = Object.values(sgs).some((sg) =>
+        ((sg.Properties?.SecurityGroupIngress as Array<Record<string, unknown>>) ?? []).some(
+          (rule) => rule.CidrIp === '0.0.0.0/0',
+        ),
+      );
+      expect(hasOpenIngress).toBe(false);
+    });
   });
 
   describe('環境別設定', () => {

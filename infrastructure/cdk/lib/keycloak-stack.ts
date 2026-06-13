@@ -220,14 +220,30 @@ export class KeycloakStack extends cdk.Stack {
     );
 
     // H-1: ingress CIDR 制限が指定された場合、ALB のリスナーポートを当該 CIDR のみに許可する。
-    // (certificate 有 → 443, 無 → 80。dev は通常 80。)
+    // openListener:false で両 listener の自動 ingress を抑止しているため、存在する全 listener
+    // ポートを明示許可する必要がある。証明書ありの場合は HTTPS(443) に加えて redirectHTTP が
+    // 生成する HTTP(80) リダイレクト listener も許可しないと、許可 CIDR からの HTTP→HTTPS
+    // リダイレクトがタイムアウトする。証明書なし(dev)は HTTP(80) のみ。
     if (restrictAlbIngress) {
-      const listenerPort = certificate ? 443 : 80;
-      service.loadBalancer.connections.allowFrom(
-        ec2.Peer.ipv4(props.albIngressCidr!),
-        ec2.Port.tcp(listenerPort),
-        'Restricted Keycloak ALB ingress (MEMORU_DEV_KEYCLOAK_ALLOWED_CIDR)',
-      );
+      const peer = ec2.Peer.ipv4(props.albIngressCidr!);
+      if (certificate) {
+        service.loadBalancer.connections.allowFrom(
+          peer,
+          ec2.Port.tcp(443),
+          'Restricted Keycloak ALB ingress - HTTPS (MEMORU_DEV_KEYCLOAK_ALLOWED_CIDR)',
+        );
+        service.loadBalancer.connections.allowFrom(
+          peer,
+          ec2.Port.tcp(80),
+          'Restricted Keycloak ALB ingress - HTTP redirect (MEMORU_DEV_KEYCLOAK_ALLOWED_CIDR)',
+        );
+      } else {
+        service.loadBalancer.connections.allowFrom(
+          peer,
+          ec2.Port.tcp(80),
+          'Restricted Keycloak ALB ingress - HTTP (MEMORU_DEV_KEYCLOAK_ALLOWED_CIDR)',
+        );
+      }
     }
 
     // Configure ALB target group health check
