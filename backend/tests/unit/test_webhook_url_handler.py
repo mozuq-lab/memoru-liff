@@ -66,7 +66,7 @@ class TestUrlDetection:
 class TestHandleMessage:
     """Tests for message event handling with URL detection."""
 
-    @patch("webhook.line_handler.line_service")
+    @patch("webhook.dependencies.line_service")
     def test_url_message_triggers_card_generation(self, mock_line_service: MagicMock) -> None:
         """URL message triggers card generation flow."""
         mock_line_service.get_user_id_from_line.return_value = "user-123"
@@ -85,7 +85,7 @@ class TestHandleMessage:
             handle_message(event)
             mock_url_gen.assert_called_once()
 
-    @patch("webhook.line_handler.line_service")
+    @patch("webhook.dependencies.line_service")
     def test_non_url_message_ignored(self, mock_line_service: MagicMock) -> None:
         """Non-URL messages are not processed for card generation."""
         event = LineEvent(
@@ -101,7 +101,7 @@ class TestHandleMessage:
             handle_message(event)
             mock_url_gen.assert_not_called()
 
-    @patch("webhook.line_handler.line_service")
+    @patch("webhook.dependencies.line_service")
     def test_unlinked_user_gets_link_message(self, mock_line_service: MagicMock) -> None:
         """Unlinked user sending URL gets account link prompt."""
         mock_line_service.get_user_id_from_line.return_value = None
@@ -122,9 +122,9 @@ class TestHandleMessage:
 class TestHandleSaveUrlCards:
     """C-3: ref-key based save flow (no re-generation)."""
 
-    @patch("webhook.line_handler.card_service")
-    @patch("webhook.line_handler.url_cards_store")
-    @patch("webhook.line_handler.line_service")
+    @patch("webhook.dependencies.card_service")
+    @patch("webhook.dependencies.url_cards_store")
+    @patch("webhook.dependencies.line_service")
     def test_save_from_store_no_regeneration(
         self, mock_line_service, mock_store, mock_card_service
     ):
@@ -140,8 +140,8 @@ class TestHandleSaveUrlCards:
         }
         mock_store.mark_saved.return_value = True
 
-        with patch("webhook.line_handler.create_ai_service") as mock_ai, patch(
-            "webhook.line_handler.UrlContentService"
+        with patch("webhook.line_actions.create_ai_service") as mock_ai, patch(
+            "webhook.line_actions.UrlContentService"
         ) as mock_url:
             handle_save_url_cards(
                 user_id="user-1",
@@ -158,9 +158,9 @@ class TestHandleSaveUrlCards:
         reply = mock_line_service.reply_message.call_args.args[1]
         assert "2枚" in reply[0]["text"]
 
-    @patch("webhook.line_handler.card_service")
-    @patch("webhook.line_handler.url_cards_store")
-    @patch("webhook.line_handler.line_service")
+    @patch("webhook.dependencies.card_service")
+    @patch("webhook.dependencies.url_cards_store")
+    @patch("webhook.dependencies.line_service")
     def test_expired_or_missing_record_replies_expired(
         self, mock_line_service, mock_store, mock_card_service
     ):
@@ -178,9 +178,9 @@ class TestHandleSaveUrlCards:
         reply = mock_line_service.reply_message.call_args.args[1]
         assert "有効期限" in reply[0]["text"]
 
-    @patch("webhook.line_handler.card_service")
-    @patch("webhook.line_handler.url_cards_store")
-    @patch("webhook.line_handler.line_service")
+    @patch("webhook.dependencies.card_service")
+    @patch("webhook.dependencies.url_cards_store")
+    @patch("webhook.dependencies.line_service")
     def test_double_tap_does_not_resave(
         self, mock_line_service, mock_store, mock_card_service
     ):
@@ -208,7 +208,7 @@ class TestHandleSaveUrlCards:
 class TestSaveUrlCardsPostbackRouting:
     """Routing of save_url_cards postbacks: ref= (new) vs url= (legacy)."""
 
-    @patch("webhook.line_handler.line_service")
+    @patch("webhook.dependencies.line_service")
     def test_ref_postback_uses_new_handler(self, mock_line_service):
         mock_line_service.get_user_id_from_line.return_value = "user-1"
         event = LineEvent(
@@ -228,7 +228,7 @@ class TestSaveUrlCardsPostbackRouting:
             assert mock_new.call_args.args[2] == "URLCARDS#abc"
             mock_legacy.assert_not_called()
 
-    @patch("webhook.line_handler.line_service")
+    @patch("webhook.dependencies.line_service")
     def test_legacy_url_postback_falls_back(self, mock_line_service):
         mock_line_service.get_user_id_from_line.return_value = "user-1"
         event = LineEvent(

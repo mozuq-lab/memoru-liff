@@ -13,7 +13,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
-import webhook.line_handler as lh
+import webhook.line_actions as lh
 
 
 @pytest.fixture
@@ -48,15 +48,15 @@ class TestShouldEnqueue:
 
 
 class TestDispatch:
-    @patch("webhook.line_handler.generate_and_push_url_cards")
-    @patch("webhook.line_handler.line_service")
+    @patch("webhook.line_actions.generate_and_push_url_cards")
+    @patch("webhook.dependencies.line_service")
     def test_enqueues_and_does_not_run_inline(
         self, mock_line_service, mock_generate, sqs_queue
     ):
         """queue URL あり → SQS に enqueue され、同期実行は呼ばれない。"""
         sqs, queue_url = sqs_queue
         with _patch_dispatch(queue_url=queue_url, worker_mode=""), patch(
-            "webhook.line_handler._get_sqs_client", return_value=sqs
+            "webhook.line_actions._get_sqs_client", return_value=sqs
         ):
             lh.handle_url_card_generation(
                 user_id="user-1",
@@ -82,8 +82,8 @@ class TestDispatch:
             "webhook_event_id": "evt-1",
         }
 
-    @patch("webhook.line_handler.generate_and_push_url_cards")
-    @patch("webhook.line_handler.line_service")
+    @patch("webhook.line_actions.generate_and_push_url_cards")
+    @patch("webhook.dependencies.line_service")
     def test_inline_when_no_queue(self, mock_line_service, mock_generate):
         """queue URL なし → その場で同期実行される。"""
         with _patch_dispatch(queue_url="", worker_mode=""):
@@ -100,8 +100,8 @@ class TestDispatch:
             url="https://example.com/article",
         )
 
-    @patch("webhook.line_handler.generate_and_push_url_cards")
-    @patch("webhook.line_handler.line_service")
+    @patch("webhook.line_actions.generate_and_push_url_cards")
+    @patch("webhook.dependencies.line_service")
     def test_inline_when_inline_mode(self, mock_line_service, mock_generate):
         """URL_WORKER_MODE=inline → 同期実行される（ローカル相当）。"""
         with _patch_dispatch(queue_url="https://q", worker_mode="inline"):
@@ -113,8 +113,8 @@ class TestDispatch:
             )
         mock_generate.assert_called_once()
 
-    @patch("webhook.line_handler.generate_and_push_url_cards")
-    @patch("webhook.line_handler.line_service")
+    @patch("webhook.line_actions.generate_and_push_url_cards")
+    @patch("webhook.dependencies.line_service")
     def test_enqueue_failure_notifies_and_does_not_run_inline(
         self, mock_line_service, mock_generate
     ):
@@ -125,7 +125,7 @@ class TestDispatch:
         failing_sqs = MagicMock()
         failing_sqs.send_message.side_effect = RuntimeError("boom")
         with _patch_dispatch(queue_url="https://q", worker_mode=""), patch(
-            "webhook.line_handler._get_sqs_client", return_value=failing_sqs
+            "webhook.line_actions._get_sqs_client", return_value=failing_sqs
         ):
             lh.handle_url_card_generation(
                 user_id="user-1",
@@ -141,17 +141,17 @@ class TestDispatch:
         pushed_to = mock_line_service.push_message.call_args[0][0]
         assert pushed_to == "line-1"
 
-    @patch("webhook.line_handler.generate_and_push_url_cards")
-    @patch("webhook.line_handler.line_service")
+    @patch("webhook.line_actions.generate_and_push_url_cards")
+    @patch("webhook.dependencies.line_service")
     def test_invalid_url_neither_enqueues_nor_runs(
         self, mock_line_service, mock_generate, sqs_queue
     ):
         """バリデーション失敗 → enqueue も同期実行もしない。"""
         sqs, queue_url = sqs_queue
         with _patch_dispatch(queue_url=queue_url, worker_mode=""), patch(
-            "webhook.line_handler._get_sqs_client", return_value=sqs
+            "webhook.line_actions._get_sqs_client", return_value=sqs
         ), patch(
-            "webhook.line_handler.validate_url",
+            "webhook.line_actions.validate_url",
             side_effect=lh.UrlValidationError("bad"),
         ):
             lh.handle_url_card_generation(
