@@ -556,6 +556,37 @@ class TestGetDueCards:
         assert response.total_due_count == 0
         assert len(response.due_cards) == 0
 
+    def test_get_due_cards_include_future(self, review_service, dynamodb_tables):
+        """include_future returns future cards in addition to currently due cards."""
+        now = datetime.now(timezone.utc)
+        table = dynamodb_tables.Table("memoru-cards-test")
+        for card_id, due_at in [
+            ("due-card", now - timedelta(hours=1)),
+            ("future-card", now + timedelta(days=1)),
+        ]:
+            table.put_item(
+                Item={
+                    "user_id": "test-user-id",
+                    "card_id": card_id,
+                    "front": card_id,
+                    "back": card_id,
+                    "next_review_at": due_at.isoformat(),
+                    "interval": 1,
+                    "ease_factor": "2.5",
+                    "repetitions": 0,
+                    "tags": [],
+                    "created_at": now.isoformat(),
+                }
+            )
+
+        response = review_service.get_due_cards("test-user-id", include_future=True)
+
+        assert response.total_due_count == 2
+        assert [card.card_id for card in response.due_cards] == [
+            "due-card",
+            "future-card",
+        ]
+
     def test_get_due_cards_with_limit(self, review_service, dynamodb_tables):
         """Test getting due cards with limit."""
         now = datetime.now(timezone.utc)

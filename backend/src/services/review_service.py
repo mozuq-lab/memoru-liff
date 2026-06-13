@@ -488,7 +488,8 @@ class ReviewService:
             user_id: The user's ID.
             limit: Maximum number of cards to return in due_cards.
                    total_due_count はこの値に影響されず、フィルタ後の全件数を返す。
-            include_future: Include cards with future due dates.
+            include_future: Include scheduled cards with future due dates.
+                            When true, total_due_count includes those future cards.
             deck_id: Optional filter by deck ID.
                      指定した場合、total_due_count はそのデッキ内の復習対象カード総数を返す。
 
@@ -507,7 +508,8 @@ class ReviewService:
         all_due_cards = self.card_service.get_due_cards(
             user_id=user_id,
             limit=None,  # 【全件取得】: DynamoDB Query レベルの切り詰めを防ぎ、正確な総数を計算する 🔵
-            before=now if not include_future else None,
+            before=now,
+            include_future=include_future,
         )
 
         # 【deck_id フィルタ】: deck_id が指定された場合はアプリケーション層でフィルタを適用 🔵

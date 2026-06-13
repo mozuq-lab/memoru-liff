@@ -659,6 +659,7 @@ class CardService:
         user_id: str,
         limit: Optional[int] = None,
         before: Optional[datetime] = None,
+        include_future: bool = False,
     ) -> List[Card]:
         """Get cards due for review.
 
@@ -672,24 +673,32 @@ class CardService:
                    None を指定した場合は全件取得する（デフォルト）。
                    deck_id フィルタを上位層で行う場合は None を渡すこと。
             before: Get cards due before this time (defaults to now).
+            include_future: Return every scheduled card regardless of due date.
+                            Cards without next_review_at are not part of the due-date GSI.
 
         Returns:
             List of cards due for review, oldest due first.
         """
-        if before is None:
-            before = datetime.now(timezone.utc)
-
         try:
-            # 【クエリ引数構築】: GSI (user_id-due-index) を使い、期限切れカードを昇順で取得する
-            query_kwargs = {
+            # 【クエリ引数構築】: GSI (user_id-due-index) を使い、復習日時の昇順で取得する
+            query_kwargs: Dict[str, Any] = {
                 "IndexName": "user_id-due-index",
-                "KeyConditionExpression": "user_id = :user_id AND next_review_at <= :before",
                 "ExpressionAttributeValues": {
                     ":user_id": user_id,
-                    ":before": before.isoformat(),
                 },
                 "ScanIndexForward": True,  # 【昇順取得】: 期限が古い順（最も早く復習すべきカードを先頭に）
             }
+            if include_future:
+                query_kwargs["KeyConditionExpression"] = "user_id = :user_id"
+            else:
+                effective_before = before or datetime.now(timezone.utc)
+                query_kwargs["KeyConditionExpression"] = (
+                    "user_id = :user_id AND next_review_at <= :before"
+                )
+                query_kwargs["ExpressionAttributeValues"][":before"] = (
+                    effective_before.isoformat()
+                )
+
             # 【Limit 条件付き設定】: limit=None の場合は DynamoDB に Limit を渡さず全件取得する 🔵
             # limit が指定された場合のみ DynamoDB Query に Limit を付与し、レスポンスサイズを制限する。
             if limit is not None:

@@ -658,6 +658,33 @@ class TestCardServiceDueCards:
         assert len(due_cards) == 1
         assert due_cards[0].card_id == "card-due"
 
+    def test_get_due_cards_include_future(self, card_service, dynamodb_table):
+        """include_future returns due and future scheduled cards."""
+        now = datetime.now(timezone.utc)
+        table = dynamodb_table.Table("memoru-cards-test")
+        for card_id, due_at in [
+            ("card-due", now - timedelta(hours=1)),
+            ("card-future", now + timedelta(days=1)),
+        ]:
+            table.put_item(
+                Item={
+                    "user_id": "test-user-id",
+                    "card_id": card_id,
+                    "front": card_id,
+                    "back": card_id,
+                    "next_review_at": due_at.isoformat(),
+                    "interval": 1,
+                    "ease_factor": "2.5",
+                    "repetitions": 1,
+                    "tags": [],
+                    "created_at": now.isoformat(),
+                }
+            )
+
+        cards = card_service.get_due_cards("test-user-id", include_future=True)
+
+        assert [card.card_id for card in cards] == ["card-due", "card-future"]
+
 
 class TestCardServiceUpdateReviewData:
     """Tests for CardService.update_review_data method."""
