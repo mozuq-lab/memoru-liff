@@ -26,6 +26,37 @@ from .stats_service import calculate_streak, calculate_tag_performance
 logger = Logger()
 
 
+def build_srs_optimistic_lock_condition(
+    ease_placeholder: str,
+    interval_placeholder: str,
+    reps_placeholder: str,
+    history_len_placeholder: Optional[str] = None,
+) -> str:
+    """SRS 状態の楽観ロック用 ConditionExpression を生成する。
+
+    submit_review (C-1) と undo_review (B-2) で重複していた条件式を集約する。
+    attribute_not_exists(...) はレガシーアイテム（属性欠落 / #37 follow-up）を許容するためのもの。
+    `#interval` は予約語回避のため呼び出し側で ExpressionAttributeNames を渡す前提。
+
+    Args:
+        ease_placeholder: ease_factor 比較値のプレースホルダ（例: ":prev_ease"）。
+        interval_placeholder: interval 比較値のプレースホルダ。
+        reps_placeholder: repetitions 比較値のプレースホルダ。
+        history_len_placeholder: 指定時は ``size(review_history) = ...`` 条件を追加する。
+
+    Returns:
+        ConditionExpression 文字列。
+    """
+    parts = [
+        f"(attribute_not_exists(ease_factor) OR ease_factor = {ease_placeholder})",
+        f"(attribute_not_exists(#interval) OR #interval = {interval_placeholder})",
+        f"(attribute_not_exists(repetitions) OR repetitions = {reps_placeholder})",
+    ]
+    if history_len_placeholder is not None:
+        parts.append(f"size(review_history) = {history_len_placeholder}")
+    return " AND ".join(parts)
+
+
 class ReviewServiceError(Exception):
     """Base exception for review service errors."""
 
@@ -273,11 +304,11 @@ class ReviewService:
                 # has already been mutated by a concurrent operation.
                 # attribute_not_exists(...) tolerates legacy items missing these
                 # attributes (#37 follow-up), matching submit_review's behavior.
-                ConditionExpression=(
-                    "(attribute_not_exists(ease_factor) OR ease_factor = :expected_ease) "
-                    "AND (attribute_not_exists(#interval) OR #interval = :expected_interval) "
-                    "AND (attribute_not_exists(repetitions) OR repetitions = :expected_reps) "
-                    "AND size(review_history) = :expected_history_len"
+                ConditionExpression=build_srs_optimistic_lock_condition(
+                    ":expected_ease",
+                    ":expected_interval",
+                    ":expected_reps",
+                    ":expected_history_len",
                 ),
                 ExpressionAttributeNames={"#interval": "interval"},
                 ExpressionAttributeValues={
@@ -390,10 +421,10 @@ class ReviewService:
                 # and raise a spurious ConcurrentReviewError on a legitimate first
                 # review. attribute_not_exists(...) lets such items through; once
                 # written, subsequent updates are guarded normally.
-                ConditionExpression=(
-                    "(attribute_not_exists(ease_factor) OR ease_factor = :prev_ease) "
-                    "AND (attribute_not_exists(#interval) OR #interval = :prev_interval) "
-                    "AND (attribute_not_exists(repetitions) OR repetitions = :prev_reps)"
+                ConditionExpression=build_srs_optimistic_lock_condition(
+                    ":prev_ease",
+                    ":prev_interval",
+                    ":prev_reps",
                 ),
                 ExpressionAttributeNames={"#interval": "interval"},
                 ExpressionAttributeValues={
