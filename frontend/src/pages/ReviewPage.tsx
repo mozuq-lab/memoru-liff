@@ -7,11 +7,18 @@ import { ReviewProgress } from "@/components/ReviewProgress";
 import { ReviewComplete } from "@/components/ReviewComplete";
 import { Loading } from "@/components/common/Loading";
 import { Error } from "@/components/common/Error";
+import { BackButton } from "@/components/common/BackButton";
 import { cardsApi, reviewsApi } from "@/services/api";
 import { useSpeech } from "@/hooks/useSpeech";
 import { useSpeechSettings } from "@/hooks/useSpeechSettings";
 import { useAuthContext } from "@/contexts/AuthContext";
 import type { DueCard, SessionCardResult, ReconfirmCard } from "@/types";
+
+/**
+ * 【再確認キュー追加しきい値】: quality 評価がこの値未満（0-2）の場合に
+ * 再確認キューへ追加する（SM-2 で最も記憶定着が低い評価帯）。
+ */
+const RECONFIRM_THRESHOLD = 3;
 
 /**
  * 【ヘルパー関数】: ReconfirmCard オブジェクトを生成する
@@ -177,7 +184,7 @@ export const ReviewPage = () => {
           const response = await reviewsApi.submitReview(result.cardId, grade);
 
           // 【再確認キュー追加判定】: quality 0-2 の場合のみキューに追加
-          if (grade < 3) {
+          if (grade < RECONFIRM_THRESHOLD) {
             const back =
               cards.find((c) => c.card_id === result.cardId)?.back ?? "";
             setReconfirmQueue((prev) => [
@@ -202,7 +209,7 @@ export const ReviewPage = () => {
 
           // 【再採点後の遷移判定】: grade < 3 → 再確認モードに遷移、grade >= 3 → 完了画面に遷移
           setRegradeCardIndex(null);
-          if (grade < 3) {
+          if (grade < RECONFIRM_THRESHOLD) {
             setIsFlipped(false);
             setIsReconfirmMode(true);
           } else {
@@ -233,7 +240,7 @@ export const ReviewPage = () => {
         // 最新の state を参照する。moveToNext には updater で計算した値と
         // 同一のローカル変数を渡すことで整合性を保つ。
         let newReconfirmQueue = reconfirmQueue;
-        if (grade < 3) {
+        if (grade < RECONFIRM_THRESHOLD) {
           const newCard = buildReconfirmCard(
             currentCard.card_id,
             currentCard.front,
@@ -416,27 +423,7 @@ export const ReviewPage = () => {
     return (
       <div className="flex flex-col min-h-screen bg-gray-50">
         <header className="p-4">
-          <button
-            type="button"
-            onClick={handleBack}
-            className="text-gray-600 min-h-[44px] min-w-[44px] flex items-center"
-            aria-label="戻る"
-          >
-            <svg
-              className="h-6 w-6"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              aria-hidden="true"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M15 19l-7-7 7-7"
-              />
-            </svg>
-          </button>
+          <BackButton onClick={handleBack} />
         </header>
         <div className="flex-1 flex items-center justify-center p-4">
           <Error message={error} onRetry={fetchCards} />
@@ -449,27 +436,7 @@ export const ReviewPage = () => {
     return (
       <div className="flex flex-col min-h-screen bg-gray-50">
         <header className="p-4">
-          <button
-            type="button"
-            onClick={handleBack}
-            className="text-gray-600 min-h-[44px] min-w-[44px] flex items-center"
-            aria-label="戻る"
-          >
-            <svg
-              className="h-6 w-6"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              aria-hidden="true"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M15 19l-7-7 7-7"
-              />
-            </svg>
-          </button>
+          <BackButton onClick={handleBack} />
         </header>
         <div className="flex-1 flex items-center justify-center px-6 text-center">
           <div>
@@ -569,27 +536,7 @@ export const ReviewPage = () => {
     return (
       <div className="flex flex-col min-h-screen bg-gray-50">
         <header className="p-4 flex items-center gap-3">
-          <button
-            type="button"
-            onClick={handleBack}
-            className="text-gray-600 min-h-[44px] min-w-[44px] flex items-center"
-            aria-label="戻る"
-          >
-            <svg
-              className="h-6 w-6"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              aria-hidden="true"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M15 19l-7-7 7-7"
-              />
-            </svg>
-          </button>
+          <BackButton onClick={handleBack} />
           <span className="inline-flex items-center bg-amber-100 text-amber-700 rounded-full px-2 py-0.5 text-xs font-medium">
             再確認
           </span>
@@ -636,27 +583,7 @@ export const ReviewPage = () => {
   return (
     <div className="flex flex-col min-h-screen bg-gray-50">
       <header className="p-4 flex items-center justify-between">
-        <button
-          type="button"
-          onClick={handleBack}
-          className="text-gray-600 min-h-[44px] min-w-[44px] flex items-center"
-          aria-label="戻る"
-        >
-          <svg
-            className="h-6 w-6"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            aria-hidden="true"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M15 19l-7-7 7-7"
-            />
-          </svg>
-        </button>
+        <BackButton onClick={handleBack} />
         <div className="flex-1 mx-4">
           <ReviewProgress current={currentIndex + 1} total={cards.length} />
         </div>
