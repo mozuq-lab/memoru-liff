@@ -72,7 +72,7 @@ def link_line_account():
         user = user_service.link_line(user_id, line_user_id)
         return UserMutationResponse(
             success=True,
-            data=user.to_response().model_dump(mode="json"),
+            data=user.to_response(),
         ).model_dump(mode="json")
     except UserAlreadyLinkedError:
         return Response(
@@ -84,7 +84,9 @@ def link_line_account():
         return Response(
             status_code=409,
             content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "This LINE account is already linked to another user"}),
+            body=json.dumps(
+                {"error": "This LINE account is already linked to another user"}
+            ),
         )
     except Exception as e:
         logger.error("Error linking LINE account", extra={"error": str(e)})
@@ -121,7 +123,7 @@ def update_user_settings():
         )
         return UserMutationResponse(
             success=True,
-            data=user.to_response().model_dump(mode="json"),
+            data=user.to_response(),
         ).model_dump(mode="json")
     except UserNotFoundError:
         raise NotFoundError("User not found")
@@ -141,7 +143,7 @@ def unlink_line():
         user = user_service.unlink_line(user_id)
         return UserMutationResponse(
             success=True,
-            data=user.to_response().model_dump(mode="json"),
+            data=user.to_response(),
         ).model_dump(mode="json")
     except LineNotLinkedError:
         return Response(

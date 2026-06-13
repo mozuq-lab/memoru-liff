@@ -15,7 +15,7 @@ class TestUpdateSettingsResponse:
     """TC-01: PUT /users/me/settings が {success: true, data: User} 形式を返却する."""
 
     def test_update_settings_returns_data_not_settings(
-        self, api_gateway_event, lambda_context
+        self, api_gateway_event, lambda_context, user_response_factory
     ):
         """設定更新レスポンスが data フィールドを使用し settings フィールドを使用しない.
 
@@ -40,20 +40,13 @@ class TestUpdateSettingsResponse:
             mock_user_service.get_or_create_user.return_value = mock_user
             mock_user_service.update_settings.return_value = mock_user
 
-            mock_response = MagicMock()
-            mock_response.model_dump.return_value = {
-                "user_id": "test-user-id",
-                "display_name": None,
-                "picture_url": None,
-                "line_linked": False,
-                "notification_time": "21:00",
-                "timezone": "UTC",
-                "created_at": "2024-01-01T00:00:00+00:00",
-                "updated_at": "2024-01-01T12:00:00+00:00",
-            }
-            mock_user.to_response.return_value = mock_response
+            mock_user.to_response.return_value = user_response_factory(
+                notification_time="21:00",
+                timezone="UTC",
+            )
 
             from api.handler import handler
+
             response = handler(event, lambda_context)
 
         assert response["statusCode"] == 200
@@ -75,13 +68,13 @@ class TestUpdateSettingsResponse:
         )
 
     def test_update_settings_includes_all_user_fields(
-        self, api_gateway_event, lambda_context
+        self, api_gateway_event, lambda_context, user_response_factory
     ):
-        """設定更新レスポンスに UserResponse の全8フィールドが含まれること.
+        """設定更新レスポンスに UserResponse の全9フィールドが含まれること.
 
         【テスト目的】: data オブジェクトが UserResponse 型の全フィールドを持つことを検証
         【期待される動作】: user_id, display_name, picture_url, line_linked,
-                          notification_time, timezone, created_at, updated_at が存在する
+                          notification_time, timezone, day_start_hour, created_at, updated_at が存在する
         青 信頼性レベル: EARS-045-002, UserResponse Pydantic モデル定義 (user.py L68-78)
 
         RED フェーズ失敗理由:
@@ -96,24 +89,21 @@ class TestUpdateSettingsResponse:
 
         with patch("api.handlers.user_handler.user_service") as mock_user_service:
             mock_user = MagicMock()
-            mock_user.settings = {"notification_time": "21:00", "timezone": "Asia/Tokyo"}
+            mock_user.settings = {
+                "notification_time": "21:00",
+                "timezone": "Asia/Tokyo",
+            }
             mock_user_service.get_or_create_user.return_value = mock_user
             mock_user_service.update_settings.return_value = mock_user
 
-            mock_response = MagicMock()
-            mock_response.model_dump.return_value = {
-                "user_id": "test-user-id",
-                "display_name": "テストユーザー",
-                "picture_url": None,
-                "line_linked": True,
-                "notification_time": "21:00",
-                "timezone": "Asia/Tokyo",
-                "created_at": "2024-01-01T00:00:00+00:00",
-                "updated_at": "2024-01-01T12:00:00+00:00",
-            }
-            mock_user.to_response.return_value = mock_response
+            mock_user.to_response.return_value = user_response_factory(
+                display_name="テストユーザー",
+                line_linked=True,
+                notification_time="21:00",
+            )
 
             from api.handler import handler
+
             response = handler(event, lambda_context)
 
         assert response["statusCode"] == 200
@@ -131,6 +121,7 @@ class TestUpdateSettingsResponse:
             "line_linked",
             "notification_time",
             "timezone",
+            "day_start_hour",
             "created_at",
             "updated_at",
         ]
@@ -147,7 +138,7 @@ class TestUpdateSettingsResponse:
         assert "/" in data["timezone"] or data["timezone"] == "UTC"
 
     def test_update_settings_reflects_updated_values(
-        self, api_gateway_event, lambda_context
+        self, api_gateway_event, lambda_context, user_response_factory
     ):
         """設定更新レスポンスが更新後の値を正しく反映すること.
 
@@ -171,20 +162,13 @@ class TestUpdateSettingsResponse:
             mock_user_service.get_or_create_user.return_value = mock_user
             mock_user_service.update_settings.return_value = mock_user
 
-            mock_response = MagicMock()
-            mock_response.model_dump.return_value = {
-                "user_id": "test-user-id",
-                "display_name": None,
-                "picture_url": None,
-                "line_linked": False,
-                "notification_time": "21:00",
-                "timezone": "UTC",
-                "created_at": "2024-01-01T00:00:00+00:00",
-                "updated_at": "2024-01-02T00:00:00+00:00",
-            }
-            mock_user.to_response.return_value = mock_response
+            mock_user.to_response.return_value = user_response_factory(
+                notification_time="21:00",
+                timezone="UTC",
+            )
 
             from api.handler import handler
+
             response = handler(event, lambda_context)
 
         body = json.loads(response["body"])

@@ -16,7 +16,7 @@ class TestUnlinkLineResponse:
     """TC-04〜05: POST /users/me/unlink-line が User 型レスポンスを返却する."""
 
     def test_unlink_line_returns_user_response_with_line_linked_false(
-        self, api_gateway_event, lambda_context
+        self, api_gateway_event, lambda_context, user_response_factory
     ):
         """LINE連携解除レスポンスが {success: true, data: User} 形式で line_linked=false を含む.
 
@@ -39,21 +39,13 @@ class TestUnlinkLineResponse:
             # unlink_line が User オブジェクトを返すようにモック
             # (GREEN フェーズ後の期待される戻り値型)
             mock_user = MagicMock()
-            mock_response = MagicMock()
-            mock_response.model_dump.return_value = {
-                "user_id": "test-user-id",
-                "display_name": "テストユーザー",
-                "picture_url": None,
-                "line_linked": False,
-                "notification_time": "09:00",
-                "timezone": "Asia/Tokyo",
-                "created_at": "2024-01-01T00:00:00+00:00",
-                "updated_at": "2024-01-02T00:00:00+00:00",
-            }
-            mock_user.to_response.return_value = mock_response
+            mock_user.to_response.return_value = user_response_factory(
+                display_name="テストユーザー",
+            )
             mock_user_service.unlink_line.return_value = mock_user
 
             from api.handler import handler
+
             response = handler(event, lambda_context)
 
         assert response["statusCode"] == 200
@@ -75,9 +67,9 @@ class TestUnlinkLineResponse:
         )
 
     def test_unlink_line_includes_all_user_fields(
-        self, api_gateway_event, lambda_context
+        self, api_gateway_event, lambda_context, user_response_factory
     ):
-        """LINE連携解除レスポンスに UserResponse の全8フィールドが含まれること.
+        """LINE連携解除レスポンスに UserResponse の全9フィールドが含まれること.
 
         【テスト目的】: data オブジェクトが UserResponse 型の全フィールドを持つことを検証
         【期待される動作】: 旧形式の {user_id, unlinked_at} ではなく UserResponse 全フィールドが返る
@@ -95,21 +87,13 @@ class TestUnlinkLineResponse:
 
         with patch("api.handlers.user_handler.user_service") as mock_user_service:
             mock_user = MagicMock()
-            mock_response = MagicMock()
-            mock_response.model_dump.return_value = {
-                "user_id": "test-user-id",
-                "display_name": "テストユーザー",
-                "picture_url": None,
-                "line_linked": False,
-                "notification_time": "09:00",
-                "timezone": "Asia/Tokyo",
-                "created_at": "2024-01-01T00:00:00+00:00",
-                "updated_at": "2024-01-02T00:00:00+00:00",
-            }
-            mock_user.to_response.return_value = mock_response
+            mock_user.to_response.return_value = user_response_factory(
+                display_name="テストユーザー",
+            )
             mock_user_service.unlink_line.return_value = mock_user
 
             from api.handler import handler
+
             response = handler(event, lambda_context)
 
         body = json.loads(response["body"])
@@ -125,6 +109,7 @@ class TestUnlinkLineResponse:
             "line_linked",
             "notification_time",
             "timezone",
+            "day_start_hour",
             "created_at",
             "updated_at",
         ]

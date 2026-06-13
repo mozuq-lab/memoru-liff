@@ -142,7 +142,7 @@ class TestUnlinkLineAPIHandler:
         assert hasattr(user_handler, "unlink_line")
         assert callable(user_handler.unlink_line)
 
-    def test_unlink_line_function_calls_service(self):
+    def test_unlink_line_function_calls_service(self, user_response_factory):
         """Test that unlink_line function calls user_service.unlink_line with correct user_id."""
         from api.handlers.user_handler import unlink_line
 
@@ -152,18 +152,9 @@ class TestUnlinkLineAPIHandler:
 
             mock_get_user_id.return_value = "test-user-id"
             mock_user = MagicMock()
-            mock_response = MagicMock()
-            mock_response.model_dump.return_value = {
-                "user_id": "test-user-id",
-                "display_name": None,
-                "picture_url": None,
-                "line_linked": False,
-                "notification_time": "09:00",
-                "timezone": "Asia/Tokyo",
-                "created_at": "2024-01-01T00:00:00+00:00",
-                "updated_at": "2024-01-15T10:00:00+00:00",
-            }
-            mock_user.to_response.return_value = mock_response
+            mock_user.to_response.return_value = user_response_factory(
+                updated_at="2024-01-15T10:00:00+00:00",
+            )
             mock_user_service.unlink_line.return_value = mock_user
 
             # Execute

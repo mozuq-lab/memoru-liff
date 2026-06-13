@@ -15,7 +15,7 @@ class TestResponseConsistency:
     """TC-06: レスポンス形式の一貫性検証."""
 
     def test_settings_and_unlink_return_same_user_structure(
-        self, api_gateway_event, lambda_context
+        self, api_gateway_event, lambda_context, user_response_factory
     ):
         """PUT /users/me/settings と POST /users/me/unlink-line が同じ User 構造を返す.
 
@@ -52,19 +52,10 @@ class TestResponseConsistency:
 
         with patch("api.handlers.user_handler.user_service") as mock_user_service:
             mock_user = MagicMock()
-            mock_response = MagicMock()
-            mock_response.model_dump.return_value = {
-                "user_id": "test-user-id",
-                "display_name": None,
-                "picture_url": None,
-                "line_linked": True,
-                "notification_time": "21:00",
-                "timezone": "Asia/Tokyo",
-                "day_start_hour": 4,
-                "created_at": "2024-01-01T00:00:00+00:00",
-                "updated_at": "2024-01-02T00:00:00+00:00",
-            }
-            mock_user.to_response.return_value = mock_response
+            mock_user.to_response.return_value = user_response_factory(
+                line_linked=True,
+                notification_time="21:00",
+            )
             mock_user.settings = {
                 "notification_time": "21:00",
                 "timezone": "Asia/Tokyo",
@@ -92,19 +83,7 @@ class TestResponseConsistency:
 
         with patch("api.handlers.user_handler.user_service") as mock_user_service:
             mock_user2 = MagicMock()
-            mock_response2 = MagicMock()
-            mock_response2.model_dump.return_value = {
-                "user_id": "test-user-id",
-                "display_name": None,
-                "picture_url": None,
-                "line_linked": False,
-                "notification_time": "09:00",
-                "timezone": "Asia/Tokyo",
-                "day_start_hour": 4,
-                "created_at": "2024-01-01T00:00:00+00:00",
-                "updated_at": "2024-01-02T00:00:00+00:00",
-            }
-            mock_user2.to_response.return_value = mock_response2
+            mock_user2.to_response.return_value = user_response_factory()
             mock_user_service.unlink_line.return_value = mock_user2
 
             unlink_response = handler(unlink_event, lambda_context)
