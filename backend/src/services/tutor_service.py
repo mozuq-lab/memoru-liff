@@ -3,6 +3,11 @@
 Handles session lifecycle: start, send_message, end, list, get.
 Includes auto-end of existing active sessions, timeout checks,
 message limit enforcement, and TTL calculation.
+
+DynamoDB アクセスと低レベルなエラー変換は TutorSessionRepository に委譲し、本クラスは
+セッションライフサイクル・AI 呼び出し・SessionManager の扱いに専念する。
+例外クラスは tutor_errors に定義し、後方互換のため本モジュールから再エクスポートする
+（``from services.tutor_service import SessionNotFoundError`` を維持）。
 """
 
 import os
@@ -11,7 +16,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from aws_lambda_powertools import Logger
-from botocore.exceptions import ClientError
 
 from models.tutor import (
     SendMessageResponse,
@@ -20,10 +24,33 @@ from models.tutor import (
 )
 from services.prompts.tutor import format_cards_context, get_system_prompt
 from services.tutor_ai_service import clean_response_text, create_tutor_ai_service
+from services.tutor_errors import (
+    ConcurrentSendError,
+    DeckNotFoundError,
+    EmptyDeckError,
+    InsufficientReviewDataError,
+    MessageLimitError,
+    SessionEndedError,
+    SessionNotFoundError,
+    TutorServiceError,
+)
 from services.tutor_session_factory import create_tutor_session_manager
-from utils.dynamodb_client import get_dynamodb_resource
+from services.tutor_session_repository import TutorSessionRepository
 
 logger = Logger()
+
+# 後方互換のための再エクスポート (ruff の未使用 import 検出を回避)
+__all__ = [
+    "TutorService",
+    "TutorServiceError",
+    "SessionNotFoundError",
+    "SessionEndedError",
+    "MessageLimitError",
+    "ConcurrentSendError",
+    "DeckNotFoundError",
+    "EmptyDeckError",
+    "InsufficientReviewDataError",
+]
 
 
 def _close_quietly(sm: Any) -> None:
@@ -41,39 +68,6 @@ def _close_quietly(sm: Any) -> None:
             "SessionManager.close() raised; suppressing to preserve body exception",
             extra={"error": str(exc)},
         )
-
-
-# Exceptions
-class TutorServiceError(Exception):
-    """Base exception for TutorService errors."""
-
-
-class SessionNotFoundError(TutorServiceError):
-    """Raised when a session cannot be found."""
-
-
-class SessionEndedError(TutorServiceError):
-    """Raised when trying to interact with an ended/timed_out session."""
-
-
-class MessageLimitError(TutorServiceError):
-    """Raised when session message limit is reached."""
-
-
-class ConcurrentSendError(TutorServiceError):
-    """Raised when concurrent send_message is detected (optimistic lock failed)."""
-
-
-class DeckNotFoundError(TutorServiceError):
-    """Raised when a deck cannot be found."""
-
-
-class EmptyDeckError(TutorServiceError):
-    """Raised when a deck has no cards."""
-
-
-class InsufficientReviewDataError(TutorServiceError):
-    """Raised when weak_point mode is requested but no review history exists."""
 
 
 class TutorService:
@@ -94,19 +88,11 @@ class TutorService:
         ai_service: Any | None = None,
         session_manager_factory: Any | None = None,
     ):
-        self.table_name = table_name or os.environ.get(
-            "TUTOR_SESSIONS_TABLE", "memoru-tutor-sessions-dev"
+        self._repo = TutorSessionRepository(
+            table_name=table_name,
+            dynamodb_resource=dynamodb_resource,
         )
-
-        self.dynamodb = get_dynamodb_resource(dynamodb_resource)
-
-        self.table = self.dynamodb.Table(self.table_name)
-
-        # Cards and decks tables for context loading
-        self.cards_table_name = os.environ.get("CARDS_TABLE", "memoru-cards-dev")
-        self.decks_table_name = os.environ.get("DECKS_TABLE", "memoru-decks-dev")
-        self.cards_table = self.dynamodb.Table(self.cards_table_name)
-        self.decks_table = self.dynamodb.Table(self.decks_table_name)
+        self.table_name = self._repo.table_name
 
         self.ai_service = ai_service if ai_service is not None else create_tutor_ai_service()
         self.session_manager_factory = session_manager_factory or create_tutor_session_manager
@@ -131,8 +117,8 @@ class TutorService:
             TutorSessionResponse with the new session data.
         """
         # Validate deck and cards BEFORE ending existing sessions (C-1 fix)
-        deck = self._get_deck(user_id, deck_id)
-        cards = self._get_deck_cards(user_id, deck_id)
+        deck = self._repo.get_deck(user_id, deck_id)
+        cards = self._repo.get_deck_cards(user_id, deck_id)
 
         if not cards:
             raise EmptyDeckError(
@@ -182,7 +168,7 @@ class TutorService:
             "system_prompt": system_prompt,
             "deck_card_ids": list(valid_card_ids),
         }
-        self.table.put_item(Item=item)
+        self._repo.put_session(item)
 
         # Generate AI greeting via SessionManager-attached Agent
         sm = self.session_manager_factory(session_id=session_id, user_id=user_id)
@@ -196,9 +182,7 @@ class TutorService:
             except Exception:
                 # Rollback: remove the incomplete session to avoid orphaned records
                 try:
-                    self.table.delete_item(
-                        Key={"user_id": user_id, "session_id": session_id}
-                    )
+                    self._repo.delete_session(user_id, session_id)
                 except Exception:
                     logger.warning(
                         "Failed to cleanup session after AI error",
@@ -261,7 +245,7 @@ class TutorService:
             MessageLimitError: If message limit reached.
             ConcurrentSendError: If a concurrent send is detected (optimistic lock failed).
         """
-        item = self._get_session_item(user_id, session_id)
+        item = self._repo.get_session_item(user_id, session_id)
 
         # Check status
         status = item["status"]
@@ -288,38 +272,9 @@ class TutorService:
         stale_threshold = (
             now - timedelta(seconds=self.LOCK_TIMEOUT_SECONDS)
         ).isoformat()
-        try:
-            self.table.update_item(
-                Key={"user_id": user_id, "session_id": session_id},
-                UpdateExpression=(
-                    "SET processing_started_at = :now, updated_at = :now"
-                ),
-                # status が active で、かつロックが取れていない or stale の場合のみ取得
-                ConditionExpression=(
-                    "#st = :active "
-                    "AND (attribute_not_exists(processing_started_at) "
-                    "OR processing_started_at < :stale)"
-                ),
-                ExpressionAttributeNames={"#st": "status"},
-                ExpressionAttributeValues={
-                    ":active": "active",
-                    ":now": now.isoformat(),
-                    ":stale": stale_threshold,
-                },
-            )
-        except ClientError as e:
-            if e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
-                logger.warning(
-                    "Concurrent send detected (in-flight lock held)",
-                    extra={
-                        "user_id": user_id,
-                        "session_id": session_id,
-                    },
-                )
-                raise ConcurrentSendError(
-                    f"Session {session_id} has an in-flight send in progress"
-                ) from e
-            raise
+        self._repo.acquire_inflight_lock(
+            user_id, session_id, now.isoformat(), stale_threshold
+        )
 
         # Get AI response via SessionManager
         system_prompt = item.get("system_prompt", "")
@@ -349,21 +304,7 @@ class TutorService:
         except Exception:
             # AI error: ロックを解放する (count は進めない)。
             # 解放に失敗しても LOCK_TIMEOUT_SECONDS 後には他の送信が引き継げる。
-            try:
-                self.table.update_item(
-                    Key={"user_id": user_id, "session_id": session_id},
-                    UpdateExpression="REMOVE processing_started_at",
-                    ConditionExpression="attribute_exists(processing_started_at)",
-                )
-            except ClientError as rb_err:
-                logger.warning(
-                    "Failed to release in-flight lock after AI error",
-                    extra={
-                        "user_id": user_id,
-                        "session_id": session_id,
-                        "error": str(rb_err),
-                    },
-                )
+            self._repo.release_inflight_lock(user_id, session_id)
             raise
 
         ai_content = self.ai_service.clean_response_text(ai_content)
@@ -381,44 +322,14 @@ class TutorService:
         # AI 成功後: ロック解放 (REMOVE processing_started_at) + count++ を
         # 同一 update_item で行う。limit reached なら session を ended に遷移。
         completion_now = datetime.now(timezone.utc)
-        if is_limit_reached:
-            ttl = int(
-                (completion_now + timedelta(days=self.TTL_DAYS)).timestamp()
-            )
-            self.table.update_item(
-                Key={"user_id": user_id, "session_id": session_id},
-                UpdateExpression=(
-                    "SET message_count = :cnt, "
-                    "#st = :ended, "
-                    "ended_at = :ended_at, "
-                    "#ttl = :ttl, "
-                    "updated_at = :upd "
-                    "REMOVE processing_started_at"
-                ),
-                ConditionExpression="attribute_exists(processing_started_at)",
-                ExpressionAttributeValues={
-                    ":cnt": new_count,
-                    ":ended": "ended",
-                    ":ended_at": completion_now.isoformat(),
-                    ":ttl": ttl,
-                    ":upd": completion_now.isoformat(),
-                },
-                ExpressionAttributeNames={"#st": "status", "#ttl": "ttl"},
-            )
-        else:
-            self.table.update_item(
-                Key={"user_id": user_id, "session_id": session_id},
-                UpdateExpression=(
-                    "SET message_count = :cnt, "
-                    "updated_at = :upd "
-                    "REMOVE processing_started_at"
-                ),
-                ConditionExpression="attribute_exists(processing_started_at)",
-                ExpressionAttributeValues={
-                    ":cnt": new_count,
-                    ":upd": completion_now.isoformat(),
-                },
-            )
+        ttl = (
+            int((completion_now + timedelta(days=self.TTL_DAYS)).timestamp())
+            if is_limit_reached
+            else None
+        )
+        self._repo.complete_send(
+            user_id, session_id, new_count, completion_now.isoformat(), ttl=ttl
+        )
 
         return SendMessageResponse(
             message=ai_msg,
@@ -445,7 +356,7 @@ class TutorService:
             SessionNotFoundError: If session doesn't exist.
             SessionEndedError: If session is already ended.
         """
-        item = self._get_session_item(user_id, session_id)
+        item = self._repo.get_session_item(user_id, session_id)
 
         if item["status"] in ("ended", "timed_out"):
             raise SessionEndedError(f"Session {session_id} is already {item['status']}")
@@ -453,17 +364,7 @@ class TutorService:
         now = datetime.now(timezone.utc)
         ttl = int((now + timedelta(days=self.TTL_DAYS)).timestamp())
 
-        self.table.update_item(
-            Key={"user_id": user_id, "session_id": session_id},
-            UpdateExpression="SET #st = :status, ended_at = :ended, updated_at = :upd, #ttl = :ttl",
-            ExpressionAttributeValues={
-                ":status": "ended",
-                ":ended": now.isoformat(),
-                ":upd": now.isoformat(),
-                ":ttl": ttl,
-            },
-            ExpressionAttributeNames={"#st": "status", "#ttl": "ttl"},
-        )
+        self._repo.mark_ended(user_id, session_id, now.isoformat(), ttl)
 
         messages = self._get_session_messages(user_id, session_id, item)
         return TutorSessionResponse(
@@ -494,24 +395,7 @@ class TutorService:
         Returns:
             List of TutorSessionResponse objects.
         """
-        if status:
-            # Use GSI for status filtering
-            response = self.table.query(
-                IndexName="user_id-status-index",
-                KeyConditionExpression="user_id = :uid AND #st = :status",
-                ExpressionAttributeValues={
-                    ":uid": user_id,
-                    ":status": status,
-                },
-                ExpressionAttributeNames={"#st": "status"},
-            )
-        else:
-            response = self.table.query(
-                KeyConditionExpression="user_id = :uid",
-                ExpressionAttributeValues={":uid": user_id},
-            )
-
-        items = response.get("Items", [])
+        items = self._repo.query_sessions(user_id, status)
 
         if deck_id:
             items = [i for i in items if i.get("deck_id") == deck_id]
@@ -556,7 +440,7 @@ class TutorService:
         Raises:
             SessionNotFoundError: If session doesn't exist.
         """
-        item = self._get_session_item(user_id, session_id)
+        item = self._repo.get_session_item(user_id, session_id)
         item = self._check_and_mark_timeout(user_id, item)
 
         # SessionManager 経由で会話履歴を取得
@@ -679,16 +563,6 @@ class TutorService:
             )
             return [TutorMessage(**m) for m in item.get("messages", [])]
 
-    def _get_session_item(self, user_id: str, session_id: str) -> dict:
-        """Fetch raw session item from DynamoDB."""
-        response = self.table.get_item(
-            Key={"user_id": user_id, "session_id": session_id}
-        )
-        item = response.get("Item")
-        if not item:
-            raise SessionNotFoundError(f"Session {session_id} not found")
-        return item
-
     def _check_and_mark_timeout(self, user_id: str, item: dict) -> dict:
         """Check if an active session has timed out and mark it if so.
 
@@ -722,63 +596,7 @@ class TutorService:
         """Mark a session as timed out (idempotent)."""
         now = datetime.now(timezone.utc)
         ttl = int((now + timedelta(days=self.TTL_DAYS)).timestamp())
-        try:
-            self.table.update_item(
-                Key={"user_id": user_id, "session_id": session_id},
-                UpdateExpression="SET #st = :status, ended_at = :ended, updated_at = :upd, #ttl = :ttl",
-                ConditionExpression="#st = :active",
-                ExpressionAttributeValues={
-                    ":status": "timed_out",
-                    ":active": "active",
-                    ":ended": now.isoformat(),
-                    ":upd": now.isoformat(),
-                    ":ttl": ttl,
-                },
-                ExpressionAttributeNames={"#st": "status", "#ttl": "ttl"},
-            )
-        except ClientError as e:
-            if e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
-                pass  # Already marked — idempotent
-            else:
-                raise
-
-    def _get_deck(self, user_id: str, deck_id: str) -> dict:
-        """Fetch deck info from DynamoDB."""
-        response = self.decks_table.get_item(
-            Key={"user_id": user_id, "deck_id": deck_id}
-        )
-        item = response.get("Item")
-        if not item:
-            raise DeckNotFoundError(f"Deck {deck_id} not found")
-        return item
-
-    def _get_deck_cards(self, user_id: str, deck_id: str) -> list[dict]:
-        """Fetch all cards for a deck from DynamoDB."""
-        cards: list[dict] = []
-        query_kwargs: dict[str, Any] = {
-            "KeyConditionExpression": "user_id = :uid",
-            "FilterExpression": "deck_id = :did",
-            "ExpressionAttributeValues": {
-                ":uid": user_id,
-                ":did": deck_id,
-            },
-        }
-
-        while True:
-            response = self.cards_table.query(**query_kwargs)
-            for item in response.get("Items", []):
-                cards.append({
-                    "card_id": item.get("card_id", ""),
-                    "front": item.get("front", ""),
-                    "back": item.get("back", ""),
-                    "ease_factor": float(item.get("ease_factor", 2.5)),
-                    "repetitions": int(item.get("repetitions", 0)),
-                })
-            if not response.get("LastEvaluatedKey"):
-                break
-            query_kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
-
-        return cards
+        self._repo.mark_timed_out(user_id, session_id, now.isoformat(), ttl)
 
     def _get_weak_cards_for_deck(
         self, user_id: str, deck_id: str, cards: list[dict]
