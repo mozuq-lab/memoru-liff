@@ -4,18 +4,14 @@ import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-import boto3
 from aws_lambda_powertools import Logger
 from botocore.exceptions import ClientError
 
 from models.deck import Deck
+from utils.dynamodb_client import get_dynamodb_resource
+from utils.sentinel import UNSET as _UNSET
 
 logger = Logger()
-
-# Sentinel value to distinguish "not provided" from explicit None (null).
-# 【Sentinel 定数】: update_deck で description/color が省略された場合に「変更なし」を表現する。
-# 🔵 card_service.py と同一パターン (TASK-0085 参照)
-_UNSET = object()
 
 
 class DeckServiceError(Exception):
@@ -57,14 +53,7 @@ class DeckService:
         self.table_name = table_name or os.environ.get("DECKS_TABLE", "memoru-decks-dev")
         self.cards_table_name = cards_table_name or os.environ.get("CARDS_TABLE", "memoru-cards-dev")
 
-        endpoint_url = os.environ.get("DYNAMODB_ENDPOINT_URL") or os.environ.get("AWS_ENDPOINT_URL")
-        if dynamodb_resource:
-            self.dynamodb = dynamodb_resource
-        else:
-            if endpoint_url:
-                self.dynamodb = boto3.resource("dynamodb", endpoint_url=endpoint_url)
-            else:
-                self.dynamodb = boto3.resource("dynamodb")
+        self.dynamodb = get_dynamodb_resource(dynamodb_resource)
 
         self.table = self.dynamodb.Table(self.table_name)
         self.cards_table = self.dynamodb.Table(self.cards_table_name)

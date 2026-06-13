@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useCallback, useMemo, useRef, type ReactNode } from 'react';
 import type { Card, DueCard } from '@/types';
 import { cardsApi } from '@/services/api';
+import { toError } from '@/utils/error';
 
 // F-3: AbortError 判定ヘルパー — 中断起因のエラーは error state に入れない
 const isAbortError = (err: unknown): boolean =>
@@ -76,7 +77,7 @@ export const CardsProvider = ({ children }: CardsProviderProps) => {
     } catch (err) {
       if (options?.signal?.aborted || isAbortError(err) || requestId !== cardsRequestIdRef.current) return;
       // 【W-30修正】: 型安全なエラーラッピング
-      setError(err instanceof Error ? err : new Error(String(err)));
+      setError(toError(err));
     } finally {
       // F-3: 最新リクエストかつ未中断のときのみローディング解除
       if (!options?.signal?.aborted && requestId === cardsRequestIdRef.current) {
@@ -108,7 +109,7 @@ export const CardsProvider = ({ children }: CardsProviderProps) => {
     } catch (err) {
       if (options?.signal?.aborted || isAbortError(err) || requestId !== dueCardsRequestIdRef.current) return;
       // 【W-30修正】: 型安全なエラーラッピング
-      setError(err instanceof Error ? err : new Error(String(err)));
+      setError(toError(err));
     } finally {
       // F-3: 最新リクエストかつ未中断のときのみローディング解除
       if (!options?.signal?.aborted && requestId === dueCardsRequestIdRef.current) {

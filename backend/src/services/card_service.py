@@ -4,19 +4,17 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-import boto3
 from aws_lambda_powertools import Logger
 from boto3.dynamodb.types import TypeSerializer
 from botocore.exceptions import ClientError
 
 from models.card import Card, Reference
+from utils.dynamodb_client import get_dynamodb_client, get_dynamodb_resource
+from utils.sentinel import UNSET as _UNSET
 from .srs import calculate_next_review_boundary
 
 # 【ロガー設定】: TransactionCanceledException などの内部エラーをログ出力するために必要 (EARS-009)
 logger = Logger()
-
-# Sentinel value to distinguish "not provided" from explicit None (null)
-_UNSET = object()
 
 
 class CardServiceError(Exception):
@@ -79,14 +77,7 @@ class CardService:
         # 【レビューテーブル設定】: delete_card トランザクションで Reviews テーブルを参照するために必要
         self.reviews_table_name = reviews_table_name or os.environ.get("REVIEWS_TABLE", "memoru-reviews-dev")
 
-        endpoint_url = os.environ.get("DYNAMODB_ENDPOINT_URL") or os.environ.get("AWS_ENDPOINT_URL")
-        if dynamodb_resource:
-            self.dynamodb = dynamodb_resource
-        else:
-            if endpoint_url:
-                self.dynamodb = boto3.resource("dynamodb", endpoint_url=endpoint_url)
-            else:
-                self.dynamodb = boto3.resource("dynamodb")
+        self.dynamodb = get_dynamodb_resource(dynamodb_resource)
 
         self.table = self.dynamodb.Table(self.table_name)
         self.users_table = self.dynamodb.Table(self.users_table_name)
@@ -95,10 +86,7 @@ class CardService:
         # boto3.resource().meta.client はリソース層の型変換イベントハンドラーを含むため、
         # 低レベル DynamoDB JSON を二重シリアライズしてしまう。
         # 直接 boto3.client() を使うことで回避する。
-        if endpoint_url:
-            self._client = boto3.client("dynamodb", endpoint_url=endpoint_url)
-        else:
-            self._client = boto3.client("dynamodb")
+        self._client = get_dynamodb_client()
 
         # 【C-7: deck_id 存在・所有検証用】DeckService をオプション注入する。
         # 未注入時は使用時に遅延生成してキャッシュする（同一 dynamodb_resource を共有）。

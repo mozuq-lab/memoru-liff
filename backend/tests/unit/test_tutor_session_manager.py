@@ -504,7 +504,7 @@ class TestConstructor:
         assert sm.session_id == "sess1"
         assert sm.user_id == "user1"
 
-    @patch("services.tutor_session_manager.boto3")
+    @patch("utils.dynamodb_client.boto3")
     def test_creates_dynamodb_resource_with_endpoint_url(self, mock_boto3):
         """When DYNAMODB_ENDPOINT_URL is set, it should be used for DynamoDB resource."""
         from services.tutor_session_manager import DynamoDBSessionManager
@@ -522,7 +522,7 @@ class TestConstructor:
             "dynamodb", endpoint_url="http://localhost:8000"
         )
 
-    @patch("services.tutor_session_manager.boto3")
+    @patch("utils.dynamodb_client.boto3")
     def test_creates_dynamodb_resource_with_aws_endpoint_url(self, mock_boto3):
         """When AWS_ENDPOINT_URL is set, it should be used as fallback."""
         from services.tutor_session_manager import DynamoDBSessionManager
@@ -548,7 +548,7 @@ class TestConstructor:
                 "dynamodb", endpoint_url="http://localhost:4566"
             )
 
-    @patch("services.tutor_session_manager.boto3")
+    @patch("utils.dynamodb_client.boto3")
     def test_creates_dynamodb_resource_default(self, mock_boto3):
         """Without endpoint env vars, it should create default DynamoDB resource."""
         from services.tutor_session_manager import DynamoDBSessionManager

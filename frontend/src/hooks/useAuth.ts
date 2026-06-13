@@ -8,6 +8,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import type { User } from 'oidc-client-ts';
 import type { AuthUser } from '@/types';
 import { authService } from '@/services/auth';
+import { toError } from '@/utils/error';
 
 /**
  * 【ヘルパー】: oidc-client-ts の User を AuthUser へ変換する
@@ -71,7 +72,7 @@ export const useAuth = (): UseAuthReturn => {
       } catch (err) {
         // 【エラー処理】: 初期化エラーを状態に設定
         // 🔵 青信号: エラーハンドリングの仕様
-        setError(err instanceof Error ? err : new Error(String(err)));
+        setError(toError(err));
         setUser(null);
       } finally {
         // 【ローディング完了】: 初期化処理の完了を通知
@@ -108,7 +109,7 @@ export const useAuth = (): UseAuthReturn => {
     } catch (err) {
       // 【エラー処理】: ログインエラーを状態に設定
       // 🔵 青信号: エラーハンドリングの仕様
-      setError(err instanceof Error ? err : new Error(String(err)));
+      setError(toError(err));
       setIsLoading(false);
     }
   }, []);
@@ -132,7 +133,7 @@ export const useAuth = (): UseAuthReturn => {
     } catch (err) {
       // 【エラー処理】: ログアウトエラーを状態に設定
       // 🔵 青信号: エラーハンドリングの仕様
-      setError(err instanceof Error ? err : new Error(String(err)));
+      setError(toError(err));
     } finally {
       setIsLoading(false);
     }
@@ -167,7 +168,7 @@ export const useAuth = (): UseAuthReturn => {
     } catch (err) {
       // 【エラー処理】: リフレッシュエラーを状態に設定
       // 🔵 青信号: エラーハンドリングの仕様
-      setError(err instanceof Error ? err : new Error(String(err)));
+      setError(toError(err));
     }
   }, []);
 
