@@ -14,6 +14,26 @@ class Reference(BaseModel):
     value: str = Field(..., min_length=1, max_length=500)
 
 
+# タグ・参考情報の制約値（Create / Update リクエストで共有）。
+MAX_TAGS = 10
+MAX_TAG_LENGTH = 50
+MAX_REFERENCES = 5
+
+
+def normalize_tags(v: List[str]) -> List[str]:
+    """タグを検証・正規化する（最大件数チェック + 前後空白除去 + 長さ切り詰め）。"""
+    if len(v) > MAX_TAGS:
+        raise ValueError(f"Maximum {MAX_TAGS} tags allowed")
+    return [tag.strip()[:MAX_TAG_LENGTH] for tag in v if tag.strip()]
+
+
+def validate_references_limit(v: List[Reference]) -> List[Reference]:
+    """参考情報の最大件数を検証する。"""
+    if len(v) > MAX_REFERENCES:
+        raise ValueError(f"Maximum {MAX_REFERENCES} references allowed")
+    return v
+
+
 class CreateCardRequest(BaseModel):
     """Request model for creating a card."""
 
@@ -27,17 +47,13 @@ class CreateCardRequest(BaseModel):
     @classmethod
     def validate_tags(cls, v: List[str]) -> List[str]:
         """Validate tags."""
-        if len(v) > 10:
-            raise ValueError("Maximum 10 tags allowed")
-        return [tag.strip()[:50] for tag in v if tag.strip()]
+        return normalize_tags(v)
 
     @field_validator("references")
     @classmethod
     def validate_references(cls, v: List[Reference]) -> List[Reference]:
         """Validate references."""
-        if len(v) > 5:
-            raise ValueError("Maximum 5 references allowed")
-        return v
+        return validate_references_limit(v)
 
 
 class UpdateCardRequest(BaseModel):
@@ -60,9 +76,7 @@ class UpdateCardRequest(BaseModel):
         """Validate tags."""
         if v is None:
             return v
-        if len(v) > 10:
-            raise ValueError("Maximum 10 tags allowed")
-        return [tag.strip()[:50] for tag in v if tag.strip()]
+        return normalize_tags(v)
 
     @field_validator("references")
     @classmethod
@@ -70,9 +84,7 @@ class UpdateCardRequest(BaseModel):
         """Validate references."""
         if v is None:
             return v
-        if len(v) > 5:
-            raise ValueError("Maximum 5 references allowed")
-        return v
+        return validate_references_limit(v)
 
 
 class CardResponse(BaseModel):

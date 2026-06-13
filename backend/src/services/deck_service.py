@@ -9,13 +9,9 @@ from botocore.exceptions import ClientError
 
 from models.deck import Deck
 from utils.dynamodb_client import get_dynamodb_resource
+from utils.sentinel import UNSET as _UNSET
 
 logger = Logger()
-
-# Sentinel value to distinguish "not provided" from explicit None (null).
-# 【Sentinel 定数】: update_deck で description/color が省略された場合に「変更なし」を表現する。
-# 🔵 card_service.py と同一パターン (TASK-0085 参照)
-_UNSET = object()
 
 
 class DeckServiceError(Exception):

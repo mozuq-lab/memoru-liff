@@ -10,13 +10,11 @@ from botocore.exceptions import ClientError
 
 from models.card import Card, Reference
 from utils.dynamodb_client import get_dynamodb_client, get_dynamodb_resource
+from utils.sentinel import UNSET as _UNSET
 from .srs import calculate_next_review_boundary
 
 # 【ロガー設定】: TransactionCanceledException などの内部エラーをログ出力するために必要 (EARS-009)
 logger = Logger()
-
-# Sentinel value to distinguish "not provided" from explicit None (null)
-_UNSET = object()
 
 
 class CardServiceError(Exception):
