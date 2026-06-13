@@ -5,10 +5,10 @@ from datetime import datetime
 from datetime import timezone as dt_timezone
 from typing import Any, Dict, List, Optional
 
-import boto3
 from botocore.exceptions import ClientError
 
 from models.user import User
+from utils.dynamodb_client import get_dynamodb_client, get_dynamodb_resource
 
 
 class UserServiceError(Exception):
@@ -53,14 +53,7 @@ class UserService:
         """
         self.table_name = table_name or os.environ.get("USERS_TABLE", "memoru-users-dev")
 
-        endpoint_url = os.environ.get("DYNAMODB_ENDPOINT_URL") or os.environ.get("AWS_ENDPOINT_URL")
-        if dynamodb_resource:
-            self.dynamodb = dynamodb_resource
-        else:
-            if endpoint_url:
-                self.dynamodb = boto3.resource("dynamodb", endpoint_url=endpoint_url)
-            else:
-                self.dynamodb = boto3.resource("dynamodb")
+        self.dynamodb = get_dynamodb_resource(dynamodb_resource)
 
         self.table = self.dynamodb.Table(self.table_name)
 
@@ -68,10 +61,7 @@ class UserService:
         # boto3.resource().meta.client はリソース層の型変換イベントハンドラーを含むため、
         # 低レベル DynamoDB JSON ({"S": ...}) を二重シリアライズしてしまう。
         # 直接 boto3.client() を使うことで回避する (card_service.py と同一パターン)。
-        if endpoint_url:
-            self._client = boto3.client("dynamodb", endpoint_url=endpoint_url)
-        else:
-            self._client = boto3.client("dynamodb")
+        self._client = get_dynamodb_client()
 
     def get_user(self, user_id: str) -> User:
         """Get user by user_id.

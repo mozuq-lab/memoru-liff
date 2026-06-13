@@ -4,7 +4,6 @@ import os
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
-import boto3
 from aws_lambda_powertools import Logger
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
@@ -18,6 +17,7 @@ from models.review import (
     UndoRestoredState,
     UndoReviewResponse,
 )
+from utils.dynamodb_client import get_dynamodb_resource
 from .ai_service import ReviewSummary
 from .card_service import CardService, CardServiceError
 from .srs import ReviewHistoryEntry, SM2Result, add_review_history, calculate_next_review_boundary, calculate_sm2
@@ -73,14 +73,7 @@ class ReviewService:
             "REVIEWS_TABLE", "memoru-reviews-dev"
         )
 
-        if dynamodb_resource:
-            self.dynamodb = dynamodb_resource
-        else:
-            endpoint_url = os.environ.get("DYNAMODB_ENDPOINT_URL") or os.environ.get("AWS_ENDPOINT_URL")
-            if endpoint_url:
-                self.dynamodb = boto3.resource("dynamodb", endpoint_url=endpoint_url)
-            else:
-                self.dynamodb = boto3.resource("dynamodb")
+        self.dynamodb = get_dynamodb_resource(dynamodb_resource)
 
         self.cards_table = self.dynamodb.Table(self.cards_table_name)
         self.reviews_table = self.dynamodb.Table(self.reviews_table_name)

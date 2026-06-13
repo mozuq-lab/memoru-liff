@@ -10,7 +10,6 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-import boto3
 from aws_lambda_powertools import Logger
 from botocore.exceptions import ClientError
 
@@ -22,6 +21,7 @@ from models.tutor import (
 from services.prompts.tutor import format_cards_context, get_system_prompt
 from services.tutor_ai_service import clean_response_text, create_tutor_ai_service
 from services.tutor_session_factory import create_tutor_session_manager
+from utils.dynamodb_client import get_dynamodb_resource
 
 logger = Logger()
 
@@ -98,15 +98,7 @@ class TutorService:
             "TUTOR_SESSIONS_TABLE", "memoru-tutor-sessions-dev"
         )
 
-        endpoint_url = os.environ.get("DYNAMODB_ENDPOINT_URL") or os.environ.get(
-            "AWS_ENDPOINT_URL"
-        )
-        if dynamodb_resource:
-            self.dynamodb = dynamodb_resource
-        elif endpoint_url:
-            self.dynamodb = boto3.resource("dynamodb", endpoint_url=endpoint_url)
-        else:
-            self.dynamodb = boto3.resource("dynamodb")
+        self.dynamodb = get_dynamodb_resource(dynamodb_resource)
 
         self.table = self.dynamodb.Table(self.table_name)
 

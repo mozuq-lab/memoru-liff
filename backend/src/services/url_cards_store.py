@@ -20,9 +20,10 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
-import boto3
 from aws_lambda_powertools import Logger
 from botocore.exceptions import ClientError
+
+from utils.dynamodb_client import get_dynamodb_resource
 
 logger = Logger()
 
@@ -44,16 +45,7 @@ class UrlCardsStore:
         self.table_name = table_name or os.environ.get(
             "PROCESSED_EVENTS_TABLE", "memoru-processed-events-dev"
         )
-        if dynamodb_resource:
-            self.dynamodb = dynamodb_resource
-        else:
-            endpoint_url = os.environ.get("DYNAMODB_ENDPOINT_URL") or os.environ.get(
-                "AWS_ENDPOINT_URL"
-            )
-            if endpoint_url:
-                self.dynamodb = boto3.resource("dynamodb", endpoint_url=endpoint_url)
-            else:
-                self.dynamodb = boto3.resource("dynamodb")
+        self.dynamodb = get_dynamodb_resource(dynamodb_resource)
         self.table = self.dynamodb.Table(self.table_name)
 
     def store_pending_cards(
