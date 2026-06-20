@@ -129,13 +129,17 @@ export const CardsProvider = ({ children }: CardsProviderProps) => {
 
   // P2: ローカルな mutation も進行中の fetchCards の古いレスポンス（line 84）で
   //     打ち消されないよう世代を進める（DecksContext と同じ競合対策）。
+  // P3: 世代を進めると進行中 fetchCards の finally（line 91）が loading を解除できなく
+  //     なるため、ここで明示的に解除して残留を防ぐ（mutation 後はローカルデータが最新）。
   const addCard = useCallback((card: Card) => {
     cardsRequestIdRef.current++;
+    setIsCardsLoading(false);
     setCards(prev => [...prev, card]);
   }, []);
 
   const updateCard = useCallback((cardId: string, updates: Partial<Card>) => {
     cardsRequestIdRef.current++;
+    setIsCardsLoading(false);
     setCards(prev => prev.map(card =>
       card.card_id === cardId ? { ...card, ...updates } : card
     ));
@@ -143,6 +147,7 @@ export const CardsProvider = ({ children }: CardsProviderProps) => {
 
   const deleteCard = useCallback((cardId: string) => {
     cardsRequestIdRef.current++;
+    setIsCardsLoading(false);
     setCards(prev => prev.filter(card => card.card_id !== cardId));
   }, []);
 

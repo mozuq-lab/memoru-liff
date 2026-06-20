@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type ReactNode } from 'react';
+import { useState, useEffect, useRef, useCallback, type ReactNode } from 'react';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { Loading } from './Loading';
 import { Error } from './Error';
@@ -17,36 +17,52 @@ const LOGIN_REDIRECT_TIMEOUT_MS = 8000;
 export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
   const { isLoading, isAuthenticated, error, login } = useAuthContext();
   const loginAttemptedRef = useRef(false);
+  const timeoutRef = useRef<number | null>(null);
   const [loginError, setLoginError] = useState<string | null>(null);
 
+  // フォールバックタイマーを張り直す。login() が無言で進まない場合に、一定時間後
+  // エラー表示へ倒すための保険。
+  const startFallbackTimer = useCallback(() => {
+    if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current);
+    timeoutRef.current = window.setTimeout(() => {
+      setLoginError('ログインに失敗しました。時間をおいて再度お試しください。');
+    }, LOGIN_REDIRECT_TIMEOUT_MS);
+  }, []);
+
+  // 未認証が確定したら一度だけ自動ログインを開始し、フォールバックタイマーを張る。
+  // 【重要】(レビュー P2): login() は内部で setIsLoading(true) するため isLoading が
+  // 変化するが、この effect の cleanup でタイマーを消すと、リダイレクトが進まない
+  // ケースでフォールバックが即解除され無限ローディングへ戻る。そのため解除はこの
+  // effect では行わず、下の「認証成功・エラー時」専用 effect に委ねる。
   useEffect(() => {
-    // 認証済み・認証エラー発生時・既に試行済みのいずれかなら自動ログインしない。
     if (isLoading || isAuthenticated || error || loginAttemptedRef.current) {
       return;
     }
     loginAttemptedRef.current = true;
-
-    // 【リダイレクト遅延ガード】(M-25 / レビュー P2): signinRedirect が一定時間内に
-    // ブラウザ遷移を起こさない場合のフォールバック。useAuth.login は内部で例外を
-    // 握って rethrow しないため login() の .catch は発火しない。代わりにタイマーで
-    // 救済し、login が error をセットした場合は deps の error 変化に伴う cleanup で
-    // clearTimeout され、下の error 分岐（エラー表示）へ倒れる。
-    const timeoutId = window.setTimeout(() => {
-      setLoginError('ログインに失敗しました。時間をおいて再度お試しください。');
-    }, LOGIN_REDIRECT_TIMEOUT_MS);
-
+    startFallbackTimer();
     void login();
+  }, [isLoading, isAuthenticated, error, login, startFallbackTimer]);
 
-    // アンマウント時・isAuthenticated/error 変化時にタイマーを破棄し、認証成功後や
-    // エラー表示後に遅延エラーが誤発火するのを防ぐ。
-    return () => window.clearTimeout(timeoutId);
-  }, [isLoading, isAuthenticated, error, login]);
+  // 認証成功・認証エラー時、およびアンマウント時のみフォールバックタイマーを解除する
+  // （isLoading の変化では解除しない）。
+  useEffect(() => {
+    const clearTimer = () => {
+      if (timeoutRef.current !== null) {
+        window.clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+    };
+    if (isAuthenticated || error) {
+      clearTimer();
+    }
+    return clearTimer;
+  }, [isAuthenticated, error]);
 
-  // 【自動ログイン再試行】: 遅延エラーを消して login をやり直す。loginAttemptedRef は
-  // true のまま据え置き、effect による二重起動を防ぐ。失敗時は useAuth が error を
-  // セットし、下の error 分岐で表示される。
+  // 【自動ログイン再試行】: 遅延エラーを消し、フォールバックタイマーを張り直して login を
+  // やり直す。loginAttemptedRef は据え置き、自動ログイン effect の二重起動を防ぐ。
   const retryLogin = () => {
     setLoginError(null);
+    startFallbackTimer();
     void login();
   };
 

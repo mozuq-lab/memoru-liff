@@ -215,6 +215,44 @@ describe('ProtectedRoute', () => {
         vi.useRealTimers();
       }
     });
+
+    it('login 中に isLoading が変動してもフォールバックタイマーが維持されること', async () => {
+      // P2 回帰: login() が setIsLoading(true) で isLoading を変えても、タイマーを
+      // 解除せず 8 秒後にフォールバックが発火することを保証する（旧実装ではここで
+      // タイマーが clearTimeout され、無限ローディングへ戻っていた）。
+      vi.useFakeTimers();
+      try {
+        mockLogin.mockReturnValue(new Promise<void>(() => {}));
+        const baseAuth = {
+          isAuthenticated: false,
+          error: null,
+          login: mockLogin,
+          logout: vi.fn(),
+          user: null,
+          refreshToken: vi.fn(),
+        };
+        mockUseAuthContext.mockReturnValue({ ...baseAuth, isLoading: false });
+        const { rerender } = render(
+          <ProtectedRoute>
+            <div>Protected Content</div>
+          </ProtectedRoute>
+        );
+
+        // login 開始で isLoading が true→false と変動する状況を再現
+        mockUseAuthContext.mockReturnValue({ ...baseAuth, isLoading: true });
+        rerender(<ProtectedRoute><div>Protected Content</div></ProtectedRoute>);
+        mockUseAuthContext.mockReturnValue({ ...baseAuth, isLoading: false });
+        rerender(<ProtectedRoute><div>Protected Content</div></ProtectedRoute>);
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(8000);
+        });
+
+        expect(screen.getByText(/時間をおいて再度お試しください/)).toBeInTheDocument();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   describe('無限ループ防止', () => {
