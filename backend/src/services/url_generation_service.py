@@ -35,7 +35,11 @@ from services.flex_messages import (
     create_card_preview_carousel,
     create_url_generation_error_message,
 )
-from services.url_content_service import UrlContentService, ContentFetchError
+from services.url_content_service import (
+    UrlContentService,
+    ContentFetchError,
+    PageContent,
+)
 from services.content_chunker import chunk_content
 from services.ai_service import (
     create_ai_service,
@@ -44,6 +48,10 @@ from services.ai_service import (
     AIRateLimitError,
     AIProviderError,
     AIParseError,
+    GenerationResult,
+    CardType,
+    DifficultyLevel,
+    Language,
 )
 from services.url_cards_store import UrlCardsStore
 
@@ -95,6 +103,74 @@ class UrlGenerationTransientError(UrlGenerationError):
     """
 
 
+class EmptyContentError(Exception):
+    """ページからテキストを抽出できなかった（chunk 0 件）。
+
+    fetch_and_generate_cards が raise する。「テキスト抽出不可」は再実行しても
+    結果が変わらないため、呼び出し側は恒久エラー（HTTP 422 / permanent / 通知）
+    として扱う。
+    """
+
+
+def fetch_and_generate_cards(
+    url: str,
+    *,
+    card_type: CardType = "qa",
+    target_count: int = 10,
+    difficulty: DifficultyLevel = "medium",
+    language: Language = "ja",
+    content_service: UrlContentService | None = None,
+    profile_id: str | None = None,
+) -> tuple[PageContent, list[str], GenerationResult]:
+    """URL からページを取得し、chunk 化して AI カードを生成する共通パイプライン。
+
+    fetch → chunk →（空チェック）→ generate という「ハッピーパス」を一元化する。
+    REST ハンドラー（HTTP レスポンス）・SQS ワーカー（型付き例外）・レガシー保存
+    （LINE 通知）でエラーの表現方法が異なるため、本関数はエラー変換を行わず素の
+    例外をそのまま伝播させる。カード 0 件の扱いも呼び出し側の責務とする
+    （REST=422 / worker=permanent など方針が異なるため）。
+
+    既定の生成パラメータ（qa / 10 / medium / ja）は、生成オプション UI を持たない
+    LINE チャットフローの仕様。LIFF（REST）経路は呼び出し側が明示的に上書きする。
+
+    Args:
+        url: 生成元 URL（fetch_content 内で SSRF バリデーションされる）。
+        card_type: カードタイプ（qa/definition/cloze）。
+        target_count: 目標生成枚数。
+        difficulty: 難易度。
+        language: 出力言語。
+        content_service: 使用する UrlContentService。None の場合は既定生成
+            （REST は BrowserService を注入したインスタンスを渡す）。
+        profile_id: 認証付きページ取得用のブラウザプロファイル ID。
+
+    Returns:
+        (ページ内容, chunk テキスト列, 生成結果) のタプル。
+
+    Raises:
+        ContentFetchError: ページ取得・抽出に失敗。
+        EmptyContentError: テキストを抽出できなかった（chunk 0 件）。
+        AIServiceError（サブクラス含む）: AI 生成に失敗。
+    """
+    svc = content_service or UrlContentService()
+    page = svc.fetch_content(url, profile_id=profile_id)
+
+    chunks = chunk_content(page.text_content, page_title=page.title)
+    chunk_texts = [c.text for c in chunks]
+    if not chunk_texts:
+        raise EmptyContentError("No text extracted from page")
+
+    ai_service = create_ai_service()
+    result = ai_service.generate_cards_from_chunks(
+        chunks=chunk_texts,
+        card_type=card_type,
+        target_count=target_count,
+        difficulty=difficulty,
+        language=language,
+        page_title=page.title,
+    )
+    return page, chunk_texts, result
+
+
 @tracer.capture_method
 def generate_url_cards_core(
     user_id: str,
@@ -117,10 +193,10 @@ def generate_url_cards_core(
     """
     logger.info(f"Generating cards from URL for user: {user_id}, url: {url}")
 
-    # --- ページ取得 ---
+    # --- 取得 → chunk → 生成（共通パイプライン）---
+    # エラーは再試行可否で分類した型付き例外へ変換する。
     try:
-        content_service = UrlContentService()
-        page = content_service.fetch_content(url)
+        page, _chunk_texts, result = fetch_and_generate_cards(url)
     except ContentFetchError as e:
         # ネットワーク／タイムアウト等は再試行で成功し得る → transient。
         logger.warning(f"Content fetch error: {e}")
@@ -128,29 +204,12 @@ def generate_url_cards_core(
             f"Content fetch failed: {e}",
             user_message=str(e),
         ) from e
-
-    # --- コンテンツを chunk 化 ---
-    chunks = chunk_content(page.text_content, page_title=page.title)
-    chunk_texts = [c.text for c in chunks]
-
-    if not chunk_texts:
+    except EmptyContentError as e:
         # テキストを抽出できない＝再実行しても同じ → permanent。
         raise UrlGenerationPermanentError(
             "No text extracted from page",
             user_message="ページからテキストを抽出できませんでした。",
-        )
-
-    # --- カード生成 ---
-    try:
-        ai_service = create_ai_service()
-        result = ai_service.generate_cards_from_chunks(
-            chunks=chunk_texts,
-            card_type="qa",
-            target_count=10,
-            difficulty="medium",
-            language="ja",
-            page_title=page.title,
-        )
+        ) from e
     except (
         AITimeoutError,
         AIRateLimitError,

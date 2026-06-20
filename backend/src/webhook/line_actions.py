@@ -15,9 +15,7 @@ import boto3
 from aws_lambda_powertools import Logger, Tracer
 
 from models.card import Reference
-from services.ai_service import create_ai_service
 from services.card_service import CardNotFoundError
-from services.content_chunker import chunk_content
 from services.flex_messages import (
     create_answer_message,
     create_error_message,
@@ -26,8 +24,11 @@ from services.flex_messages import (
     create_url_generation_error_message,
     create_url_generation_progress_message,
 )
-from services.url_content_service import UrlContentService
-from services.url_generation_service import generate_and_push_url_cards
+from services.url_generation_service import (
+    EmptyContentError,
+    fetch_and_generate_cards,
+    generate_and_push_url_cards,
+)
 from utils.url_validator import UrlValidationError, validate_url
 from webhook import dependencies as deps
 
@@ -415,29 +416,18 @@ def handle_save_url_cards_legacy(
         return
 
     try:
-        # Re-fetch and generate
-        content_service = UrlContentService()
-        page = content_service.fetch_content(url)
-
-        chunks = chunk_content(page.text_content, page_title=page.title)
-        chunk_texts = [c.text for c in chunks]
-
-        if not chunk_texts:
+        # Re-fetch and generate（共通パイプライン fetch_and_generate_cards）。
+        # fetch→chunk→generate は REST / worker と共有。空コンテンツのみ専用メッセージで通知する。
+        try:
+            page, _chunk_texts, result = fetch_and_generate_cards(
+                url, target_count=count
+            )
+        except EmptyContentError:
             deps.line_service.reply_message(
                 reply_token,
                 [create_url_generation_error_message("テキストを抽出できませんでした。")],
             )
             return
-
-        ai_service = create_ai_service()
-        result = ai_service.generate_cards_from_chunks(
-            chunks=chunk_texts,
-            card_type="qa",
-            target_count=count,
-            difficulty="medium",
-            language="ja",
-            page_title=page.title,
-        )
 
         # Save each card
         saved_count = 0
