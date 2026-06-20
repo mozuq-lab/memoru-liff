@@ -10,7 +10,6 @@ from typing import Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 from aws_lambda_powertools import Logger
-from boto3.dynamodb.conditions import Key
 from models.stats import (
     ForecastDay,
     ForecastResponse,
@@ -18,7 +17,8 @@ from models.stats import (
     WeakCard,
     WeakCardsResponse,
 )
-from utils.dynamodb_client import get_dynamodb_resource
+from .card_repository import CardRepository
+from .review_repository import ReviewRepository
 
 logger = Logger()
 
@@ -135,55 +135,25 @@ class StatsService:
             "REVIEWS_TABLE", "memoru-reviews-dev"
         )
 
-        self.dynamodb = get_dynamodb_resource(dynamodb_resource)
-
-        self.cards_table = self.dynamodb.Table(self.cards_table_name)
-        self.reviews_table = self.dynamodb.Table(self.reviews_table_name)
+        # L-7 集約: 全件取得は Repository に委譲し、stats_service は集計に専念する
+        # （DynamoDB 直アクセス＋ページネーションループの二重実装を解消）。
+        self._card_repo = CardRepository(
+            table_name=self.cards_table_name,
+            dynamodb_resource=dynamodb_resource,
+            reviews_table_name=self.reviews_table_name,
+        )
+        self._review_repo = ReviewRepository(
+            table_name=self.reviews_table_name,
+            dynamodb_resource=dynamodb_resource,
+        )
 
     def _fetch_all_cards(self, user_id: str) -> List[Dict]:
-        """Fetch all cards for a user with pagination.
-
-        Args:
-            user_id: The user's ID.
-
-        Returns:
-            List of card items from DynamoDB.
-        """
-        cards: List[Dict] = []
-        query_kwargs = {
-            "KeyConditionExpression": Key("user_id").eq(user_id),
-        }
-        while True:
-            response = self.cards_table.query(**query_kwargs)
-            cards.extend(response.get("Items", []))
-            last_key = response.get("LastEvaluatedKey")
-            if not last_key:
-                break
-            query_kwargs["ExclusiveStartKey"] = last_key
-        return cards
+        """Fetch all cards for a user (CardRepository へ委譲)."""
+        return self._card_repo.scan_all_cards(user_id)
 
     def _fetch_all_reviews(self, user_id: str) -> List[Dict]:
-        """Fetch all reviews for a user with pagination.
-
-        Args:
-            user_id: The user's ID.
-
-        Returns:
-            List of review items from DynamoDB.
-        """
-        reviews: List[Dict] = []
-        query_kwargs = {
-            "IndexName": "user_id-reviewed_at-index",
-            "KeyConditionExpression": Key("user_id").eq(user_id),
-        }
-        while True:
-            response = self.reviews_table.query(**query_kwargs)
-            reviews.extend(response.get("Items", []))
-            last_key = response.get("LastEvaluatedKey")
-            if not last_key:
-                break
-            query_kwargs["ExclusiveStartKey"] = last_key
-        return reviews
+        """Fetch all reviews for a user (ReviewRepository へ委譲)."""
+        return self._review_repo.query_all_reviews(user_id)
 
     def get_stats(self, user_id: str, user_timezone: str = "UTC") -> StatsResponse:
         """Get learning statistics for a user.

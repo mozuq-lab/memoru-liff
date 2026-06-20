@@ -15,9 +15,7 @@ import boto3
 from aws_lambda_powertools import Logger, Tracer
 
 from models.card import Reference
-from services.ai_service import create_ai_service
 from services.card_service import CardNotFoundError
-from services.content_chunker import chunk_content
 from services.flex_messages import (
     create_answer_message,
     create_error_message,
@@ -26,8 +24,11 @@ from services.flex_messages import (
     create_url_generation_error_message,
     create_url_generation_progress_message,
 )
-from services.url_content_service import UrlContentService
-from services.url_generation_service import generate_and_push_url_cards
+from services.url_generation_service import (
+    EmptyContentError,
+    fetch_and_generate_cards,
+    generate_and_push_url_cards,
+)
 from utils.url_validator import UrlValidationError, validate_url
 from webhook import dependencies as deps
 
@@ -341,24 +342,7 @@ def handle_save_url_cards(
 
     references = [Reference(type="url", value=page_url)] if page_url else []
 
-    saved_count = 0
-    for card in cards:
-        front = str(card.get("front", "")).strip()
-        back = str(card.get("back", "")).strip()
-        if not front or not back:
-            continue
-        tags = card.get("suggested_tags") or card.get("tags") or []
-        try:
-            deps.card_service.create_card(
-                user_id=user_id,
-                front=front,
-                back=back,
-                tags=tags,
-                references=references,
-            )
-            saved_count += 1
-        except Exception as e:
-            logger.warning(f"Failed to save card: {e}")
+    saved_count = deps.card_service.bulk_create_cards(user_id, cards, references)
 
     # M-19: 全件保存に失敗した場合（DynamoDB / バリデーションエラー等）は
     # 「✅ 0枚のカードを保存しました！」という誤成功通知を出さず、エラーを通知する。
@@ -415,44 +399,29 @@ def handle_save_url_cards_legacy(
         return
 
     try:
-        # Re-fetch and generate
-        content_service = UrlContentService()
-        page = content_service.fetch_content(url)
-
-        chunks = chunk_content(page.text_content, page_title=page.title)
-        chunk_texts = [c.text for c in chunks]
-
-        if not chunk_texts:
+        # Re-fetch and generate（共通パイプライン fetch_and_generate_cards）。
+        # fetch→chunk→generate は REST / worker と共有。空コンテンツのみ専用メッセージで通知する。
+        try:
+            page, _chunk_texts, result = fetch_and_generate_cards(
+                url, target_count=count
+            )
+        except EmptyContentError:
             deps.line_service.reply_message(
                 reply_token,
                 [create_url_generation_error_message("テキストを抽出できませんでした。")],
             )
             return
 
-        ai_service = create_ai_service()
-        result = ai_service.generate_cards_from_chunks(
-            chunks=chunk_texts,
-            card_type="qa",
-            target_count=count,
-            difficulty="medium",
-            language="ja",
-            page_title=page.title,
+        # Save each card（GeneratedCard を dict 化して共通の一括作成へ委譲）。
+        card_dicts = [
+            {"front": c.front, "back": c.back, "suggested_tags": c.suggested_tags}
+            for c in result.cards[:count]
+        ]
+        saved_count = deps.card_service.bulk_create_cards(
+            user_id,
+            card_dicts,
+            [Reference(type="url", value=page.url)],
         )
-
-        # Save each card
-        saved_count = 0
-        for card in result.cards[:count]:
-            try:
-                deps.card_service.create_card(
-                    user_id=user_id,
-                    front=card.front,
-                    back=card.back,
-                    tags=card.suggested_tags,
-                    references=[Reference(type="url", value=page.url)],
-                )
-                saved_count += 1
-            except Exception as e:
-                logger.warning(f"Failed to save card: {e}")
 
         # M-19: 全件保存失敗時に「✅ 0枚のカードを保存しました！」という誤成功
         # 通知を出さない。レガシー経路は ref_key を持たないため再送（URL 再投稿）

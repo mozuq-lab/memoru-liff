@@ -10,8 +10,7 @@ import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as targets from 'aws-cdk-lib/aws-route53-targets';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import type { Construct } from 'constructs';
-
-type Environment = 'dev' | 'staging' | 'prod';
+import { Environment, exportName, isProdEnv, resourceName } from './naming';
 
 export interface KeycloakStackProps extends cdk.StackProps {
   environment: Environment;
@@ -40,7 +39,7 @@ export class KeycloakStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: KeycloakStackProps) {
     super(scope, id, props);
 
-    const isProd = props.environment === 'prod';
+    const isProd = isProdEnv(props.environment);
     // H-1: ALB ingress CIDR が指定された場合のみ受信を制限する（openListener を無効化して手動付与）。
     const restrictAlbIngress = !!props.albIngressCidr;
 
@@ -67,7 +66,7 @@ export class KeycloakStack extends cdk.Stack {
     // VPC and Networking
     // ============================================================
     this.vpc = new ec2.Vpc(this, 'Vpc', {
-      vpcName: `memoru-${props.environment}-vpc`,
+      vpcName: resourceName(props.environment, 'vpc'),
       ipAddresses: ec2.IpAddresses.cidr(props.vpcCidr ?? '10.0.0.0/16'),
       maxAzs: 2,
       natGateways: isProd ? 1 : 0,
@@ -91,7 +90,7 @@ export class KeycloakStack extends cdk.Stack {
     // Secrets Manager
     // ============================================================
     const dbSecret = new secretsmanager.Secret(this, 'DBSecret', {
-      secretName: `memoru-${props.environment}-keycloak-db-secret`,
+      secretName: resourceName(props.environment, 'keycloak-db-secret'),
       description: 'Keycloak database credentials',
       generateSecretString: {
         secretStringTemplate: JSON.stringify({ username: 'keycloak' }),
@@ -106,7 +105,7 @@ export class KeycloakStack extends cdk.Stack {
     });
 
     const keycloakAdminSecret = new secretsmanager.Secret(this, 'KeycloakAdminSecret', {
-      secretName: `memoru-${props.environment}-keycloak-admin-secret`,
+      secretName: resourceName(props.environment, 'keycloak-admin-secret'),
       description: 'Keycloak admin credentials',
       generateSecretString: {
         secretStringTemplate: JSON.stringify({ username: keycloakAdminUser }),
@@ -125,12 +124,12 @@ export class KeycloakStack extends cdk.Stack {
     // ============================================================
     const dbSecurityGroup = new ec2.SecurityGroup(this, 'RDSSecurityGroup', {
       vpc: this.vpc,
-      securityGroupName: `memoru-${props.environment}-keycloak-rds-sg`,
+      securityGroupName: resourceName(props.environment, 'keycloak-rds-sg'),
       description: 'Security group for Keycloak RDS',
     });
 
     this.dbInstance = new rds.DatabaseInstance(this, 'Database', {
-      instanceIdentifier: `memoru-${props.environment}-keycloak-db`,
+      instanceIdentifier: resourceName(props.environment, 'keycloak-db'),
       engine: rds.DatabaseInstanceEngine.postgres({
         version: rds.PostgresEngineVersion.VER_17,
       }),
@@ -160,7 +159,7 @@ export class KeycloakStack extends cdk.Stack {
     // ECS Cluster
     // ============================================================
     const cluster = new ecs.Cluster(this, 'Cluster', {
-      clusterName: `memoru-${props.environment}-keycloak-cluster`,
+      clusterName: resourceName(props.environment, 'keycloak-cluster'),
       vpc: this.vpc,
       containerInsightsV2: isProd ? ecs.ContainerInsights.ENABLED : ecs.ContainerInsights.DISABLED,
     });
@@ -169,7 +168,7 @@ export class KeycloakStack extends cdk.Stack {
     // Log Group
     // ============================================================
     const logGroup = new logs.LogGroup(this, 'LogGroup', {
-      logGroupName: `/ecs/memoru-${props.environment}-keycloak`,
+      logGroupName: `/ecs/${resourceName(props.environment, 'keycloak')}`,
       retention: isProd ? logs.RetentionDays.THREE_MONTHS : logs.RetentionDays.TWO_WEEKS,
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
@@ -187,7 +186,7 @@ export class KeycloakStack extends cdk.Stack {
     const service = new ecs_patterns.ApplicationLoadBalancedFargateService(
       this, 'KeycloakService', {
         cluster,
-        serviceName: `memoru-${props.environment}-keycloak-service`,
+        serviceName: resourceName(props.environment, 'keycloak-service'),
         cpu: 512,
         memoryLimitMiB: 1024,
         desiredCount: 1,
@@ -319,7 +318,7 @@ export class KeycloakStack extends cdk.Stack {
     // ============================================================
     new cdk.CfnOutput(this, 'VpcId', {
       value: this.vpc.vpcId,
-      exportName: `memoru-${props.environment}-vpc-id`,
+      exportName: exportName(props.environment, 'vpc-id'),
       description: 'VPC ID',
     });
 
@@ -333,31 +332,31 @@ export class KeycloakStack extends cdk.Stack {
 
     new cdk.CfnOutput(this, 'ALBDNSName', {
       value: service.loadBalancer.loadBalancerDnsName,
-      exportName: `memoru-${props.environment}-keycloak-alb-dns`,
+      exportName: exportName(props.environment, 'keycloak-alb-dns'),
       description: 'ALB DNS Name',
     });
 
     new cdk.CfnOutput(this, 'RDSEndpoint', {
       value: this.dbInstance.instanceEndpoint.hostname,
-      exportName: `memoru-${props.environment}-keycloak-db-endpoint`,
+      exportName: exportName(props.environment, 'keycloak-db-endpoint'),
       description: 'RDS Endpoint',
     });
 
     new cdk.CfnOutput(this, 'ECSClusterArn', {
       value: cluster.clusterArn,
-      exportName: `memoru-${props.environment}-keycloak-cluster-arn`,
+      exportName: exportName(props.environment, 'keycloak-cluster-arn'),
       description: 'ECS Cluster ARN',
     });
 
     new cdk.CfnOutput(this, 'DBSecretArn', {
       value: dbSecret.secretArn,
-      exportName: `memoru-${props.environment}-keycloak-db-secret-arn`,
+      exportName: exportName(props.environment, 'keycloak-db-secret-arn'),
       description: 'Database Secret ARN',
     });
 
     new cdk.CfnOutput(this, 'KeycloakAdminSecretArn', {
       value: keycloakAdminSecret.secretArn,
-      exportName: `memoru-${props.environment}-keycloak-admin-secret-arn`,
+      exportName: exportName(props.environment, 'keycloak-admin-secret-arn'),
       description: 'Keycloak Admin Secret ARN',
     });
   }

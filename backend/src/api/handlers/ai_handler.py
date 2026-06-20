@@ -5,9 +5,8 @@ import json
 from aws_lambda_powertools import Logger, Tracer
 from aws_lambda_powertools.event_handler import Response, content_types
 from aws_lambda_powertools.event_handler.api_gateway import Router
-from pydantic import ValidationError
 
-from api.shared import get_user_id_from_context, map_ai_error_to_http, make_validation_error_response
+from api.shared import get_user_id_from_context, map_ai_error_to_http, parse_json_body
 from services.card_service import CardService
 from models.generate import (
     GenerateCardsRequest,
@@ -28,8 +27,11 @@ from services.ai_service import (
     AIServiceError,
 )
 from services.browser_service import BrowserService
-from services.content_chunker import chunk_content
 from services.url_content_service import ContentFetchError, UrlContentService
+from services.url_generation_service import (
+    fetch_and_generate_cards,
+    EmptyContentError,
+)
 
 logger = Logger()
 tracer = Tracer()
@@ -43,24 +45,10 @@ def generate_cards():
     user_id = get_user_id_from_context(router)
     logger.info("Generating cards", extra={"user_id": user_id})
 
-    try:
-        body = router.current_event.json_body
-        if not isinstance(body, dict):
-            return Response(
-                status_code=400,
-                content_type=content_types.APPLICATION_JSON,
-                body=json.dumps({"error": "Request body must be a JSON object"}),
-            )
-        request = GenerateCardsRequest(**body)
-    except ValidationError as e:
-        logger.warning("Validation error", extra={"error": str(e)})
-        return make_validation_error_response(e)
-    except json.JSONDecodeError:
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid JSON body"}),
-        )
+    parsed = parse_json_body(router, GenerateCardsRequest)
+    if isinstance(parsed, Response):
+        return parsed
+    request = parsed
 
     try:
         ai_service = create_ai_service()
@@ -107,24 +95,10 @@ def generate_from_url():
     user_id = get_user_id_from_context(router)
     logger.info("Generating cards from URL", extra={"user_id": user_id})
 
-    try:
-        body = router.current_event.json_body
-        if not isinstance(body, dict):
-            return Response(
-                status_code=400,
-                content_type=content_types.APPLICATION_JSON,
-                body=json.dumps({"error": "Request body must be a JSON object"}),
-            )
-        request = GenerateFromUrlRequest(**body)
-    except ValidationError as e:
-        logger.warning("Validation error", extra={"error": str(e)})
-        return make_validation_error_response(e)
-    except json.JSONDecodeError:
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid JSON body"}),
-        )
+    parsed = parse_json_body(router, GenerateFromUrlRequest)
+    if isinstance(parsed, Response):
+        return parsed
+    request = parsed
 
     # Duplicate URL detection warning.
     # C-5: use the paginated reference-URL lookup so cards beyond the first
@@ -161,12 +135,18 @@ def generate_from_url():
             ),
         )
 
-    # Fetch page content (no profile_id path; SPA fallback also disabled and
-    # will surface as a 422 from the BrowserFetchError → ContentFetchError chain).
+    # Fetch → chunk → generate（共通パイプライン fetch_and_generate_cards）。
+    # エラー表現は本ハンドラー固有（granular な HTTP ステータス）なので、ここで変換する。
+    # profile_id は上で 501 拒否済みのため常に None（SPA fallback も無効化されており、
+    # BrowserFetchError → ContentFetchError チェーンで 422/502 に落ちる）。
     try:
-        content_service = UrlContentService(browser_service=BrowserService())
-        page = content_service.fetch_content(
+        page, chunk_texts, result = fetch_and_generate_cards(
             request.url,
+            card_type=request.card_type,
+            target_count=request.target_count,
+            difficulty=request.difficulty,
+            language=request.language,
+            content_service=UrlContentService(browser_service=BrowserService()),
             profile_id=None,
         )
     except ContentFetchError as e:
@@ -185,77 +165,60 @@ def generate_from_url():
             content_type=content_types.APPLICATION_JSON,
             body=json.dumps({"error": error_msg}),
         )
-
-    # Chunk content
-    chunks = chunk_content(page.text_content, page_title=page.title)
-    chunk_texts = [c.text for c in chunks]
-
-    if not chunk_texts:
+    except EmptyContentError:
         return Response(
             status_code=422,
             content_type=content_types.APPLICATION_JSON,
             body=json.dumps({"error": "Could not extract meaningful text content from the page"}),
         )
-
-    # Generate cards
-    try:
-        ai_service = create_ai_service()
-        result = ai_service.generate_cards_from_chunks(
-            chunks=chunk_texts,
-            card_type=request.card_type,
-            target_count=request.target_count,
-            difficulty=request.difficulty,
-            language=request.language,
-            page_title=page.title,
-        )
-        if not result.cards:
-            return Response(
-                status_code=422,
-                content_type=content_types.APPLICATION_JSON,
-                body=json.dumps({"error": "Failed to generate cards from the page content"}),
-            )
-
-        logger.info(
-            "URL card generation succeeded",
-            extra={
-                "model": result.model_used,
-                "cards": len(result.cards),
-                "chunks": len(chunk_texts),
-                "time_ms": result.processing_time_ms,
-            },
-        )
-
-        response = GenerateFromUrlResponse(
-            generated_cards=[
-                GeneratedCardResponse(
-                    front=card.front,
-                    back=card.back,
-                    suggested_tags=card.suggested_tags,
-                )
-                for card in result.cards
-            ],
-            generation_info=UrlGenerationInfoResponse(
-                model_used=result.model_used,
-                processing_time_ms=result.processing_time_ms,
-                fetch_method=page.fetch_method,
-                chunk_count=len(chunk_texts),
-                content_length=len(page.text_content),
-            ),
-            page_info=PageInfoResponse(
-                url=page.url,
-                title=page.title,
-                fetched_at=page.fetched_at,
-            ),
-            warning=duplicate_warning,
-        )
-        return response.model_dump(mode="json", exclude_none=True)
-
     except AIServiceError as e:
         logger.warning("AI service error", extra={"user_id": user_id, "error_type": type(e).__name__, "error": str(e)})
         return map_ai_error_to_http(e)
     except Exception as e:
         logger.error("Error generating cards from URL", extra={"error": str(e)})
         raise
+
+    if not result.cards:
+        return Response(
+            status_code=422,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": "Failed to generate cards from the page content"}),
+        )
+
+    logger.info(
+        "URL card generation succeeded",
+        extra={
+            "model": result.model_used,
+            "cards": len(result.cards),
+            "chunks": len(chunk_texts),
+            "time_ms": result.processing_time_ms,
+        },
+    )
+
+    response = GenerateFromUrlResponse(
+        generated_cards=[
+            GeneratedCardResponse(
+                front=card.front,
+                back=card.back,
+                suggested_tags=card.suggested_tags,
+            )
+            for card in result.cards
+        ],
+        generation_info=UrlGenerationInfoResponse(
+            model_used=result.model_used,
+            processing_time_ms=result.processing_time_ms,
+            fetch_method=page.fetch_method,
+            chunk_count=len(chunk_texts),
+            content_length=len(page.text_content),
+        ),
+        page_info=PageInfoResponse(
+            url=page.url,
+            title=page.title,
+            fetched_at=page.fetched_at,
+        ),
+        warning=duplicate_warning,
+    )
+    return response.model_dump(mode="json", exclude_none=True)
 
 
 @router.post("/cards/refine")
@@ -265,24 +228,10 @@ def refine_card():
     user_id = get_user_id_from_context(router)
     logger.info("Refining card", extra={"user_id": user_id})
 
-    try:
-        body = router.current_event.json_body
-        if not isinstance(body, dict):
-            return Response(
-                status_code=400,
-                content_type=content_types.APPLICATION_JSON,
-                body=json.dumps({"error": "Request body must be a JSON object"}),
-            )
-        request = RefineCardRequest(**body)
-    except ValidationError as e:
-        logger.warning("Validation error", extra={"error": str(e)})
-        return make_validation_error_response(e)
-    except json.JSONDecodeError:
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid JSON body"}),
-        )
+    parsed = parse_json_body(router, RefineCardRequest)
+    if isinstance(parsed, Response):
+        return parsed
+    request = parsed
 
     try:
         ai_service = create_ai_service()

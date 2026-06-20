@@ -6,9 +6,8 @@ from aws_lambda_powertools import Logger, Tracer
 from aws_lambda_powertools.event_handler import Response, content_types
 from aws_lambda_powertools.event_handler.api_gateway import Router
 from aws_lambda_powertools.event_handler.exceptions import NotFoundError
-from pydantic import ValidationError
 
-from api.shared import get_user_id_from_context, make_validation_error_response
+from api.shared import get_user_id_from_context, parse_json_body
 from models.deck import CreateDeckRequest, UpdateDeckRequest, DeckListResponse
 from services.deck_service import (
     DeckService,
@@ -30,24 +29,10 @@ def create_deck():
     user_id = get_user_id_from_context(router)
     logger.info("Creating deck", extra={"user_id": user_id})
 
-    try:
-        body = router.current_event.json_body
-        if not isinstance(body, dict):
-            return Response(
-                status_code=400,
-                content_type=content_types.APPLICATION_JSON,
-                body=json.dumps({"error": "Request body must be a JSON object"}),
-            )
-        request = CreateDeckRequest(**body)
-    except ValidationError as e:
-        logger.warning("Validation error", extra={"error": str(e)})
-        return make_validation_error_response(e)
-    except json.JSONDecodeError:
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid JSON body"}),
-        )
+    parsed = parse_json_body(router, CreateDeckRequest)
+    if isinstance(parsed, Response):
+        return parsed
+    request = parsed
 
     try:
         deck = deck_service.create_deck(
@@ -108,32 +93,13 @@ def update_deck(deck_id: str):
     user_id = get_user_id_from_context(router)
     logger.info("Updating deck", extra={"deck_id": deck_id, "user_id": user_id})
 
-    try:
-        # 【バリデーション + Sentinel 判別】: Pydantic でフォーマット検証し、
-        # model_fields_set で送信されたフィールドを判別する。
-        # raw body の key 存在チェックで null/未送信を判別する（Pydantic は
-        # null と未送信を区別できないため）。
-        body = router.current_event.json_body
-        if not isinstance(body, dict):
-            return Response(
-                status_code=400,
-                content_type=content_types.APPLICATION_JSON,
-                body=json.dumps({"error": "Request body must be a JSON object"}),
-            )
-        # 【Pydantic バリデーション】: color フォーマット等の検証を実行。
-        # model_fields_set でどのフィールドが明示的に送信されたかを取得できるが、
-        # null/未送信の判別には raw body の key 存在チェックが必要。
-        validated = UpdateDeckRequest.model_validate(body)
-        _ = validated.model_fields_set  # 送信されたフィールドセットを取得可能
-    except ValidationError as e:
-        logger.warning("Validation error", extra={"error": str(e)})
-        return make_validation_error_response(e)
-    except json.JSONDecodeError:
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid JSON body"}),
-        )
+    # 【Pydantic バリデーション】: color フォーマット等を検証（共通ヘルパー）。
+    parsed = parse_json_body(router, UpdateDeckRequest)
+    if isinstance(parsed, Response):
+        return parsed
+    # 【Sentinel 判別】: 検証済みモデルでは null と未送信を区別できないため、raw body の
+    # key 存在チェックを使う。json_body は cached property なので再パースは発生しない。
+    body = router.current_event.json_body
 
     try:
         # 【Sentinel パターン適用】: JSON body の key 存在チェックで null/未送信を判別する

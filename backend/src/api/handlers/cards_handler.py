@@ -7,9 +7,8 @@ from aws_lambda_powertools import Logger, Tracer
 from aws_lambda_powertools.event_handler import Response, content_types
 from aws_lambda_powertools.event_handler.api_gateway import Router
 from aws_lambda_powertools.event_handler.exceptions import NotFoundError
-from pydantic import ValidationError
 
-from api.shared import get_user_id_from_context, make_validation_error_response
+from api.shared import get_user_id_from_context, parse_json_body
 from models.card import CreateCardRequest, UpdateCardRequest, CardListResponse
 from services.user_service import UserService
 from services.card_service import (
@@ -72,24 +71,10 @@ def create_card():
     user_id = get_user_id_from_context(router)
     logger.info("Creating card", extra={"user_id": user_id})
 
-    try:
-        body = router.current_event.json_body
-        if not isinstance(body, dict):
-            return Response(
-                status_code=400,
-                content_type=content_types.APPLICATION_JSON,
-                body=json.dumps({"error": "Request body must be a JSON object"}),
-            )
-        request = CreateCardRequest(**body)
-    except ValidationError as e:
-        logger.warning("Validation error", extra={"error": str(e)})
-        return make_validation_error_response(e)
-    except json.JSONDecodeError:
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid JSON body"}),
-        )
+    parsed = parse_json_body(router, CreateCardRequest)
+    if isinstance(parsed, Response):
+        return parsed
+    request = parsed
 
     try:
         user_service.get_or_create_user(user_id)
@@ -149,24 +134,13 @@ def update_card(card_id: str):
     user_id = get_user_id_from_context(router)
     logger.info("Updating card", extra={"card_id": card_id, "user_id": user_id})
 
-    try:
-        body = router.current_event.json_body
-        if not isinstance(body, dict):
-            return Response(
-                status_code=400,
-                content_type=content_types.APPLICATION_JSON,
-                body=json.dumps({"error": "Request body must be a JSON object"}),
-            )
-        request = UpdateCardRequest(**body)
-    except ValidationError as e:
-        logger.warning("Validation error", extra={"error": str(e)})
-        return make_validation_error_response(e)
-    except json.JSONDecodeError:
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid JSON body"}),
-        )
+    parsed = parse_json_body(router, UpdateCardRequest)
+    if isinstance(parsed, Response):
+        return parsed
+    request = parsed
+    # Sentinel 判別: 検証済みモデルでは null と未送信を区別できないため、raw body の
+    # key 存在チェックを使う。json_body は cached property なので再パースは発生しない。
+    body = router.current_event.json_body
 
     try:
         # Determine deck_id: distinguish JSON null from missing key

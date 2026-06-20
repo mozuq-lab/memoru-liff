@@ -121,6 +121,73 @@ class TestInlineWrapper:
         patched["line"].push_message.assert_called_once()
 
 
+class TestFetchAndGenerateCards:
+    """fetch → chunk → generate を一元化した共通パイプライン。
+
+    エラー変換は呼び出し側に委ねるため、本関数は素の例外を伝播する。
+    """
+
+    def test_returns_page_chunks_and_result(self, patched):
+        page, chunk_texts, result = svc.fetch_and_generate_cards(
+            "https://example.com/a"
+        )
+        assert page.url == "https://example.com/a"
+        assert chunk_texts  # chunk が 1 つ以上
+        assert len(result.cards) == 3
+
+    def test_empty_text_raises_empty_content_error(self, patched):
+        patched["fetch"].return_value = _FakePage(text_content="   ")
+        with pytest.raises(svc.EmptyContentError):
+            svc.fetch_and_generate_cards("https://example.com/a")
+
+    def test_content_fetch_error_propagates(self, patched):
+        # 呼び出し側で HTTP / 通知 / 型付き例外へ変換できるよう、素の例外を伝播。
+        patched["fetch"].side_effect = ContentFetchError("network down")
+        with pytest.raises(ContentFetchError):
+            svc.fetch_and_generate_cards("https://example.com/a")
+
+    def test_ai_error_propagates(self, patched):
+        patched["ai"].generate_cards_from_chunks.side_effect = AIParseError("bad json")
+        with pytest.raises(AIParseError):
+            svc.fetch_and_generate_cards("https://example.com/a")
+
+    def test_no_cards_does_not_raise(self, patched):
+        # カード 0 件の扱いは呼び出し側の責務（REST=422 / worker=permanent 等）。
+        patched["ai"].generate_cards_from_chunks.return_value = _result_with_cards(0)
+        _, _, result = svc.fetch_and_generate_cards("https://example.com/a")
+        assert result.cards == []
+
+    def test_passes_generation_params(self, patched):
+        svc.fetch_and_generate_cards(
+            "https://example.com/a",
+            card_type="cloze",
+            target_count=5,
+            difficulty="hard",
+            language="en",
+        )
+        _, kwargs = patched["ai"].generate_cards_from_chunks.call_args
+        assert kwargs["card_type"] == "cloze"
+        assert kwargs["target_count"] == 5
+        assert kwargs["difficulty"] == "hard"
+        assert kwargs["language"] == "en"
+
+    def test_default_generation_params(self, patched):
+        # 既定値は LINE フローの仕様（qa / 10 / medium / ja）を維持する。
+        svc.fetch_and_generate_cards("https://example.com/a")
+        _, kwargs = patched["ai"].generate_cards_from_chunks.call_args
+        assert kwargs["card_type"] == "qa"
+        assert kwargs["target_count"] == 10
+        assert kwargs["difficulty"] == "medium"
+        assert kwargs["language"] == "ja"
+
+    def test_uses_provided_content_service(self, patched):
+        custom = MagicMock()
+        custom.fetch_content.return_value = _FakePage()
+        svc.fetch_and_generate_cards("https://example.com/a", content_service=custom)
+        custom.fetch_content.assert_called_once()
+        patched["fetch"].assert_not_called()
+
+
 class TestNotifyHelper:
     def test_notify_failure_swallows_push_error(self, monkeypatch):
         line = MagicMock()

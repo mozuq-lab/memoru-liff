@@ -64,9 +64,9 @@ class TestGenerateFromUrlProfileIdDisabled:
         ) as mock_url_cls, patch(
             "api.handlers.ai_handler.BrowserService"
         ), patch(
-            "api.handlers.ai_handler.create_ai_service"
+            "services.url_generation_service.create_ai_service"
         ) as mock_ai_create, patch(
-            "api.handlers.ai_handler.chunk_content"
+            "services.url_generation_service.chunk_content"
         ) as mock_chunk, patch(
             "api.handlers.ai_handler.CardService"
         ) as mock_card_service_cls:
@@ -119,9 +119,9 @@ class TestGenerateFromUrlDuplicateWarning:
         ) as mock_url_cls, patch(
             "api.handlers.ai_handler.BrowserService"
         ), patch(
-            "api.handlers.ai_handler.create_ai_service"
+            "services.url_generation_service.create_ai_service"
         ) as mock_ai_create, patch(
-            "api.handlers.ai_handler.chunk_content"
+            "services.url_generation_service.chunk_content"
         ) as mock_chunk, patch(
             "api.handlers.ai_handler.CardService"
         ) as mock_card_service_cls:

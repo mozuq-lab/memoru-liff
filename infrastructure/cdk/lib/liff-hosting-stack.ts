@@ -6,8 +6,7 @@ import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as targets from 'aws-cdk-lib/aws-route53-targets';
 import type { Construct } from 'constructs';
-
-type Environment = 'dev' | 'staging' | 'prod';
+import { Environment, exportName, isProdEnv } from './naming';
 
 export interface LiffHostingStackProps extends cdk.StackProps {
   environment: Environment;
@@ -34,7 +33,7 @@ export class LiffHostingStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: LiffHostingStackProps) {
     super(scope, id, props);
 
-    const isProd = props.environment === 'prod';
+    const isProd = isProdEnv(props.environment);
 
     // Validate: custom domain requires certificate
     if (props.domainName && !props.certificateArn) {
@@ -258,25 +257,25 @@ export class LiffHostingStack extends cdk.Stack {
     // ============================================================
     new cdk.CfnOutput(this, 'BucketName', {
       value: this.bucket.bucketName,
-      exportName: `memoru-${props.environment}-liff-bucket`,
+      exportName: exportName(props.environment, 'liff-bucket'),
       description: 'S3 Bucket name for LIFF app',
     });
 
     new cdk.CfnOutput(this, 'BucketArn', {
       value: this.bucket.bucketArn,
-      exportName: `memoru-${props.environment}-liff-bucket-arn`,
+      exportName: exportName(props.environment, 'liff-bucket-arn'),
       description: 'S3 Bucket ARN',
     });
 
     new cdk.CfnOutput(this, 'DistributionId', {
       value: this.distribution.distributionId,
-      exportName: `memoru-${props.environment}-liff-distribution-id`,
+      exportName: exportName(props.environment, 'liff-distribution-id'),
       description: 'CloudFront Distribution ID',
     });
 
     new cdk.CfnOutput(this, 'DistributionDomainName', {
       value: this.distribution.distributionDomainName,
-      exportName: `memoru-${props.environment}-liff-distribution-domain`,
+      exportName: exportName(props.environment, 'liff-distribution-domain'),
       description: 'CloudFront Distribution Domain Name',
     });
 
@@ -285,7 +284,7 @@ export class LiffHostingStack extends cdk.Stack {
       : `https://${this.distribution.distributionDomainName}`;
     new cdk.CfnOutput(this, 'LiffUrl', {
       value: liffUrl,
-      exportName: `memoru-${props.environment}-liff-url`,
+      exportName: exportName(props.environment, 'liff-url'),
       description: 'LIFF Application URL',
     });
 

@@ -6,9 +6,8 @@ from aws_lambda_powertools import Logger, Tracer
 from aws_lambda_powertools.event_handler import Response, content_types
 from aws_lambda_powertools.event_handler.api_gateway import Router
 from aws_lambda_powertools.event_handler.exceptions import NotFoundError
-from pydantic import ValidationError
 
-from api.shared import get_user_id_from_context, make_validation_error_response
+from api.shared import get_user_id_from_context, parse_json_body
 from models.review import ReviewRequest
 from services.card_service import CardNotFoundError
 from services.review_service import (
@@ -68,24 +67,10 @@ def submit_review(card_id: str):
     user_id = get_user_id_from_context(router)
     logger.info("Submitting review", extra={"card_id": card_id, "user_id": user_id})
 
-    try:
-        body = router.current_event.json_body
-        if not isinstance(body, dict):
-            return Response(
-                status_code=400,
-                content_type=content_types.APPLICATION_JSON,
-                body=json.dumps({"error": "Request body must be a JSON object"}),
-            )
-        request = ReviewRequest(**body)
-    except ValidationError as e:
-        logger.warning("Validation error", extra={"error": str(e)})
-        return make_validation_error_response(e)
-    except json.JSONDecodeError:
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid JSON body"}),
-        )
+    parsed = parse_json_body(router, ReviewRequest)
+    if isinstance(parsed, Response):
+        return parsed
+    request = parsed
 
     try:
         # Get user settings for day boundary normalization
