@@ -337,7 +337,10 @@ class TestGetForecast:
 
     def test_get_forecast_past_due_counts_as_today(self, stats_service, dynamodb_tables):
         """Test that past-due cards are counted as today."""
-        today = date.today()
+        # get_forecast の既定 user_timezone は "UTC" のため「今日」も UTC 基準。
+        # date.today()（ローカル日付）と比較すると JST 0-9 時など UTC とローカルの
+        # 日付がずれる時間帯で flaky になるため、サービスと同じ UTC の今日を使う。
+        today = datetime.now(timezone.utc).date()
         past = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
 
         _put_card(dynamodb_tables, "user-1", "card-1",
@@ -390,6 +393,8 @@ class TestGetForecast:
 
     def test_get_forecast_first_date_is_today(self, stats_service):
         """Test that the first forecast date is today."""
-        today = date.today()
+        # get_forecast の既定 user_timezone は "UTC"。UTC 基準の今日と比較する
+        # （date.today() のローカル日付だと UTC とずれる時間帯で flaky になる）。
+        today = datetime.now(timezone.utc).date()
         result = stats_service.get_forecast("user-1", days=7)
         assert result.forecast[0].date == today.isoformat()
