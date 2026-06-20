@@ -139,6 +139,7 @@ class TestHandleSaveUrlCards:
             "saved": False,
         }
         mock_store.mark_saved.return_value = True
+        mock_card_service.bulk_create_cards.return_value = 2
 
         with patch("webhook.line_actions.fetch_and_generate_cards") as mock_pipeline:
             handle_save_url_cards(
@@ -150,7 +151,10 @@ class TestHandleSaveUrlCards:
             # No re-generation, no re-fetch（統合パイプラインを呼ばない）。
             mock_pipeline.assert_not_called()
 
-        assert mock_card_service.create_card.call_count == 2
+        # ストアのカードを共通の一括作成へ委譲する（再生成しない）。
+        mock_card_service.bulk_create_cards.assert_called_once()
+        passed_cards = mock_card_service.bulk_create_cards.call_args.args[1]
+        assert len(passed_cards) == 2
         mock_line_service.reply_message.assert_called_once()
         reply = mock_line_service.reply_message.call_args.args[1]
         assert "2枚" in reply[0]["text"]

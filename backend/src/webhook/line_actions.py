@@ -342,24 +342,7 @@ def handle_save_url_cards(
 
     references = [Reference(type="url", value=page_url)] if page_url else []
 
-    saved_count = 0
-    for card in cards:
-        front = str(card.get("front", "")).strip()
-        back = str(card.get("back", "")).strip()
-        if not front or not back:
-            continue
-        tags = card.get("suggested_tags") or card.get("tags") or []
-        try:
-            deps.card_service.create_card(
-                user_id=user_id,
-                front=front,
-                back=back,
-                tags=tags,
-                references=references,
-            )
-            saved_count += 1
-        except Exception as e:
-            logger.warning(f"Failed to save card: {e}")
+    saved_count = deps.card_service.bulk_create_cards(user_id, cards, references)
 
     # M-19: 全件保存に失敗した場合（DynamoDB / バリデーションエラー等）は
     # 「✅ 0枚のカードを保存しました！」という誤成功通知を出さず、エラーを通知する。
@@ -429,20 +412,16 @@ def handle_save_url_cards_legacy(
             )
             return
 
-        # Save each card
-        saved_count = 0
-        for card in result.cards[:count]:
-            try:
-                deps.card_service.create_card(
-                    user_id=user_id,
-                    front=card.front,
-                    back=card.back,
-                    tags=card.suggested_tags,
-                    references=[Reference(type="url", value=page.url)],
-                )
-                saved_count += 1
-            except Exception as e:
-                logger.warning(f"Failed to save card: {e}")
+        # Save each card（GeneratedCard を dict 化して共通の一括作成へ委譲）。
+        card_dicts = [
+            {"front": c.front, "back": c.back, "suggested_tags": c.suggested_tags}
+            for c in result.cards[:count]
+        ]
+        saved_count = deps.card_service.bulk_create_cards(
+            user_id,
+            card_dicts,
+            [Reference(type="url", value=page.url)],
+        )
 
         # M-19: 全件保存失敗時に「✅ 0枚のカードを保存しました！」という誤成功
         # 通知を出さない。レガシー経路は ref_key を持たないため再送（URL 再投稿）

@@ -1829,3 +1829,69 @@ class TestFindCardsByReferenceUrl:
             references=[Reference(type="book", value="紙の本 p.10")],
         )
         assert card_service.find_cards_by_reference_url("u-book", "https://book.example.com") == []
+
+
+class TestBulkCreateCards:
+    """URL カード保存フロー（ref-key / レガシー）で共通利用する一括作成。"""
+
+    def test_saves_all_valid_cards(self, card_service):
+        cards = [
+            {"front": "Q1", "back": "A1", "suggested_tags": ["t"]},
+            {"front": "Q2", "back": "A2"},
+        ]
+        refs = [Reference(type="url", value="https://example.com/p")]
+        saved = card_service.bulk_create_cards("u-bulk", cards, refs)
+        assert saved == 2
+        stored, _ = card_service.list_cards(user_id="u-bulk", limit=10)
+        assert len(stored) == 2
+        # references がすべてのカードに付与されている。
+        assert all(c.references[0].value == "https://example.com/p" for c in stored)
+
+    def test_skips_empty_front_or_back(self, card_service):
+        cards = [
+            {"front": "Q1", "back": "A1"},
+            {"front": "   ", "back": "A2"},  # front 空白のみ → スキップ
+            {"front": "Q3", "back": ""},  # back 空 → スキップ
+        ]
+        saved = card_service.bulk_create_cards("u-bulk2", cards)
+        assert saved == 1
+
+    def test_continues_on_individual_failure(self, card_service, monkeypatch):
+        real_create = card_service.create_card
+        seen = []
+
+        def flaky(**kwargs):
+            seen.append(kwargs["front"])
+            if kwargs["front"] == "Q2":
+                raise RuntimeError("transient")
+            return real_create(**kwargs)
+
+        monkeypatch.setattr(card_service, "create_card", flaky)
+        cards = [
+            {"front": "Q1", "back": "A1"},
+            {"front": "Q2", "back": "A2"},
+            {"front": "Q3", "back": "A3"},
+        ]
+        saved = card_service.bulk_create_cards("u-bulk3", cards)
+        # 1 件失敗しても残りは保存され、全件試行される。
+        assert saved == 2
+        assert seen == ["Q1", "Q2", "Q3"]
+
+    def test_all_fail_returns_zero(self, card_service, monkeypatch):
+        def always_fail(**kwargs):
+            raise RuntimeError("down")
+
+        monkeypatch.setattr(card_service, "create_card", always_fail)
+        saved = card_service.bulk_create_cards(
+            "u-bulk4", [{"front": "Q", "back": "A"}]
+        )
+        assert saved == 0  # M-19: 呼び出し側は 0 を保存失敗として扱う
+
+    def test_suggested_tags_take_precedence_over_tags(self, card_service):
+        cards = [{"front": "Q", "back": "A", "suggested_tags": ["s"], "tags": ["t"]}]
+        card_service.bulk_create_cards("u-bulk5", cards)
+        stored, _ = card_service.list_cards(user_id="u-bulk5", limit=10)
+        assert stored[0].tags == ["s"]
+
+    def test_empty_card_list_returns_zero(self, card_service):
+        assert card_service.bulk_create_cards("u-bulk6", []) == 0
