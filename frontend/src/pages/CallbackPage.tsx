@@ -18,14 +18,25 @@ export const CallbackPage = () => {
       try {
         await authService.handleCallback();
         navigate('/', { replace: true });
-      } catch (err) {
-        console.error('Callback error:', err);
+      } catch {
+        // L-25: 認証応答（state / エラーコード等）を含みうるため
+        // console.error には出力しない。UI のエラー表示のみで通知する。
         setError('認証に失敗しました');
       }
     };
 
     processCallback();
   }, [navigate]);
+
+  // L-24: 認証コードは使い捨てのためコールバック失敗後に `/` へ戻すと
+  // ProtectedRoute の自動 login() → 同じ /callback 再処理 → 再失敗という
+  // ループに陥りうる。`/` への遷移ではなく login() で新規認証フローを
+  // 開始し直すことでループを断ち切る。
+  const handleRetryLogin = () => {
+    authService.login().catch(() => {
+      setError('ログインの開始に失敗しました');
+    });
+  };
 
   if (error) {
     return (
@@ -37,10 +48,10 @@ export const CallbackPage = () => {
         </div>
         <p className="text-gray-700 text-center mb-4">{error}</p>
         <button
-          onClick={() => navigate('/', { replace: true })}
+          onClick={handleRetryLogin}
           className="btn-primary"
         >
-          ホームに戻る
+          ログインし直す
         </button>
       </div>
     );

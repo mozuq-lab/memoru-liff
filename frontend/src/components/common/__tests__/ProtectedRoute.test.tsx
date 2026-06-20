@@ -163,7 +163,7 @@ describe('ProtectedRoute', () => {
       expect(screen.queryByText('Protected Content')).not.toBeInTheDocument();
     });
 
-    it('login() 失敗後、再試行ボタンが表示されないこと', async () => {
+    it('login() 失敗後、再試行ボタンが表示されること', async () => {
       // Arrange: login失敗をモック
       const loginError = new Error('Login failed');
       mockLogin.mockRejectedValue(loginError);
@@ -189,8 +189,9 @@ describe('ProtectedRoute', () => {
         expect(screen.getByText('ログインに失敗しました')).toBeInTheDocument();
       });
 
-      // 再試行ボタンが表示されないこと
-      expect(screen.queryByRole('button', { name: /再試行/ })).not.toBeInTheDocument();
+      // 再試行ボタンが表示されること（M-25: 自動ログイン失敗時に無限ローディングへ陥らず
+      // 再試行手段を提供するフォールバックを追加したため、挙動を更新）
+      expect(screen.getByRole('button', { name: /再試行/ })).toBeInTheDocument();
     });
   });
 

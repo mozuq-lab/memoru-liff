@@ -10,7 +10,12 @@ const isAbortError = (err: unknown): boolean =>
 interface CardsContextType {
   cards: Card[];
   dueCards: Card[];
+  // M-32 / M-36: fetchCards と fetchDueCards で isLoading を共有すると、一方の完了で
+  //   ローディング表示が早期に消えてちらつく。関心事ごとに loading を分離する。
+  //   isLoading は「どちらかが読み込み中」を表す後方互換のための集約フラグ。
   isLoading: boolean;
+  isCardsLoading: boolean;
+  isDueCardsLoading: boolean;
   error: Error | null;
   // 【TASK-0091】: deckId パラメータ追加（省略時は従来通り全カード取得） 🔵
   fetchCards: (deckId?: string, options?: { signal?: AbortSignal }) => Promise<void>;
@@ -48,7 +53,9 @@ const dueCardToCard = (due: DueCard): Card => ({
 export const CardsProvider = ({ children }: CardsProviderProps) => {
   const [cards, setCards] = useState<Card[]>([]);
   const [dueCards, setDueCards] = useState<Card[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  // M-32 / M-36: cards 取得と dueCards 取得で loading を分離する
+  const [isCardsLoading, setIsCardsLoading] = useState(false);
+  const [isDueCardsLoading, setIsDueCardsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [dueCount, setDueCount] = useState(0);
   // F-3: 最新リクエスト ID を保持し、古い fetch の結果（タブ/デッキ連続切替時）を破棄する
@@ -65,7 +72,8 @@ export const CardsProvider = ({ children }: CardsProviderProps) => {
   const fetchCards = useCallback(async (deckId?: string, options?: { signal?: AbortSignal }) => {
     // F-3: このリクエストの ID を採番。完了時に最新でなければ結果を破棄する
     const requestId = ++cardsRequestIdRef.current;
-    setIsLoading(true);
+    // M-32 / M-36: cards 専用の loading フラグのみを操作する
+    setIsCardsLoading(true);
     setError(null);
     try {
       // 【API呼び出し】: deckId を API レイヤーに伝搬（undefined の場合は全カード取得）
@@ -81,7 +89,7 @@ export const CardsProvider = ({ children }: CardsProviderProps) => {
     } finally {
       // F-3: 最新リクエストかつ未中断のときのみローディング解除
       if (!options?.signal?.aborted && requestId === cardsRequestIdRef.current) {
-        setIsLoading(false);
+        setIsCardsLoading(false);
       }
     }
   }, []);
@@ -96,7 +104,8 @@ export const CardsProvider = ({ children }: CardsProviderProps) => {
   const fetchDueCards = useCallback(async (deckId?: string, options?: { signal?: AbortSignal }) => {
     // F-3: このリクエストの ID を採番。完了時に最新でなければ結果を破棄する
     const requestId = ++dueCardsRequestIdRef.current;
-    setIsLoading(true);
+    // M-32 / M-36: dueCards 専用の loading フラグのみを操作する
+    setIsDueCardsLoading(true);
     setError(null);
     try {
       // 【API呼び出し】: limit は undefined、deckId を第2引数として伝搬
@@ -113,7 +122,7 @@ export const CardsProvider = ({ children }: CardsProviderProps) => {
     } finally {
       // F-3: 最新リクエストかつ未中断のときのみローディング解除
       if (!options?.signal?.aborted && requestId === dueCardsRequestIdRef.current) {
-        setIsLoading(false);
+        setIsDueCardsLoading(false);
       }
     }
   }, []);
@@ -142,15 +151,23 @@ export const CardsProvider = ({ children }: CardsProviderProps) => {
       const count = await cardsApi.getDueCount();
       setDueCount(count);
     } catch (err) {
+      // L-26: console.error のみでは UI が失敗を検知できないため error state へも反映する。
+      //   HomePage の `if (error)` 分岐がデータ取得失敗をユーザーに通知できるようにする。
       console.error('Failed to fetch due count:', err);
+      setError(toError(err));
     }
   }, []);
+
+  // M-32 / M-36: 後方互換のため isLoading は「いずれかが読み込み中」を表す集約フラグとして派生させる
+  const isLoading = isCardsLoading || isDueCardsLoading;
 
   const value = useMemo(
     () => ({
       cards,
       dueCards,
       isLoading,
+      isCardsLoading,
+      isDueCardsLoading,
       error,
       fetchCards,
       fetchDueCards,
@@ -161,7 +178,7 @@ export const CardsProvider = ({ children }: CardsProviderProps) => {
       fetchDueCount,
       clearError,
     }),
-    [cards, dueCards, isLoading, error, fetchCards, fetchDueCards, addCard, updateCard, deleteCard, dueCount, fetchDueCount, clearError]
+    [cards, dueCards, isLoading, isCardsLoading, isDueCardsLoading, error, fetchCards, fetchDueCards, addCard, updateCard, deleteCard, dueCount, fetchDueCount, clearError]
   );
 
   return (

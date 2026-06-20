@@ -23,13 +23,17 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const auth = useAuth();
 
   // Sync access token with API client
+  // L-31: 依存配列を auth.user にする。access_token 文字列だけを依存にすると
+  // 新しい User オブジェクトに差し替わってもトークン文字列が同一の場合に
+  // effect が再実行されない。useAuth は user を useMemo でメモ化しているため、
+  // auth.user を依存にしても不要な再実行は発生しない。
   useEffect(() => {
     if (auth.user?.access_token) {
       apiClient.setAccessToken(auth.user.access_token);
     } else {
       apiClient.setAccessToken(null);
     }
-  }, [auth.user?.access_token]);
+  }, [auth.user]);
 
   const value = auth;
 

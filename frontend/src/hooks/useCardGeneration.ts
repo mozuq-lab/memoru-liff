@@ -46,6 +46,13 @@ export const useCardGeneration = () => {
   const [urlProgressStage, setUrlProgressStage] = useState<UrlProgressStage>('fetching');
   const [pageInfo, setPageInfo] = useState<PageInfo | null>(null);
   const progressTimerRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  // M-30 / L-28: 生成中の AbortController とタイムアウトタイマーを ref で保持し、
+  //   アンマウント時の cleanup で確実にキャンセルする。これにより
+  //   アンマウント後の setState（警告・メモリリーク）とタイマーリークを防ぐ。
+  const controllerRef = useRef<AbortController | null>(null);
+  const timeoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // M-30: アンマウント後の setState を抑止するマウントフラグ
+  const isMountedRef = useRef(true);
 
   // 生成オプション state
   const [cardType, setCardType] = useState<CardType>('qa');
@@ -89,8 +96,11 @@ export const useCardGeneration = () => {
     setGeneratedCards([]);
     setSelectedCards(new Set());
 
+    // M-30 / L-28: controller / timeout を ref に保持し cleanup で abort/clear できるようにする
     const controller = new AbortController();
+    controllerRef.current = controller;
     const timeoutId = setTimeout(() => controller.abort(), MAX_GENERATION_TIME);
+    timeoutTimerRef.current = timeoutId;
 
     try {
       const request: GenerateCardsRequest = {
@@ -99,6 +109,8 @@ export const useCardGeneration = () => {
       };
       const response = await cardsApi.generateCards(request, { signal: controller.signal });
       clearTimeout(timeoutId);
+      // M-30: アンマウント済みなら state 更新を行わない
+      if (!isMountedRef.current) return;
 
       const cardsWithId: GeneratedCardWithId[] = response.generated_cards.map((card, index) => ({
         ...card,
@@ -109,13 +121,19 @@ export const useCardGeneration = () => {
       setSelectedCards(new Set());
     } catch (err) {
       clearTimeout(timeoutId);
+      // M-30: アンマウント済み（cleanup の abort 含む）なら state 更新を行わない
+      if (!isMountedRef.current) return;
       if (err instanceof DOMException && err.name === 'AbortError') {
         setError('生成がタイムアウトしました。もう一度お試しください。');
       } else {
         setError('カードの生成に失敗しました。もう一度お試しください。');
       }
     } finally {
-      setIsGenerating(false);
+      controllerRef.current = null;
+      timeoutTimerRef.current = null;
+      if (isMountedRef.current) {
+        setIsGenerating(false);
+      }
     }
   }, [canGenerateText, inputText]);
 
@@ -135,8 +153,11 @@ export const useCardGeneration = () => {
     const timer2 = setTimeout(() => setUrlProgressStage('generating'), 8000);
     progressTimerRef.current = [timer1, timer2];
 
+    // M-30 / L-28: controller / timeout を ref に保持し cleanup で abort/clear できるようにする
     const controller = new AbortController();
+    controllerRef.current = controller;
     const timeoutId = setTimeout(() => controller.abort(), MAX_URL_GENERATION_TIME);
+    timeoutTimerRef.current = timeoutId;
 
     try {
       const request: GenerateFromUrlRequest = {
@@ -151,6 +172,8 @@ export const useCardGeneration = () => {
       clearTimeout(timeoutId);
       clearTimeout(timer1);
       clearTimeout(timer2);
+      // M-30: アンマウント済みなら state 更新を行わない
+      if (!isMountedRef.current) return;
 
       setPageInfo(response.page_info);
 
@@ -165,6 +188,8 @@ export const useCardGeneration = () => {
       clearTimeout(timeoutId);
       clearTimeout(timer1);
       clearTimeout(timer2);
+      // M-30: アンマウント済み（cleanup の abort 含む）なら state 更新を行わない
+      if (!isMountedRef.current) return;
       if (err instanceof DOMException && err.name === 'AbortError') {
         setError('生成がタイムアウトしました。URLが正しいか確認してください。');
       } else {
@@ -172,13 +197,25 @@ export const useCardGeneration = () => {
         setError(getUserFacingMessage(err, 'URLからのカード生成に失敗しました。'));
       }
     } finally {
-      setIsGenerating(false);
+      controllerRef.current = null;
+      timeoutTimerRef.current = null;
       progressTimerRef.current = [];
+      if (isMountedRef.current) {
+        setIsGenerating(false);
+      }
     }
   }, [canGenerateUrl, inputUrl, cardType, targetCount, difficulty, selectedProfileId]);
 
+  // M-30 / L-28: アンマウント時に進行中のリクエストとタイマーを確実にキャンセルする。
+  //   AbortController.abort() で API リクエスト自体を中断し、タイムアウト/プログレス
+  //   タイマーを clear し、isMountedRef を false にして以降の setState を抑止する。
   useEffect(() => {
     return () => {
+      isMountedRef.current = false;
+      controllerRef.current?.abort();
+      if (timeoutTimerRef.current !== null) {
+        clearTimeout(timeoutTimerRef.current);
+      }
       progressTimerRef.current.forEach(clearTimeout);
     };
   }, []);
