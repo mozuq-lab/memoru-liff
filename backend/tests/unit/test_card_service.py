@@ -31,6 +31,7 @@ def dynamodb_table():
                 {"AttributeName": "user_id", "AttributeType": "S"},
                 {"AttributeName": "card_id", "AttributeType": "S"},
                 {"AttributeName": "next_review_at", "AttributeType": "S"},
+                {"AttributeName": "reference_url_key", "AttributeType": "S"},
             ],
             GlobalSecondaryIndexes=[
                 {
@@ -40,7 +41,15 @@ def dynamodb_table():
                         {"AttributeName": "next_review_at", "KeyType": "RANGE"},
                     ],
                     "Projection": {"ProjectionType": "ALL"},
-                }
+                },
+                {
+                    # M-13: URL 重複検出を Query 化するための GSI。
+                    "IndexName": "reference-url-index",
+                    "KeySchema": [
+                        {"AttributeName": "reference_url_key", "KeyType": "HASH"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
+                },
             ],
             BillingMode="PAY_PER_REQUEST",
         )
@@ -1721,6 +1730,8 @@ class TestFindCardsByReferenceUrl:
         }
         if ref_url:
             item["references"] = [{"type": "url", "value": ref_url}]
+            # M-13: 実カード（Card.to_dynamodb_item）と同様に GSI 用派生キーを付与する。
+            item["reference_url_key"] = f"{user_id}#{ref_url}"
         dynamodb_table.Table("memoru-cards-test").put_item(Item=item)
 
     def test_match_found_beyond_first_50(self, card_service, dynamodb_table):

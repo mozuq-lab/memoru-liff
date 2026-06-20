@@ -174,6 +174,14 @@ class Card(BaseModel):
         }
         if self.references:
             item["references"] = [ref.model_dump() for ref in self.references]
+            # 【reference_url_key（GSI 用複合キー）】: reference-url-index GSI の HASH キーとして
+            # 生成元 URL（先頭の type=="url" reference）を1件採用し "<user_id>#<url>" を持たせる。
+            # URL からのカード生成時の重複検出（ai_handler.generate_from_url）を全件 scan から
+            # Query へ置き換えるための派生属性（M-13）。url reference を持たないカードには
+            # 属性を書かずスパースインデックスを維持する。
+            source_url = next((ref.value for ref in self.references if ref.type == "url"), None)
+            if source_url:
+                item["reference_url_key"] = self.reference_url_key(self.user_id, source_url)
         if self.deck_id:
             item["deck_id"] = self.deck_id
             # GSI 用複合キー（永続化専用。CardResponse には出さない）。
@@ -191,6 +199,18 @@ class Card(BaseModel):
         ユーザー境界を含めた複合キー "<user_id>#<deck_id>" を生成する (PR #47 [P2])。
         """
         return f"{user_id}#{deck_id}"
+
+    @staticmethod
+    def reference_url_key(user_id: str, url: str) -> str:
+        """Build the reference-url-index GSI HASH key from user_id and url.
+
+        M-13: ユーザー境界を含めた複合キー "<user_id>#<url>" を生成する。
+        deck_index_key と同方針で、異なるユーザーが同一 URL からカードを生成しても
+        重複検出が混ざらないようにユーザー境界をキーに含める。url は保存済み reference の
+        生値をそのまま用い、find_cards_by_reference_url の引数 url と同じ複合化で
+        完全一致検索する（既存の references[].value == url 完全一致の意味論を維持）。
+        """
+        return f"{user_id}#{url}"
 
     @classmethod
     def from_dynamodb_item(cls, item: dict) -> "Card":

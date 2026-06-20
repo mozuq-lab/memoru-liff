@@ -344,45 +344,29 @@ class CardService:
         return [Card.from_dynamodb_item(item) for item in items], next_cursor
 
     def find_cards_by_reference_url(self, user_id: str, url: str) -> List[Card]:
-        """指定 URL を references に含むカードを全件検索する。
+        """指定 URL を生成元参照に持つカードを reference-url-index GSI で検索する。
 
-        C-5: list_cards の最初の50件のみで重複 URL を検出していた問題を解消するため、
-        ページネーション対応で全カードを走査し references[].value を完全一致で判定する。
+        M-13: 旧実装は scan_all_cards でユーザーの全カードを取得し references[].value を
+        Python 側で完全一致判定していたため、URL カード生成（ai_handler）のたびに
+        コスト・レイテンシがユーザーの蓄積カード数に線形比例していた（最大 2000 件読み取り）。
+        本実装は Card.to_dynamodb_item が付与する派生属性 reference_url_key
+        （= "<user_id>#<url>"、生成元 = 先頭の type=="url" reference）を HASH キーとする
+        reference-url-index GSI を Query し、コストを O(一致件数) にする。
 
-        references は List<Map>（{type, value}）構造のため DynamoDB の
-        ``contains`` フィルタでは文字列一致できない。そのため全件を取得し、
-        アプリケーション層で references[].value の完全一致を判定する。
-
-        【M-13: 既知のパフォーマンス負債（線形コスト）】:
-        本メソッドは URL カード生成のたびに呼ばれ（ai_handler）、内部で
-        scan_all_cards によりユーザーの全カードをページネーション取得して
-        Python 側で完全一致判定する。そのためコスト・レイテンシがユーザーの
-        蓄積カード数に線形比例する（上限 MAX_CARDS_PER_USER=2000 でも、
-        生成のたびに最大 2000 件読み取り）。
-        将来的には reference URL を正規化した値を専用の GSI 投影属性
-        （例: reference_url_key）としてカードに持たせ、URL での重複検出を
-        Query 化すべき。これはカードモデル（models/card.py）と GSI 定義（CDK）の
-        変更を伴うため、本サービス層単独では対応できず据え置く。
-        当面据え置く場合のフォールバックとして、上限到達時は先頭 N 件のみ確認する
-        などの緩和も検討対象。
+        設計判断: references は最大 5 件だが、GSI に投影するのは生成元 URL（先頭の url
+        reference）1 件のみ。URL からのカード生成では生成元 URL が単一の url reference として
+        記録されるため、重複検出の用途を満たす。生成元以外の URL を非先頭 reference に持つ
+        カードは対象外（許容済みの設計トレードオフ）。
 
         Args:
             user_id: ユーザー ID。
-            url: 検索する参照 URL。
+            url: 検索する生成元 URL。
 
         Returns:
-            指定 URL を references フィールドに含むカードのリスト。
+            指定 URL を生成元参照に持つカードのリスト。
         """
-        matched_cards: List[Card] = []
-        for item in self._repo.scan_all_cards(user_id):
-            card = Card.from_dynamodb_item(item)
-            refs = card.references or []
-            for ref in refs:
-                ref_val = ref.get("value", "") if isinstance(ref, dict) else getattr(ref, "value", "")
-                if ref_val == url:
-                    matched_cards.append(card)
-                    break
-        return matched_cards
+        items = self._repo.query_cards_by_reference_url(user_id, url)
+        return [Card.from_dynamodb_item(item) for item in items]
 
     def get_card_count(self, user_id: str) -> int:
         """Get the number of cards for a user.

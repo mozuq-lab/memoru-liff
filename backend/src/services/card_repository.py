@@ -387,6 +387,32 @@ class CardRepository:
         except ClientError as e:
             raise CardServiceError(f"Failed to scan cards: {e}")
 
+    def query_cards_by_reference_url(self, user_id: str, url: str) -> List[Dict[str, Any]]:
+        """生成元 URL が一致するカードを reference-url-index GSI で取得する（M-13）。
+
+        全件 scan + アプリ層完全一致から GSI Query へ置き換え、URL 重複検出のコストを
+        ユーザーの蓄積カード数に依存しない O(一致件数) にする。HASH キー reference_url_key
+        は "<user_id>#<url>" の複合キー。Projection=ALL のためカード本体を返せる。
+        """
+        key = f"{user_id}#{url}"
+        try:
+            items: List[Dict[str, Any]] = []
+            query_kwargs: Dict[str, Any] = {
+                "IndexName": "reference-url-index",
+                "KeyConditionExpression": "reference_url_key = :key",
+                "ExpressionAttributeValues": {":key": key},
+            }
+            while True:
+                response = self.table.query(**query_kwargs)
+                items.extend(response.get("Items", []))
+                last_key = response.get("LastEvaluatedKey")
+                if not last_key:
+                    break
+                query_kwargs["ExclusiveStartKey"] = last_key
+            return items
+        except ClientError as e:
+            raise CardServiceError(f"Failed to query cards by reference URL: {e}")
+
     def count_cards(self, user_id: str) -> int:
         """ユーザーのカード総数を返す (Select COUNT)。"""
         try:
