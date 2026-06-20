@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from aws_lambda_powertools import Logger
-from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
 
 from models.review import (
@@ -19,7 +18,9 @@ from models.review import (
 )
 from utils.dynamodb_client import get_dynamodb_resource
 from .ai_service import ReviewSummary
+from .card_repository import CardRepository, CardServiceError, OptimisticLockError
 from .card_service import CardService
+from .review_repository import ReviewRepository
 from .srs import ReviewHistoryEntry, SM2Result, add_review_history, calculate_next_review_boundary, calculate_sm2
 from .stats_service import calculate_streak, calculate_tag_performance
 
@@ -117,8 +118,23 @@ class ReviewService:
 
         self.dynamodb = get_dynamodb_resource(dynamodb_resource)
 
-        self.cards_table = self.dynamodb.Table(self.cards_table_name)
-        self.reviews_table = self.dynamodb.Table(self.reviews_table_name)
+        # L-7: Cards / Reviews テーブルへの DynamoDB アクセスは Repository 層へ集約する。
+        # ReviewService は SRS 計算と更新式の組み立てに専念し、self.cards_table /
+        # self.reviews_table を直接叩かない構造にする。
+        self._card_repo = CardRepository(
+            table_name=self.cards_table_name,
+            dynamodb_resource=dynamodb_resource,
+            reviews_table_name=self.reviews_table_name,
+        )
+        self._review_repo = ReviewRepository(
+            table_name=self.reviews_table_name,
+            dynamodb_resource=dynamodb_resource,
+        )
+        # 後方互換エイリアス: 既存テストが review_service.cards_table /
+        # reviews_table を読み取り・patch するため、Repository が実際に使用する
+        # boto3 Table と同一オブジェクトを公開し続ける（patch がそのまま効く）。
+        self.cards_table = self._card_repo.table
+        self.reviews_table = self._review_repo.table
         self.card_service = CardService(
             table_name=self.cards_table_name,
             dynamodb_resource=dynamodb_resource,
@@ -264,15 +280,8 @@ class ReviewService:
         # Get the card (also verifies ownership)
         card = self.card_service.get_card(user_id, card_id)
 
-        # Get existing review history
-        try:
-            response = self.cards_table.get_item(
-                Key={"user_id": user_id, "card_id": card_id},
-                ProjectionExpression="review_history",
-            )
-            review_history = response.get("Item", {}).get("review_history", [])
-        except ClientError:
-            review_history = []
+        # Get existing review history (L-7: Repository 経由で取得)
+        review_history = self._card_repo.get_review_history(user_id, card_id)
 
         if not review_history:
             raise NoReviewHistoryError("No review history to undo")
@@ -305,12 +314,13 @@ class ReviewService:
         # Remove latest entry from history
         updated_history = review_history[:-1]
 
-        # Update card with restored parameters
+        # Update card with restored parameters (L-7: Repository 経由で楽観ロック更新)
         now = datetime.now(timezone.utc)
         try:
-            self.cards_table.update_item(
-                Key={"user_id": user_id, "card_id": card_id},
-                UpdateExpression=(
+            self._card_repo.apply_review_update(
+                user_id=user_id,
+                card_id=card_id,
+                update_expression=(
                     "SET next_review_at = :next_review, "
                     "#interval = :interval, "
                     "ease_factor = :ease_factor, "
@@ -327,14 +337,14 @@ class ReviewService:
                 # has already been mutated by a concurrent operation.
                 # attribute_not_exists(...) tolerates legacy items missing these
                 # attributes (#37 follow-up), matching submit_review's behavior.
-                ConditionExpression=build_srs_optimistic_lock_condition(
+                condition_expression=build_srs_optimistic_lock_condition(
                     ":expected_ease",
                     ":expected_interval",
                     ":expected_reps",
                     ":expected_history_len",
                 ),
-                ExpressionAttributeNames={"#interval": "interval"},
-                ExpressionAttributeValues={
+                expression_names={"#interval": "interval"},
+                expression_values={
                     ":next_review": restored_next_review_at,
                     ":interval": restored_interval,
                     ":ease_factor": str(restored_ease_factor),
@@ -347,16 +357,16 @@ class ReviewService:
                     ":expected_history_len": expected_history_len,
                 },
             )
-        except ClientError as e:
-            if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
-                logger.warning(
-                    "Concurrent undo update detected (optimistic lock failed)",
-                    extra={"user_id": user_id, "card_id": card_id},
-                )
-                raise ConcurrentReviewError(
-                    "Undo conflict: the card was modified concurrently. Please retry."
-                ) from e
-            raise ReviewPersistenceError(f"Failed to undo review: {e}")
+        except OptimisticLockError as e:
+            logger.warning(
+                "Concurrent undo update detected (optimistic lock failed)",
+                extra={"user_id": user_id, "card_id": card_id},
+            )
+            raise ConcurrentReviewError(
+                "Undo conflict: the card was modified concurrently. Please retry."
+            ) from e
+        except CardServiceError as e:
+            raise ReviewPersistenceError(f"Failed to undo review: {e}") from e
 
         # Parse due_date from restored_next_review_at
         try:
@@ -423,9 +433,11 @@ class ReviewService:
         entry_dict = add_review_history([], history_entry)[0]
 
         try:
-            self.cards_table.update_item(
-                Key={"user_id": user_id, "card_id": card_id},
-                UpdateExpression=(
+            # L-7: Repository 経由で楽観ロック付き SRS 更新を実行する。
+            self._card_repo.apply_review_update(
+                user_id=user_id,
+                card_id=card_id,
+                update_expression=(
                     "SET next_review_at = :next_review, "
                     "#interval = :interval, "
                     "ease_factor = :ease_factor, "
@@ -444,13 +456,13 @@ class ReviewService:
                 # and raise a spurious ConcurrentReviewError on a legitimate first
                 # review. attribute_not_exists(...) lets such items through; once
                 # written, subsequent updates are guarded normally.
-                ConditionExpression=build_srs_optimistic_lock_condition(
+                condition_expression=build_srs_optimistic_lock_condition(
                     ":prev_ease",
                     ":prev_interval",
                     ":prev_reps",
                 ),
-                ExpressionAttributeNames={"#interval": "interval"},
-                ExpressionAttributeValues={
+                expression_names={"#interval": "interval"},
+                expression_values={
                     ":next_review": result.next_review_at.isoformat(),
                     ":interval": result.interval,
                     ":ease_factor": str(result.ease_factor),
@@ -463,16 +475,16 @@ class ReviewService:
                     ":prev_reps": previous_repetitions,
                 },
             )
-        except ClientError as e:
-            if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
-                logger.warning(
-                    "Concurrent review update detected (optimistic lock failed)",
-                    extra={"user_id": user_id, "card_id": card_id},
-                )
-                raise ConcurrentReviewError(
-                    "Review update conflict: the card was modified concurrently. Please retry."
-                ) from e
-            raise ReviewPersistenceError(f"Failed to update card review data: {e}")
+        except OptimisticLockError as e:
+            logger.warning(
+                "Concurrent review update detected (optimistic lock failed)",
+                extra={"user_id": user_id, "card_id": card_id},
+            )
+            raise ConcurrentReviewError(
+                "Review update conflict: the card was modified concurrently. Please retry."
+            ) from e
+        except CardServiceError as e:
+            raise ReviewPersistenceError(f"Failed to update card review data: {e}") from e
 
     def _record_review(
         self,
@@ -511,25 +523,19 @@ class ReviewService:
             interval_before: Interval before review.
             interval_after: Interval after review.
         """
-        try:
-            self.reviews_table.put_item(
-                Item={
-                    "user_id": user_id,
-                    "reviewed_at": reviewed_at.isoformat(),
-                    "card_id": card_id,
-                    "grade": grade,
-                    "ease_factor_before": str(ease_factor_before),
-                    "ease_factor_after": str(ease_factor_after),
-                    "interval_before": interval_before,
-                    "interval_after": interval_after,
-                }
-            )
-        except ClientError as e:
-            # Reviews table is for analytics, not critical – log and continue.
-            logger.warning(
-                "Failed to record review (best-effort)",
-                extra={"user_id": user_id, "card_id": card_id, "error": str(e)},
-            )
+        # L-7: reviews テーブルへの put_item は ReviewRepository に集約（ベストエフォート）。
+        self._review_repo.record(
+            {
+                "user_id": user_id,
+                "reviewed_at": reviewed_at.isoformat(),
+                "card_id": card_id,
+                "grade": grade,
+                "ease_factor_before": str(ease_factor_before),
+                "ease_factor_after": str(ease_factor_after),
+                "interval_before": interval_before,
+                "interval_after": interval_after,
+            }
+        )
 
     def get_due_cards(
         self,
@@ -646,23 +652,11 @@ class ReviewService:
             ISO format date string of next due date, or None.
         """
         now = datetime.now(timezone.utc)
-        try:
-            response = self.cards_table.query(
-                IndexName="user_id-due-index",
-                KeyConditionExpression="user_id = :user_id AND next_review_at > :now",
-                ExpressionAttributeValues={
-                    ":user_id": user_id,
-                    ":now": now.isoformat(),
-                },
-                Limit=1,
-                ScanIndexForward=True,
-            )
-            items = response.get("Items", [])
-            if items and "next_review_at" in items[0]:
-                next_review = datetime.fromisoformat(items[0]["next_review_at"])
-                return next_review.date().isoformat()
-        except ClientError:
-            pass
+        # L-7: GSI クエリは Repository 経由。失敗時は None を返す。
+        item = self._card_repo.query_next_due_after(user_id, now)
+        if item and "next_review_at" in item:
+            next_review = datetime.fromisoformat(item["next_review_at"])
+            return next_review.date().isoformat()
         return None
 
     def get_review_summary(self, user_id: str, user_timezone: str = "UTC") -> ReviewSummary:
@@ -692,32 +686,9 @@ class ReviewService:
         )
 
         try:
-            # Fetch all reviews (paginated)
-            reviews: List[Dict] = []
-            paginator_kwargs: Dict = {
-                "IndexName": "user_id-reviewed_at-index",
-                "KeyConditionExpression": Key("user_id").eq(user_id),
-            }
-            while True:
-                response = self.reviews_table.query(**paginator_kwargs)
-                reviews.extend(response.get("Items", []))
-                last_key = response.get("LastEvaluatedKey")
-                if not last_key:
-                    break
-                paginator_kwargs["ExclusiveStartKey"] = last_key
-
-            # Fetch all cards (paginated)
-            cards: List[Dict] = []
-            card_kwargs: Dict = {
-                "KeyConditionExpression": Key("user_id").eq(user_id),
-            }
-            while True:
-                response = self.cards_table.query(**card_kwargs)
-                cards.extend(response.get("Items", []))
-                last_key = response.get("LastEvaluatedKey")
-                if not last_key:
-                    break
-                card_kwargs["ExclusiveStartKey"] = last_key
+            # L-7: reviews / cards の全件取得は Repository 経由（ページネーション込み）。
+            reviews: List[Dict] = self._review_repo.query_all_reviews(user_id)
+            cards: List[Dict] = self._card_repo.scan_all_cards(user_id)
 
             total_reviews = len(reviews)
             average_grade = (
@@ -752,5 +723,7 @@ class ReviewService:
                 recent_review_dates=unique_dates,
             )
 
-        except ClientError:
+        except (ClientError, CardServiceError):
+            # L-7: Repository は DynamoDB 失敗を CardServiceError へ変換するため、
+            # 集計失敗時は既定の ReviewSummary を返す（従来の ClientError 同等挙動）。
             return default

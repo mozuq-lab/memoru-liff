@@ -50,6 +50,17 @@ class InternalError(CardServiceError):
     pass
 
 
+class OptimisticLockError(CardServiceError):
+    """Raised when an optimistic-lock ConditionExpression fails (concurrent update).
+
+    L-7: ReviewService の楽観ロック付き SRS 更新を Repository 経由にした際、
+    ConditionalCheckFailed を呼び出し元（ReviewService）が ConcurrentReviewError へ
+    変換できるよう専用例外として表現する。
+    """
+
+    pass
+
+
 class CardRepository:
     """Card 永続化層: DynamoDB アクセスを担う。"""
 
@@ -374,7 +385,7 @@ class CardRepository:
                 query_kwargs["ExclusiveStartKey"] = last_key
             return items
         except ClientError as e:
-            raise CardServiceError(f"Failed to find cards by reference URL: {e}")
+            raise CardServiceError(f"Failed to scan cards: {e}")
 
     def count_cards(self, user_id: str) -> int:
         """ユーザーのカード総数を返す (Select COUNT)。"""
@@ -456,3 +467,82 @@ class CardRepository:
             return response.get("Count", 0)
         except ClientError as e:
             raise CardServiceError(f"Failed to get due card count: {e}")
+
+    def get_review_history(self, user_id: str, card_id: str) -> List[Dict[str, Any]]:
+        """カードの review_history のみを取得する（取得失敗・属性欠落時は []）。
+
+        L-7: ReviewService.undo_review が楽観ロックのベースラインとして直近の
+        review_history を読む際の DynamoDB アクセスを集約する。ProjectionExpression で
+        review_history のみを射影し、転送量を抑える。失敗時はアンドゥ対象なしと同義の
+        空リストを返す（呼び出し元が NoReviewHistoryError へ変換する）。
+        """
+        try:
+            response = self.table.get_item(
+                Key={"user_id": user_id, "card_id": card_id},
+                ProjectionExpression="review_history",
+            )
+            return response.get("Item", {}).get("review_history", [])
+        except ClientError:
+            return []
+
+    def apply_review_update(
+        self,
+        user_id: str,
+        card_id: str,
+        update_expression: str,
+        condition_expression: str,
+        expression_values: Dict[str, Any],
+        expression_names: Optional[Dict[str, str]] = None,
+    ) -> None:
+        """楽観ロック付きで SRS 状態を update_item する（submit_review / undo 共通）。
+
+        L-7: ReviewService に散在していた楽観ロック付き UpdateItem を集約する。
+        ConditionExpression（CAS）・予約語 #interval エスケープ・キー定義といった
+        DynamoDB 固有の知識を Repository 層へ寄せ、ReviewService は更新式の組み立てに
+        専念できるようにする。
+
+        Raises:
+            OptimisticLockError: ConditionExpression 失敗（並行更新検出）時。
+            CardServiceError: その他の DynamoDB エラー時。
+        """
+        try:
+            update_kwargs: Dict[str, Any] = {
+                "Key": {"user_id": user_id, "card_id": card_id},
+                "UpdateExpression": update_expression,
+                "ConditionExpression": condition_expression,
+                "ExpressionAttributeValues": expression_values,
+            }
+            if expression_names:
+                update_kwargs["ExpressionAttributeNames"] = expression_names
+
+            self.table.update_item(**update_kwargs)
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                raise OptimisticLockError(
+                    "Optimistic lock failed: card was modified concurrently"
+                ) from e
+            raise CardServiceError(f"Failed to apply review update: {e}")
+
+    def query_next_due_after(
+        self, user_id: str, after: datetime
+    ) -> Optional[Dict[str, Any]]:
+        """user_id-due-index で next_review_at > after の最も早いカードを 1 件取得する。
+
+        L-7: ReviewService._get_next_due_date の GSI クエリを集約する。
+        due_cards が空のとき「次の復習予定日」を求めるために用いる。取得失敗時は None。
+        """
+        try:
+            response = self.table.query(
+                IndexName="user_id-due-index",
+                KeyConditionExpression="user_id = :user_id AND next_review_at > :after",
+                ExpressionAttributeValues={
+                    ":user_id": user_id,
+                    ":after": after.isoformat(),
+                },
+                Limit=1,
+                ScanIndexForward=True,
+            )
+            items = response.get("Items", [])
+            return items[0] if items else None
+        except ClientError:
+            return None
