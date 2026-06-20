@@ -427,18 +427,47 @@ class CardService:
         self,
         user_id: str,
         before: Optional[datetime] = None,
+        include_future: bool = False,
     ) -> int:
         """Get count of cards due for review.
 
         【用途】: 通知サービス（notification_service）でユーザーの復習対象カード数を確認する際に使用する。
+        review_service.get_due_cards も M-12 で total_due_count をこの COUNT 経由で求める。
         DynamoDB の SELECT COUNT を使用するため、全カードを取得するよりもコストが低い。
         deck_id フィルタは不要なシンプルな件数取得に適している。 🔵
 
         Args:
             user_id: The user's ID.
             before: Get cards due before this time (defaults to now).
+            include_future: True なら将来分も含む全カードを集計する（total_due_count 用）。
 
         Returns:
             Number of cards due for review (deck_id フィルタなしの全件数).
         """
-        return self._repo.count_due_cards(user_id, before)
+        return self._repo.count_due_cards(user_id, before, include_future)
+
+    def get_deck_due_card_count(
+        self,
+        user_id: str,
+        deck_id: str,
+        before: Optional[datetime] = None,
+        include_future: bool = False,
+    ) -> int:
+        """指定デッキの復習対象カード数を返す（M-12: total_due_count 用、本体非転送）。"""
+        return self._repo.count_deck_due_cards(user_id, deck_id, before, include_future)
+
+    def get_deck_due_cards(
+        self,
+        user_id: str,
+        deck_id: str,
+        limit: int,
+        before: Optional[datetime] = None,
+        include_future: bool = False,
+    ) -> List[Card]:
+        """指定デッキの復習対象カードを期限が古い順に最大 limit 件取得する（M-12）。
+
+        deck_id フィルタを DynamoDB 側で適用し、全件メモリ展開を避けて limit 件のみを
+        Card へ変換して返す。
+        """
+        items = self._repo.query_deck_due_cards(user_id, deck_id, limit, before, include_future)
+        return [Card.from_dynamodb_item(item) for item in items]

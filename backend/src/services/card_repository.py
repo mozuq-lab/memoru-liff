@@ -449,24 +449,136 @@ class CardRepository:
         except ClientError as e:
             raise CardServiceError(f"Failed to get due cards: {e}")
 
-    def count_due_cards(self, user_id: str, before: Optional[datetime] = None) -> int:
-        """復習対象カード数を返す (Select COUNT、deck_id フィルタなし)。"""
-        if before is None:
-            before = datetime.now(timezone.utc)
+    def count_due_cards(
+        self,
+        user_id: str,
+        before: Optional[datetime] = None,
+        include_future: bool = False,
+    ) -> int:
+        """復習対象カード数を返す (Select COUNT、deck_id フィルタなし)。
+
+        M-12: total_due_count を全件メモリ展開せずに正確に求めるための COUNT クエリ。
+        Select="COUNT" によりカード本体は転送されず、ページネーションで >1MB のインデックスも
+        正しく合算する。include_future=True のときは next_review_at の範囲条件を外し、
+        将来分も含む全カードを集計する。
+
+        Args:
+            user_id: ユーザー ID。
+            before: この時刻以前を due とみなす（既定は現在時刻）。include_future=True 時は無視。
+            include_future: True なら将来分も含む全カードを集計する。
+        """
+        query_kwargs: Dict[str, Any] = {
+            "IndexName": "user_id-due-index",
+            "ExpressionAttributeValues": {":user_id": user_id},
+            "Select": "COUNT",
+        }
+        if include_future:
+            query_kwargs["KeyConditionExpression"] = "user_id = :user_id"
+        else:
+            if before is None:
+                before = datetime.now(timezone.utc)
+            query_kwargs["KeyConditionExpression"] = "user_id = :user_id AND next_review_at <= :before"
+            query_kwargs["ExpressionAttributeValues"][":before"] = before.isoformat()
 
         try:
-            response = self.table.query(
-                IndexName="user_id-due-index",
-                KeyConditionExpression="user_id = :user_id AND next_review_at <= :before",
-                ExpressionAttributeValues={
-                    ":user_id": user_id,
-                    ":before": before.isoformat(),
-                },
-                Select="COUNT",
-            )
-            return response.get("Count", 0)
+            count = 0
+            while True:
+                response = self.table.query(**query_kwargs)
+                count += response.get("Count", 0)
+                last_key = response.get("LastEvaluatedKey")
+                if not last_key:
+                    break
+                query_kwargs["ExclusiveStartKey"] = last_key
+            return count
         except ClientError as e:
             raise CardServiceError(f"Failed to get due card count: {e}")
+
+    def count_deck_due_cards(
+        self,
+        user_id: str,
+        deck_id: str,
+        before: Optional[datetime] = None,
+        include_future: bool = False,
+    ) -> int:
+        """指定デッキの復習対象カード数を返す (Select COUNT + deck_id フィルタ)。
+
+        M-12: deck_id 指定時の total_due_count を全件メモリ展開せずに正確に求める。
+        user_id-due-index を Select="COUNT" + FilterExpression(deck_id) で集計するため、
+        カード本体はアプリ層へ転送されない。Count はフィルタ適用後の件数で、
+        ページネーションで全パーティションを走査して合算する。
+        """
+        query_kwargs: Dict[str, Any] = {
+            "IndexName": "user_id-due-index",
+            "ExpressionAttributeValues": {":user_id": user_id, ":deck_id": deck_id},
+            "FilterExpression": "deck_id = :deck_id",
+            "Select": "COUNT",
+        }
+        if include_future:
+            query_kwargs["KeyConditionExpression"] = "user_id = :user_id"
+        else:
+            if before is None:
+                before = datetime.now(timezone.utc)
+            query_kwargs["KeyConditionExpression"] = "user_id = :user_id AND next_review_at <= :before"
+            query_kwargs["ExpressionAttributeValues"][":before"] = before.isoformat()
+
+        try:
+            count = 0
+            while True:
+                response = self.table.query(**query_kwargs)
+                count += response.get("Count", 0)
+                last_key = response.get("LastEvaluatedKey")
+                if not last_key:
+                    break
+                query_kwargs["ExclusiveStartKey"] = last_key
+            return count
+        except ClientError as e:
+            raise CardServiceError(f"Failed to get deck due card count: {e}")
+
+    def query_deck_due_cards(
+        self,
+        user_id: str,
+        deck_id: str,
+        limit: int,
+        before: Optional[datetime] = None,
+        include_future: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """指定デッキの復習対象カードを期限が古い順に最大 limit 件取得する。
+
+        M-12: deck_id 指定時の本体取得を全件メモリ展開せずに行う。user_id-due-index
+        (Projection=ALL) を FilterExpression(deck_id) 付きで Query し、フィルタ後の件数が
+        limit に達するまでページングする。DynamoDB は Limit をフィルタ適用前に評価するため、
+        1 ページあたりの走査件数を limit に抑えつつ、必要な件数だけ収集してメモリ使用を
+        抑制する。ScanIndexForward=True で next_review_at 昇順（最も早く復習すべき順）。
+        """
+        query_kwargs: Dict[str, Any] = {
+            "IndexName": "user_id-due-index",
+            "ExpressionAttributeValues": {":user_id": user_id, ":deck_id": deck_id},
+            "FilterExpression": "deck_id = :deck_id",
+            "ScanIndexForward": True,
+            "Limit": limit,
+        }
+        if include_future:
+            query_kwargs["KeyConditionExpression"] = "user_id = :user_id"
+        else:
+            if before is None:
+                before = datetime.now(timezone.utc)
+            query_kwargs["KeyConditionExpression"] = "user_id = :user_id AND next_review_at <= :before"
+            query_kwargs["ExpressionAttributeValues"][":before"] = before.isoformat()
+
+        try:
+            collected: List[Dict[str, Any]] = []
+            while True:
+                response = self.table.query(**query_kwargs)
+                collected.extend(response.get("Items", []))
+                if len(collected) >= limit:
+                    return collected[:limit]
+                last_key = response.get("LastEvaluatedKey")
+                if not last_key:
+                    break
+                query_kwargs["ExclusiveStartKey"] = last_key
+            return collected[:limit]
+        except ClientError as e:
+            raise CardServiceError(f"Failed to get deck due cards: {e}")
 
     def get_review_history(self, user_id: str, card_id: str) -> List[Dict[str, Any]]:
         """カードの review_history のみを取得する（取得失敗・属性欠落時は []）。
