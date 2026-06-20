@@ -43,6 +43,17 @@ export class KeycloakStack extends cdk.Stack {
     const isProd = props.environment === 'prod';
     // H-1: ALB ingress CIDR が指定された場合のみ受信を制限する（openListener を無効化して手動付与）。
     const restrictAlbIngress = !!props.albIngressCidr;
+
+    // M-40: dev は証明書なし=平文 HTTP かつ ALB が public サブネット直結のため、
+    // CIDR 制限なしだと Keycloak 管理コンソール / OIDC エンドポイントが平文 HTTP で
+    // 0.0.0.0/0 に公開される。デフォルトを安全側に倒すと既存運用が壊れるため後方互換は
+    // 維持しつつ、CIDR 未指定時は synth 時に警告して気づけるようにする。
+    if (!isProd && !restrictAlbIngress) {
+      cdk.Annotations.of(this).addWarning(
+        'M-40: dev Keycloak ALB が 0.0.0.0/0 に平文 HTTP で公開されます。'
+          + ' MEMORU_DEV_KEYCLOAK_ALLOWED_CIDR を設定して受信元 CIDR を制限してください。',
+      );
+    }
     const keycloakImage = props.keycloakImage ?? 'quay.io/keycloak/keycloak:24.0';
     const keycloakAdminUser = props.keycloakAdminUser ?? 'admin';
     const dbAllocatedStorage = props.dbAllocatedStorage ?? 20;
@@ -88,6 +99,10 @@ export class KeycloakStack extends cdk.Stack {
         passwordLength: 32,
         excludeCharacters: '"@/\\',
       },
+      // M-42: dev は DESTROY にして cdk destroy 時に同名シークレットが残らないように
+      // する（残ると次回 deploy で「既に存在」エラーになり再構築が失敗する）。
+      // prod は誤削除防止のため RETAIN。
+      removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
 
     const keycloakAdminSecret = new secretsmanager.Secret(this, 'KeycloakAdminSecret', {
@@ -96,9 +111,13 @@ export class KeycloakStack extends cdk.Stack {
       generateSecretString: {
         secretStringTemplate: JSON.stringify({ username: keycloakAdminUser }),
         generateStringKey: 'password',
-        passwordLength: 16,
+        // M-39: IdP 管理者は DB 認証情報より高権限のため、dbSecret と同じ 32 文字に
+        // 統一する（excludeCharacters も揃える）。
+        passwordLength: 32,
         excludeCharacters: '"@/\\',
       },
+      // M-42: dev は DESTROY（同名シークレット残留による再デプロイ失敗を防ぐ）、prod は RETAIN。
+      removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
 
     // ============================================================
@@ -199,7 +218,17 @@ export class KeycloakStack extends cdk.Stack {
             KC_HOSTNAME_STRICT: isProd ? 'true' : 'false',
             KC_HOSTNAME_STRICT_HTTPS: isProd ? 'true' : 'false',
             KC_PROXY_HEADERS: 'xforwarded',
-            KC_HTTP_ENABLED: isProd ? 'false' : 'true',
+            // CR-1: prod でも HTTP(8080) を有効にする。
+            // ApplicationLoadBalancedFargateService は targetProtocol 未指定時、
+            // ターゲットグループ（ALB→コンテナ間）を HTTP に既定し、ヘルスチェックも
+            // HTTP:8080 の /health/ready を叩く。prod で KC_HTTP_ENABLED='false' に
+            // すると 8080 が無効化され、ALB ヘルスチェックが connection refused で
+            // 永続失敗 → circuitBreaker でロールバックし Keycloak が起動しなくなる。
+            // ALB が HTTPS(443) を終端し X-Forwarded-Proto: https を付与するため、
+            // KC_PROXY_HEADERS=xforwarded と組み合わせれば内部 HTTP でも外部からは
+            // HTTPS として扱われる。8080 は VPC 内（ALB→コンテナ）のみで外部非公開。
+            KC_HTTP_ENABLED: 'true',
+            KC_HTTP_PORT: '8080',
             KC_HEALTH_ENABLED: 'true',
             KC_METRICS_ENABLED: 'true',
           },
@@ -263,9 +292,18 @@ export class KeycloakStack extends cdk.Stack {
     // Route53 DNS Record (Optional)
     // ============================================================
     if (props.domainName && props.hostedZoneId) {
+      // M-43: zoneName に domainName（サブドメイン）をフォールバックすると、実際の
+      // Hosted Zone（例: example.com）と不一致になり deploy 時に Route53 API が
+      // エラーを返しうる。hostedZoneName は明示必須とし、未指定なら早期に失敗させる。
+      if (!props.hostedZoneName) {
+        throw new Error(
+          'hostedZoneName is required when domainName and hostedZoneId are specified '
+            + '(zoneName must point to the apex zone, e.g. example.com, not the record subdomain)',
+        );
+      }
       const zone = route53.HostedZone.fromHostedZoneAttributes(this, 'Zone', {
         hostedZoneId: props.hostedZoneId,
-        zoneName: props.hostedZoneName ?? props.domainName,
+        zoneName: props.hostedZoneName,
       });
       new route53.ARecord(this, 'DNSRecord', {
         zone,

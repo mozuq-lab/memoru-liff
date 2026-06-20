@@ -16,6 +16,15 @@ export interface LiffHostingStackProps extends cdk.StackProps {
   certificateArn?: string;
   hostedZoneId?: string;
   apiEndpoint?: string;
+  /**
+   * M-24: OIDC の token / userinfo エンドポイントへの fetch を CSP connect-src で
+   * 許可するための IdP オリジン。Keycloak のドメイン（例: https://keycloak.example.com）
+   * や Cognito（例: https://*.amazoncognito.com / https://cognito-idp.<region>.amazonaws.com）
+   * を 1 つ以上指定する。未指定だと本番でブラウザがトークン取得を CSP でブロックし、
+   * 認証フローが失敗するため、prod では IdP オリジンを必ず渡すこと。
+   * オリジン（scheme + host[:port]）のみを指定し、パスは含めない。
+   */
+  oidcConnectSources?: string[];
 }
 
 export class LiffHostingStack extends cdk.Stack {
@@ -77,9 +86,17 @@ export class LiffHostingStack extends cdk.Stack {
     // ============================================================
     // Security Response Headers Policy
     // ============================================================
-    const connectSrc = props.apiEndpoint
-      ? `'self' ${props.apiEndpoint} https://api.line.me https://access.line.me`
-      : "'self' https://api.line.me https://access.line.me";
+    // M-24: connect-src には API エンドポイント・LINE に加えて OIDC IdP のオリジンを
+    // 含める。これがないと本番でブラウザが token/userinfo リクエストを CSP でブロックし
+    // 認証フロー全体が失敗する。重複排除して 1 つの値域に正規化する。
+    const connectSources = [
+      "'self'",
+      ...(props.apiEndpoint ? [props.apiEndpoint] : []),
+      'https://api.line.me',
+      'https://access.line.me',
+      ...(props.oidcConnectSources ?? []),
+    ];
+    const connectSrc = Array.from(new Set(connectSources)).join(' ');
 
     const responseHeadersPolicy = new cloudfront.ResponseHeadersPolicy(
       this, 'SecurityHeadersPolicy', {
@@ -214,9 +231,18 @@ export class LiffHostingStack extends cdk.Stack {
     // Route53 DNS Record (Optional)
     // ============================================================
     if (props.domainName && props.hostedZoneId) {
+      // M-43: zoneName に domainName（サブドメイン）をフォールバックすると、実際の
+      // Hosted Zone（apex, 例: example.com）と不一致になり deploy 時に Route53 API が
+      // エラーを返しうる。hostedZoneName は明示必須とし、未指定なら早期に失敗させる。
+      if (!props.hostedZoneName) {
+        throw new Error(
+          'hostedZoneName is required when domainName and hostedZoneId are specified '
+            + '(zoneName must point to the apex zone, e.g. example.com, not the record subdomain)',
+        );
+      }
       const zone = route53.HostedZone.fromHostedZoneAttributes(this, 'Zone', {
         hostedZoneId: props.hostedZoneId,
-        zoneName: props.hostedZoneName ?? props.domainName,
+        zoneName: props.hostedZoneName,
       });
       new route53.ARecord(this, 'DNSRecord', {
         zone,

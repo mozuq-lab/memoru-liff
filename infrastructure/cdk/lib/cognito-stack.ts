@@ -156,6 +156,9 @@ export class CognitoStack extends cdk.Stack {
       idTokenValidity: cdk.Duration.hours(1),
       refreshTokenValidity: cdk.Duration.days(30),
       preventUserExistenceErrors: true,
+      // L-33: トークン失効（侵害されたリフレッシュトークンの即時無効化）を明示的に有効化。
+      // CDK のデフォルトは true だが、デフォルト変更時に意図せず無効化されないよう宣言する。
+      enableTokenRevocation: true,
     });
 
     // UserPoolClient が LINE IdP より先に作成されると CloudFormation エラーになるため明示的に依存を追加
