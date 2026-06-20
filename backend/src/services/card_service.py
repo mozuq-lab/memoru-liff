@@ -237,6 +237,18 @@ class CardService:
             expression_values[":references"] = [ref.model_dump() for ref in references]
             expression_names["#references"] = "references"
             card.references = references
+            # M-13: reference-url-index GSI の派生キー reference_url_key も references に
+            # 同期する。to_dynamodb_item（作成時）と同じく先頭の type=="url" reference を
+            # 生成元 URL として採用し、存在すれば SET、無ければ REMOVE してスパース
+            # インデックスを維持する。これを欠くと URL 参照を後から追加・差し替え・クリア
+            # した際に GSI が古いキーのまま残り、find_cards_by_reference_url の重複検出が
+            # 取りこぼし・誤検知を起こす。
+            source_url = next((ref.value for ref in references if ref.type == "url"), None)
+            if source_url:
+                update_parts.append("reference_url_key = :reference_url_key")
+                expression_values[":reference_url_key"] = Card.reference_url_key(user_id, source_url)
+            else:
+                remove_parts.append("reference_url_key")
 
         # 【interval 更新処理】: interval が指定された場合に interval と next_review_at を更新する
         # 【実装方針】: DynamoDB の予約語 interval を ExpressionAttributeNames でエスケープ

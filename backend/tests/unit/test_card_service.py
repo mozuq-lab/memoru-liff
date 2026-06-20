@@ -1760,3 +1760,72 @@ class TestFindCardsByReferenceUrl:
             "u-1", "https://example.com/none"
         )
         assert matched == []
+
+    def test_update_card_syncs_reference_url_key_on_replace_and_clear(self, card_service):
+        """M-13: update_card で URL 参照を差し替え・クリアすると GSI 派生キーも同期される。
+
+        作成時のみ reference_url_key を付与し更新経路で同期しないと、URL 差し替え後も
+        旧キーが GSI に残り find_cards_by_reference_url が取りこぼし・誤検知を起こす。
+        """
+        created = card_service.create_card(
+            user_id="u-sync",
+            front="Q",
+            back="A",
+            references=[Reference(type="url", value="https://old.example.com")],
+        )
+        assert [
+            c.card_id
+            for c in card_service.find_cards_by_reference_url("u-sync", "https://old.example.com")
+        ] == [created.card_id]
+
+        # 差し替え: 旧 URL は外れ、新 URL で見つかる。
+        card_service.update_card(
+            user_id="u-sync",
+            card_id=created.card_id,
+            references=[Reference(type="url", value="https://new.example.com")],
+        )
+        assert card_service.find_cards_by_reference_url("u-sync", "https://old.example.com") == []
+        assert [
+            c.card_id
+            for c in card_service.find_cards_by_reference_url("u-sync", "https://new.example.com")
+        ] == [created.card_id]
+
+        # クリア: REMOVE で GSI から外れ、どの URL でも見つからない。
+        card_service.update_card(
+            user_id="u-sync",
+            card_id=created.card_id,
+            references=[],
+        )
+        assert card_service.find_cards_by_reference_url("u-sync", "https://new.example.com") == []
+
+    def test_update_card_adds_reference_url_key_when_none(self, card_service):
+        """M-13: 参照なしカードに URL 参照を後付けすると GSI に載る。"""
+        created = card_service.create_card(user_id="u-add", front="Q", back="A")
+        assert card_service.find_cards_by_reference_url("u-add", "https://added.example.com") == []
+
+        card_service.update_card(
+            user_id="u-add",
+            card_id=created.card_id,
+            references=[Reference(type="url", value="https://added.example.com")],
+        )
+        assert [
+            c.card_id
+            for c in card_service.find_cards_by_reference_url("u-add", "https://added.example.com")
+        ] == [created.card_id]
+
+    def test_update_card_removes_reference_url_key_for_non_url_refs(self, card_service):
+        """M-13: URL 参照を非 URL 参照のみへ差し替えると GSI から外れる。"""
+        created = card_service.create_card(
+            user_id="u-book",
+            front="Q",
+            back="A",
+            references=[Reference(type="url", value="https://book.example.com")],
+        )
+        assert len(card_service.find_cards_by_reference_url("u-book", "https://book.example.com")) == 1
+
+        card_service.update_card(
+            user_id="u-book",
+            card_id=created.card_id,
+            references=[Reference(type="book", value="紙の本 p.10")],
+        )
+        assert card_service.find_cards_by_reference_url("u-book", "https://book.example.com") == []
