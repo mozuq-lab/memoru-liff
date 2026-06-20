@@ -31,6 +31,7 @@ def dynamodb_table():
                 {"AttributeName": "user_id", "AttributeType": "S"},
                 {"AttributeName": "card_id", "AttributeType": "S"},
                 {"AttributeName": "next_review_at", "AttributeType": "S"},
+                {"AttributeName": "reference_url_key", "AttributeType": "S"},
             ],
             GlobalSecondaryIndexes=[
                 {
@@ -40,7 +41,15 @@ def dynamodb_table():
                         {"AttributeName": "next_review_at", "KeyType": "RANGE"},
                     ],
                     "Projection": {"ProjectionType": "ALL"},
-                }
+                },
+                {
+                    # M-13: URL 重複検出を Query 化するための GSI。
+                    "IndexName": "reference-url-index",
+                    "KeySchema": [
+                        {"AttributeName": "reference_url_key", "KeyType": "HASH"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
+                },
             ],
             BillingMode="PAY_PER_REQUEST",
         )
@@ -684,32 +693,6 @@ class TestCardServiceDueCards:
         cards = card_service.get_due_cards("test-user-id", include_future=True)
 
         assert [card.card_id for card in cards] == ["card-due", "card-future"]
-
-
-class TestCardServiceUpdateReviewData:
-    """Tests for CardService.update_review_data method."""
-
-    def test_update_review_data(self, card_service):
-        """Test updating review data after a review."""
-        created = card_service.create_card(
-            user_id="test-user-id",
-            front="Question",
-            back="Answer",
-        )
-
-        next_review = datetime.now(timezone.utc) + timedelta(days=3)
-        updated = card_service.update_review_data(
-            user_id="test-user-id",
-            card_id=created.card_id,
-            next_review_at=next_review,
-            interval=3,
-            ease_factor=2.6,
-            repetitions=1,
-        )
-
-        assert updated.interval == 3
-        assert updated.ease_factor == 2.6
-        assert updated.repetitions == 1
 
 
 class TestCardServiceRaceConditionPrevention:
@@ -1747,6 +1730,8 @@ class TestFindCardsByReferenceUrl:
         }
         if ref_url:
             item["references"] = [{"type": "url", "value": ref_url}]
+            # M-13: 実カード（Card.to_dynamodb_item）と同様に GSI 用派生キーを付与する。
+            item["reference_url_key"] = f"{user_id}#{ref_url}"
         dynamodb_table.Table("memoru-cards-test").put_item(Item=item)
 
     def test_match_found_beyond_first_50(self, card_service, dynamodb_table):
@@ -1775,3 +1760,72 @@ class TestFindCardsByReferenceUrl:
             "u-1", "https://example.com/none"
         )
         assert matched == []
+
+    def test_update_card_syncs_reference_url_key_on_replace_and_clear(self, card_service):
+        """M-13: update_card で URL 参照を差し替え・クリアすると GSI 派生キーも同期される。
+
+        作成時のみ reference_url_key を付与し更新経路で同期しないと、URL 差し替え後も
+        旧キーが GSI に残り find_cards_by_reference_url が取りこぼし・誤検知を起こす。
+        """
+        created = card_service.create_card(
+            user_id="u-sync",
+            front="Q",
+            back="A",
+            references=[Reference(type="url", value="https://old.example.com")],
+        )
+        assert [
+            c.card_id
+            for c in card_service.find_cards_by_reference_url("u-sync", "https://old.example.com")
+        ] == [created.card_id]
+
+        # 差し替え: 旧 URL は外れ、新 URL で見つかる。
+        card_service.update_card(
+            user_id="u-sync",
+            card_id=created.card_id,
+            references=[Reference(type="url", value="https://new.example.com")],
+        )
+        assert card_service.find_cards_by_reference_url("u-sync", "https://old.example.com") == []
+        assert [
+            c.card_id
+            for c in card_service.find_cards_by_reference_url("u-sync", "https://new.example.com")
+        ] == [created.card_id]
+
+        # クリア: REMOVE で GSI から外れ、どの URL でも見つからない。
+        card_service.update_card(
+            user_id="u-sync",
+            card_id=created.card_id,
+            references=[],
+        )
+        assert card_service.find_cards_by_reference_url("u-sync", "https://new.example.com") == []
+
+    def test_update_card_adds_reference_url_key_when_none(self, card_service):
+        """M-13: 参照なしカードに URL 参照を後付けすると GSI に載る。"""
+        created = card_service.create_card(user_id="u-add", front="Q", back="A")
+        assert card_service.find_cards_by_reference_url("u-add", "https://added.example.com") == []
+
+        card_service.update_card(
+            user_id="u-add",
+            card_id=created.card_id,
+            references=[Reference(type="url", value="https://added.example.com")],
+        )
+        assert [
+            c.card_id
+            for c in card_service.find_cards_by_reference_url("u-add", "https://added.example.com")
+        ] == [created.card_id]
+
+    def test_update_card_removes_reference_url_key_for_non_url_refs(self, card_service):
+        """M-13: URL 参照を非 URL 参照のみへ差し替えると GSI から外れる。"""
+        created = card_service.create_card(
+            user_id="u-book",
+            front="Q",
+            back="A",
+            references=[Reference(type="url", value="https://book.example.com")],
+        )
+        assert len(card_service.find_cards_by_reference_url("u-book", "https://book.example.com")) == 1
+
+        card_service.update_card(
+            user_id="u-book",
+            card_id=created.card_id,
+            references=[Reference(type="book", value="紙の本 p.10")],
+        )
+        assert card_service.find_cards_by_reference_url("u-book", "https://book.example.com") == []

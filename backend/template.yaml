@@ -161,6 +161,8 @@ Resources:
           AttributeType: S
         - AttributeName: deck_index_key
           AttributeType: S
+        - AttributeName: reference_url_key
+          AttributeType: S
       KeySchema:
         - AttributeName: user_id
           KeyType: HASH
@@ -198,6 +200,20 @@ Resources:
               KeyType: RANGE
           Projection:
             ProjectionType: KEYS_ONLY
+        # reference-url-index: URL からのカード生成時の重複検出 (find_cards_by_reference_url)
+        # を全件 scan から Query 化するための GSI (M-13)。HASH キー reference_url_key は
+        # "<user_id>#<url>" の複合キーで、生成元 URL (先頭の type=="url" reference) を1件採用する
+        # (Card.to_dynamodb_item)。url reference を持たないカードは属性を持たずスパース化される。
+        # 重複検出は一致カード本体を参照する用途のため Projection は ALL。
+        # 注意 (マイグレーション): 既存カードには reference_url_key 属性が無く GSI に投影されない。
+        #   再保存 (create/update) 時に投影される。既存データのバックフィルは
+        #   backend/scripts/backfill_reference_url_key.py を参照 (本番はユーザーが手動実行)。
+        - IndexName: reference-url-index
+          KeySchema:
+            - AttributeName: reference_url_key
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
       SSESpecification:

@@ -1832,7 +1832,9 @@ class TestRecordReviewLogging:
 
         monkeypatch.setattr(review_service.reviews_table, "put_item", raise_client_error)
 
-        with patch("services.review_service.logger") as mock_logger:
+        # L-7: put_item の警告ログは ReviewRepository.record に移動したため、
+        # review_repository モジュールの logger を patch する。
+        with patch("services.review_repository.logger") as mock_logger:
             # _record_review is called internally by submit_review
             # but we can call it directly
             review_service._record_review(

@@ -237,6 +237,18 @@ class CardService:
             expression_values[":references"] = [ref.model_dump() for ref in references]
             expression_names["#references"] = "references"
             card.references = references
+            # M-13: reference-url-index GSI の派生キー reference_url_key も references に
+            # 同期する。to_dynamodb_item（作成時）と同じく先頭の type=="url" reference を
+            # 生成元 URL として採用し、存在すれば SET、無ければ REMOVE してスパース
+            # インデックスを維持する。これを欠くと URL 参照を後から追加・差し替え・クリア
+            # した際に GSI が古いキーのまま残り、find_cards_by_reference_url の重複検出が
+            # 取りこぼし・誤検知を起こす。
+            source_url = next((ref.value for ref in references if ref.type == "url"), None)
+            if source_url:
+                update_parts.append("reference_url_key = :reference_url_key")
+                expression_values[":reference_url_key"] = Card.reference_url_key(user_id, source_url)
+            else:
+                remove_parts.append("reference_url_key")
 
         # 【interval 更新処理】: interval が指定された場合に interval と next_review_at を更新する
         # 【実装方針】: DynamoDB の予約語 interval を ExpressionAttributeNames でエスケープ
@@ -344,45 +356,29 @@ class CardService:
         return [Card.from_dynamodb_item(item) for item in items], next_cursor
 
     def find_cards_by_reference_url(self, user_id: str, url: str) -> List[Card]:
-        """指定 URL を references に含むカードを全件検索する。
+        """指定 URL を生成元参照に持つカードを reference-url-index GSI で検索する。
 
-        C-5: list_cards の最初の50件のみで重複 URL を検出していた問題を解消するため、
-        ページネーション対応で全カードを走査し references[].value を完全一致で判定する。
+        M-13: 旧実装は scan_all_cards でユーザーの全カードを取得し references[].value を
+        Python 側で完全一致判定していたため、URL カード生成（ai_handler）のたびに
+        コスト・レイテンシがユーザーの蓄積カード数に線形比例していた（最大 2000 件読み取り）。
+        本実装は Card.to_dynamodb_item が付与する派生属性 reference_url_key
+        （= "<user_id>#<url>"、生成元 = 先頭の type=="url" reference）を HASH キーとする
+        reference-url-index GSI を Query し、コストを O(一致件数) にする。
 
-        references は List<Map>（{type, value}）構造のため DynamoDB の
-        ``contains`` フィルタでは文字列一致できない。そのため全件を取得し、
-        アプリケーション層で references[].value の完全一致を判定する。
-
-        【M-13: 既知のパフォーマンス負債（線形コスト）】:
-        本メソッドは URL カード生成のたびに呼ばれ（ai_handler）、内部で
-        scan_all_cards によりユーザーの全カードをページネーション取得して
-        Python 側で完全一致判定する。そのためコスト・レイテンシがユーザーの
-        蓄積カード数に線形比例する（上限 MAX_CARDS_PER_USER=2000 でも、
-        生成のたびに最大 2000 件読み取り）。
-        将来的には reference URL を正規化した値を専用の GSI 投影属性
-        （例: reference_url_key）としてカードに持たせ、URL での重複検出を
-        Query 化すべき。これはカードモデル（models/card.py）と GSI 定義（CDK）の
-        変更を伴うため、本サービス層単独では対応できず据え置く。
-        当面据え置く場合のフォールバックとして、上限到達時は先頭 N 件のみ確認する
-        などの緩和も検討対象。
+        設計判断: references は最大 5 件だが、GSI に投影するのは生成元 URL（先頭の url
+        reference）1 件のみ。URL からのカード生成では生成元 URL が単一の url reference として
+        記録されるため、重複検出の用途を満たす。生成元以外の URL を非先頭 reference に持つ
+        カードは対象外（許容済みの設計トレードオフ）。
 
         Args:
             user_id: ユーザー ID。
-            url: 検索する参照 URL。
+            url: 検索する生成元 URL。
 
         Returns:
-            指定 URL を references フィールドに含むカードのリスト。
+            指定 URL を生成元参照に持つカードのリスト。
         """
-        matched_cards: List[Card] = []
-        for item in self._repo.scan_all_cards(user_id):
-            card = Card.from_dynamodb_item(item)
-            refs = card.references or []
-            for ref in refs:
-                ref_val = ref.get("value", "") if isinstance(ref, dict) else getattr(ref, "value", "")
-                if ref_val == url:
-                    matched_cards.append(card)
-                    break
-        return matched_cards
+        items = self._repo.query_cards_by_reference_url(user_id, url)
+        return [Card.from_dynamodb_item(item) for item in items]
 
     def get_card_count(self, user_id: str) -> int:
         """Get the number of cards for a user.
@@ -427,70 +423,47 @@ class CardService:
         self,
         user_id: str,
         before: Optional[datetime] = None,
+        include_future: bool = False,
     ) -> int:
         """Get count of cards due for review.
 
         【用途】: 通知サービス（notification_service）でユーザーの復習対象カード数を確認する際に使用する。
+        review_service.get_due_cards も M-12 で total_due_count をこの COUNT 経由で求める。
         DynamoDB の SELECT COUNT を使用するため、全カードを取得するよりもコストが低い。
         deck_id フィルタは不要なシンプルな件数取得に適している。 🔵
 
         Args:
             user_id: The user's ID.
             before: Get cards due before this time (defaults to now).
+            include_future: True なら将来分も含む全カードを集計する（total_due_count 用）。
 
         Returns:
             Number of cards due for review (deck_id フィルタなしの全件数).
         """
-        return self._repo.count_due_cards(user_id, before)
+        return self._repo.count_due_cards(user_id, before, include_future)
 
-    def update_review_data(
+    def get_deck_due_card_count(
         self,
         user_id: str,
-        card_id: str,
-        next_review_at: datetime,
-        interval: int,
-        ease_factor: float,
-        repetitions: int,
-    ) -> Card:
-        """Update card's review data after a review.
+        deck_id: str,
+        before: Optional[datetime] = None,
+        include_future: bool = False,
+    ) -> int:
+        """指定デッキの復習対象カード数を返す（M-12: total_due_count 用、本体非転送）。"""
+        return self._repo.count_deck_due_cards(user_id, deck_id, before, include_future)
 
-        .. warning::
-            **本番コードからは直接呼び出さないこと（M-11）。**
+    def get_deck_due_cards(
+        self,
+        user_id: str,
+        deck_id: str,
+        limit: int,
+        before: Optional[datetime] = None,
+        include_future: bool = False,
+    ) -> List[Card]:
+        """指定デッキの復習対象カードを期限が古い順に最大 limit 件取得する（M-12）。
 
-            このメソッドは現在テストからのみ使用されており、本番のレビュー更新パスは
-            :meth:`ReviewService._update_card_review_data`
-            (``services/review_service.py``) が担当する。あちらは
-            ``list_append`` による review_history 追記と楽観ロック（CAS）を伴うが、
-            こちらは **楽観ロックも履歴追記も持たない**。
-            レビュー後のカード更新にこのメソッドを誤って使うと、並行更新時の
-            lost update や review_history 欠落を招く。レビュー更新が必要な場合は
-            必ず ReviewService 経由で行うこと。
-
-        Args:
-            user_id: The user's ID.
-            card_id: The card's ID.
-            next_review_at: Next review date/time.
-            interval: Days until next review.
-            ease_factor: SM-2 ease factor.
-            repetitions: Number of successful reviews.
-
-        Returns:
-            Updated Card object.
+        deck_id フィルタを DynamoDB 側で適用し、全件メモリ展開を避けて limit 件のみを
+        Card へ変換して返す。
         """
-        now = datetime.now(timezone.utc)
-        self._repo.update_item(
-            user_id,
-            card_id,
-            "SET next_review_at = :next_review, #interval = :interval, "
-            "ease_factor = :ease_factor, repetitions = :repetitions, updated_at = :updated_at",
-            expression_values={
-                ":next_review": next_review_at.isoformat(),
-                ":interval": interval,
-                ":ease_factor": str(ease_factor),
-                ":repetitions": repetitions,
-                ":updated_at": now.isoformat(),
-            },
-            expression_names={"#interval": "interval"},
-            error_message="Failed to update review data",
-        )
-        return self.get_card(user_id, card_id)
+        items = self._repo.query_deck_due_cards(user_id, deck_id, limit, before, include_future)
+        return [Card.from_dynamodb_item(item) for item in items]

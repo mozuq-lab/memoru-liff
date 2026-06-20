@@ -19,6 +19,37 @@ from services.card_service import (
 )
 
 
+def _seed_srs_data(
+    card_service,
+    user_id,
+    card_id,
+    *,
+    ease_factor,
+    interval,
+    repetitions,
+    next_review_at,
+):
+    """テスト用: カードに SRS パラメータを直接セットする。
+
+    旧 CardService.update_review_data（M-11 で削除）の代替。本番のレビュー更新は
+    ReviewService が担うため、これはテストの初期状態作成専用ヘルパー。
+    """
+    card_service._repo.update_item(
+        user_id,
+        card_id,
+        "SET next_review_at = :nr, #interval = :iv, "
+        "ease_factor = :ef, repetitions = :rp",
+        expression_values={
+            ":nr": next_review_at.isoformat(),
+            ":iv": interval,
+            ":ef": str(ease_factor),
+            ":rp": repetitions,
+        },
+        expression_names={"#interval": "interval"},
+        error_message="seed SRS data failed",
+    )
+
+
 # 【テスト前準備】: モック DynamoDB テーブルを作成するフィクスチャ
 # 【環境初期化】: 各テストが独立した DynamoDB 環境で動作するように設定
 @pytest.fixture
@@ -264,11 +295,11 @@ class TestCardServiceUpdateInterval:
         )
 
         # 【初期条件設定】: ease_factor=2.8, repetitions=3 の復習データを設定
-        # 【実装詳細】: update_review_data を使用して SRS パラメータを設定
-        # 【注意】: update_review_data は quality パラメータを受け取らない
-        card_service.update_review_data(
-            user_id="test-user-id",
-            card_id=created.card_id,
+        # 【実装詳細】: _seed_srs_data ヘルパーで SRS パラメータを直接設定
+        _seed_srs_data(
+            card_service,
+            "test-user-id",
+            created.card_id,
             ease_factor=2.8,
             interval=3,
             repetitions=3,
@@ -308,10 +339,10 @@ class TestCardServiceUpdateInterval:
         )
 
         # 【初期条件設定】: repetitions=5 の復習データを設定
-        # 【注意】: update_review_data は quality パラメータを受け取らない
-        card_service.update_review_data(
-            user_id="test-user-id",
-            card_id=created.card_id,
+        _seed_srs_data(
+            card_service,
+            "test-user-id",
+            created.card_id,
             ease_factor=2.5,
             interval=10,
             repetitions=5,
@@ -384,11 +415,11 @@ class TestCardServiceUpdateInterval:
         )
 
         # 【初期条件設定】: interval=7 の復習データを設定して元の値を記録
-        # 【注意】: update_review_data は quality パラメータを受け取らない
         original_next_review = datetime(2026, 3, 7, tzinfo=timezone.utc)
-        card_service.update_review_data(
-            user_id="test-user-id",
-            card_id=created.card_id,
+        _seed_srs_data(
+            card_service,
+            "test-user-id",
+            created.card_id,
             ease_factor=2.5,
             interval=7,
             repetitions=2,
