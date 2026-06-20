@@ -3,12 +3,13 @@
 import base64
 import json
 import os
+from typing import TypeVar
 
 from aws_lambda_powertools import Logger
 from aws_lambda_powertools.event_handler import Response, content_types
 from aws_lambda_powertools.event_handler.exceptions import UnauthorizedError
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from services.ai_service import (
     AIServiceError,
@@ -19,6 +20,47 @@ from services.ai_service import (
 )
 
 logger = Logger()
+
+_RequestModel = TypeVar("_RequestModel", bound=BaseModel)
+
+
+def parse_json_body(
+    resolver, model_class: type[_RequestModel]
+) -> _RequestModel | Response:
+    """リクエスト JSON ボディを ``model_class`` にパース・検証する。
+
+    全 POST/PUT ハンドラーで重複していた「json_body 取得 → dict 検証 →
+    Pydantic 変換 → ValidationError / JSONDecodeError ハンドリング」を一元化する。
+    ルーター経由ハンドラーの入力検証を統一し、400 応答仕様を 1 箇所に集約する。
+
+    Args:
+        resolver: ``current_event.json_body`` を持つ APIGatewayHttpResolver
+            または Router インスタンス。
+        model_class: ボディを検証する Pydantic モデルクラス。
+
+    Returns:
+        検証済みモデルインスタンス。失敗時は 400 ``Response``
+        (非 dict ボディ / バリデーションエラー / 不正 JSON)。呼び出し側は
+        ``isinstance(result, Response)`` で早期 return して分岐する。
+    """
+    try:
+        body = resolver.current_event.json_body
+        if not isinstance(body, dict):
+            return Response(
+                status_code=400,
+                content_type=content_types.APPLICATION_JSON,
+                body=json.dumps({"error": "Request body must be a JSON object"}),
+            )
+        return model_class(**body)
+    except ValidationError as e:
+        logger.warning("Validation error", extra={"error": str(e)})
+        return make_validation_error_response(e)
+    except json.JSONDecodeError:
+        return Response(
+            status_code=400,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": "Invalid JSON body"}),
+        )
 
 
 def _is_jwt_dev_fallback_enabled() -> bool:

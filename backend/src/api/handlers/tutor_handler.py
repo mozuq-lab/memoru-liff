@@ -5,9 +5,8 @@ import json
 from aws_lambda_powertools import Logger, Tracer
 from aws_lambda_powertools.event_handler import Response, content_types
 from aws_lambda_powertools.event_handler.api_gateway import Router
-from pydantic import ValidationError
 
-from api.shared import get_user_id_from_context, make_validation_error_response
+from api.shared import get_user_id_from_context, parse_json_body
 from models.tutor import (
     SendMessageRequest,
     SessionListResponse,
@@ -42,24 +41,10 @@ def create_session():
     """Start a new tutor session."""
     user_id = get_user_id_from_context(router)
 
-    try:
-        body = router.current_event.json_body
-        if not isinstance(body, dict):
-            return Response(
-                status_code=400,
-                content_type=content_types.APPLICATION_JSON,
-                body=json.dumps({"error": "Request body must be a JSON object"}),
-            )
-        request = StartSessionRequest(**body)
-    except ValidationError as e:
-        logger.warning("Validation error", extra={"error": str(e)})
-        return make_validation_error_response(e)
-    except json.JSONDecodeError:
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid JSON body"}),
-        )
+    parsed = parse_json_body(router, StartSessionRequest)
+    if isinstance(parsed, Response):
+        return parsed
+    request = parsed
 
     try:
         session = tutor_service.start_session(
@@ -127,24 +112,10 @@ def send_message(session_id: str):
     """Send message to tutor and get response."""
     user_id = get_user_id_from_context(router)
 
-    try:
-        body = router.current_event.json_body
-        if not isinstance(body, dict):
-            return Response(
-                status_code=400,
-                content_type=content_types.APPLICATION_JSON,
-                body=json.dumps({"error": "Request body must be a JSON object"}),
-            )
-        request = SendMessageRequest(**body)
-    except ValidationError as e:
-        logger.warning("Validation error", extra={"error": str(e)})
-        return make_validation_error_response(e)
-    except json.JSONDecodeError:
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid JSON body"}),
-        )
+    parsed = parse_json_body(router, SendMessageRequest)
+    if isinstance(parsed, Response):
+        return parsed
+    request = parsed
 
     try:
         result = tutor_service.send_message(

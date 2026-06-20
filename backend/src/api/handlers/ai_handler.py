@@ -5,9 +5,8 @@ import json
 from aws_lambda_powertools import Logger, Tracer
 from aws_lambda_powertools.event_handler import Response, content_types
 from aws_lambda_powertools.event_handler.api_gateway import Router
-from pydantic import ValidationError
 
-from api.shared import get_user_id_from_context, map_ai_error_to_http, make_validation_error_response
+from api.shared import get_user_id_from_context, map_ai_error_to_http, parse_json_body
 from services.card_service import CardService
 from models.generate import (
     GenerateCardsRequest,
@@ -46,24 +45,10 @@ def generate_cards():
     user_id = get_user_id_from_context(router)
     logger.info("Generating cards", extra={"user_id": user_id})
 
-    try:
-        body = router.current_event.json_body
-        if not isinstance(body, dict):
-            return Response(
-                status_code=400,
-                content_type=content_types.APPLICATION_JSON,
-                body=json.dumps({"error": "Request body must be a JSON object"}),
-            )
-        request = GenerateCardsRequest(**body)
-    except ValidationError as e:
-        logger.warning("Validation error", extra={"error": str(e)})
-        return make_validation_error_response(e)
-    except json.JSONDecodeError:
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid JSON body"}),
-        )
+    parsed = parse_json_body(router, GenerateCardsRequest)
+    if isinstance(parsed, Response):
+        return parsed
+    request = parsed
 
     try:
         ai_service = create_ai_service()
@@ -110,24 +95,10 @@ def generate_from_url():
     user_id = get_user_id_from_context(router)
     logger.info("Generating cards from URL", extra={"user_id": user_id})
 
-    try:
-        body = router.current_event.json_body
-        if not isinstance(body, dict):
-            return Response(
-                status_code=400,
-                content_type=content_types.APPLICATION_JSON,
-                body=json.dumps({"error": "Request body must be a JSON object"}),
-            )
-        request = GenerateFromUrlRequest(**body)
-    except ValidationError as e:
-        logger.warning("Validation error", extra={"error": str(e)})
-        return make_validation_error_response(e)
-    except json.JSONDecodeError:
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid JSON body"}),
-        )
+    parsed = parse_json_body(router, GenerateFromUrlRequest)
+    if isinstance(parsed, Response):
+        return parsed
+    request = parsed
 
     # Duplicate URL detection warning.
     # C-5: use the paginated reference-URL lookup so cards beyond the first
@@ -257,24 +228,10 @@ def refine_card():
     user_id = get_user_id_from_context(router)
     logger.info("Refining card", extra={"user_id": user_id})
 
-    try:
-        body = router.current_event.json_body
-        if not isinstance(body, dict):
-            return Response(
-                status_code=400,
-                content_type=content_types.APPLICATION_JSON,
-                body=json.dumps({"error": "Request body must be a JSON object"}),
-            )
-        request = RefineCardRequest(**body)
-    except ValidationError as e:
-        logger.warning("Validation error", extra={"error": str(e)})
-        return make_validation_error_response(e)
-    except json.JSONDecodeError:
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid JSON body"}),
-        )
+    parsed = parse_json_body(router, RefineCardRequest)
+    if isinstance(parsed, Response):
+        return parsed
+    request = parsed
 
     try:
         ai_service = create_ai_service()

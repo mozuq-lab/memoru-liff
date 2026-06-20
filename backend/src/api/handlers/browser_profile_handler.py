@@ -6,9 +6,9 @@ from typing import Optional
 from aws_lambda_powertools import Logger, Tracer
 from aws_lambda_powertools.event_handler import Response, content_types
 from aws_lambda_powertools.event_handler.api_gateway import Router
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field
 
-from api.shared import get_user_id_from_context, make_validation_error_response
+from api.shared import get_user_id_from_context, parse_json_body
 from services.browser_profile_service import (
     BrowserProfileService,
     BrowserProfileError,
@@ -68,24 +68,10 @@ def create_profile():
     user_id = get_user_id_from_context(router)
     logger.info("Creating browser profile", extra={"user_id": user_id})
 
-    try:
-        body = router.current_event.json_body
-        if not isinstance(body, dict):
-            return Response(
-                status_code=400,
-                content_type=content_types.APPLICATION_JSON,
-                body=json.dumps({"error": "Request body must be a JSON object"}),
-            )
-        request = BrowserProfileCreateRequest(**body)
-    except ValidationError as e:
-        logger.warning("Validation error", extra={"error": str(e)})
-        return make_validation_error_response(e)
-    except json.JSONDecodeError:
-        return Response(
-            status_code=400,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Invalid JSON body"}),
-        )
+    parsed = parse_json_body(router, BrowserProfileCreateRequest)
+    if isinstance(parsed, Response):
+        return parsed
+    request = parsed
 
     try:
         profile = profile_service.create_profile(user_id=user_id, name=request.name)
