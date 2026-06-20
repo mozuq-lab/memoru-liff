@@ -49,16 +49,15 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     return () => window.removeEventListener(LOGIN_REDIRECT_FAILED_EVENT, handler);
   }, []);
 
-  // 認証が回復したらリダイレクトエラーを解消する。
-  useEffect(() => {
-    if (auth.isAuthenticated && redirectError) {
-      setRedirectError(null);
-    }
-  }, [auth.isAuthenticated, redirectError]);
-
   // auth.error（初期化・login 由来）と redirectError（リダイレクト失敗由来）を統合する。
+  // 認証済みのとき（再ログイン成功後など）は redirectError を表に出さない。render 中に
+  // 導出することで「認証回復時にクリアする」副作用 effect を持たずに済む
+  // （react-hooks/set-state-in-effect を回避）。
   const value = useMemo<AuthContextType>(
-    () => ({ ...auth, error: auth.error ?? redirectError }),
+    () => ({
+      ...auth,
+      error: auth.error ?? (auth.isAuthenticated ? null : redirectError),
+    }),
     [auth, redirectError]
   );
 
