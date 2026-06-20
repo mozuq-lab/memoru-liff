@@ -67,24 +67,40 @@ class TutorSessionRepository:
         self.table.delete_item(Key={"user_id": user_id, "session_id": session_id})
 
     def query_sessions(self, user_id: str, status: str | None = None) -> list[dict]:
-        """Query a user's sessions, optionally filtered by status via GSI."""
+        """Query a user's sessions, optionally filtered by status via GSI.
+
+        M-15: DynamoDB の Query は 1MB 上限でページ分割されるため、
+        LastEvaluatedKey を辿って全ページを取得する。これを怠ると
+        セッション数が多いユーザーで古いセッションが取得されず、
+        _auto_end_active_sessions でアクティブセッションを見逃す。
+        """
         if status:
             # Use GSI for status filtering
-            response = self.table.query(
-                IndexName="user_id-status-index",
-                KeyConditionExpression="user_id = :uid AND #st = :status",
-                ExpressionAttributeValues={
+            query_kwargs: dict[str, Any] = {
+                "IndexName": "user_id-status-index",
+                "KeyConditionExpression": "user_id = :uid AND #st = :status",
+                "ExpressionAttributeValues": {
                     ":uid": user_id,
                     ":status": status,
                 },
-                ExpressionAttributeNames={"#st": "status"},
-            )
+                "ExpressionAttributeNames": {"#st": "status"},
+            }
         else:
-            response = self.table.query(
-                KeyConditionExpression="user_id = :uid",
-                ExpressionAttributeValues={":uid": user_id},
-            )
-        return response.get("Items", [])
+            query_kwargs = {
+                "KeyConditionExpression": "user_id = :uid",
+                "ExpressionAttributeValues": {":uid": user_id},
+            }
+
+        items: list[dict] = []
+        while True:
+            response = self.table.query(**query_kwargs)
+            items.extend(response.get("Items", []))
+            last_key = response.get("LastEvaluatedKey")
+            if not last_key:
+                break
+            query_kwargs["ExclusiveStartKey"] = last_key
+
+        return items
 
     # ---- In-flight lock ----
 

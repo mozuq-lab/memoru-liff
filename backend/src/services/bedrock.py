@@ -275,7 +275,17 @@ class BedrockService:
             context="grading",
         )
 
-        grade = int(data["grade"])
+        try:
+            grade = int(data["grade"])
+        except (ValueError, TypeError) as e:
+            raise BedrockParseError(
+                f"Failed to convert 'grade' to int: {data['grade']!r}"
+            ) from e
+        # M-17: SM-2 grade は 0〜5 の範囲。LLM が範囲外 (例: 7, -1) を返した
+        # 場合に SRS アルゴリズムへ異常値が渡るのを防ぐ。上位の Pydantic 検証
+        # に依存せず、サービス層でサニタイズする。
+        if not (0 <= grade <= 5):
+            raise BedrockParseError(f"grade out of range (0-5): {grade}")
         reasoning = str(data["reasoning"])
 
         processing_time_ms = int((time.time() - start_time) * 1000)
@@ -475,7 +485,14 @@ class BedrockService:
                     time.sleep(delay)
                     continue
                 raise
+            except BedrockServiceError:
+                # L-13: リトライ対象外のサービスエラー (基底 BedrockServiceError や
+                # BedrockParseError 等) はここで即時伝播させ、ループを素通りして
+                # 末尾の `raise last_error` に到達しない挙動を明示する。
+                raise
 
+        # 全 attempt 後にここへ到達するのは理論上のみ (各分岐が return/raise する)。
+        # last_error の None ガードは保険。
         raise last_error or BedrockServiceError("Unknown error during retry")
 
     def _invoke_claude(self, prompt: str) -> str:
@@ -513,8 +530,23 @@ class BedrockService:
             )
 
             response_body = json.loads(response["body"].read())
-            return response_body["content"][0]["text"]
+            # L-11: content が空、または先頭ブロックが text 型でない (tool_use 等)
+            # 場合に IndexError/KeyError が except Exception 経由で誤った文言に
+            # ラップされるのを防ぎ、明示的に BedrockParseError を送出する。
+            content = response_body.get("content", [])
+            if not content or content[0].get("type") not in (None, "text"):
+                raise BedrockParseError(
+                    "Unexpected Bedrock response format: missing text content block"
+                )
+            try:
+                return content[0]["text"]
+            except (KeyError, IndexError) as e:
+                raise BedrockParseError(
+                    "Unexpected Bedrock response format: missing 'text' field"
+                ) from e
 
+        except BedrockParseError:
+            raise
         except ClientError as e:
             error_code = e.response.get("Error", {}).get("Code", "")
 

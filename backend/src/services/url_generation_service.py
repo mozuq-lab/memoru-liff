@@ -50,9 +50,23 @@ from services.url_cards_store import UrlCardsStore
 logger = Logger()
 tracer = Tracer()
 
-# 共有サービスインスタンス（line_handler / worker の双方から利用される）。
-line_service = LineService()
+# L-19: LineService を import 時に即時生成すると、webhook Lambda のコールドスタートで
+# webhook/dependencies.py 側の LineService() と二重に
+# _load_credentials_from_secrets_manager() が走り、同一シークレットへ Secrets Manager
+# API コールが 2 回発生する。本モジュールは webhook Lambda では「インライン実行時のみ」
+# line_service を必要とするため、遅延生成（_get_line_service）にして無駄な呼び出しを
+# 避ける。テストは `monkeypatch.setattr(svc, "line_service", mock)` で差し替えるため、
+# module グローバル `line_service` を参照する設計を維持する（差し替え済みなら再生成しない）。
+line_service: LineService | None = None
 url_cards_store = UrlCardsStore()
+
+
+def _get_line_service() -> LineService:
+    """共有 LineService を遅延生成して返す（コールドスタート時の二重シークレット読みを回避）。"""
+    global line_service
+    if line_service is None:
+        line_service = LineService()
+    return line_service
 
 
 class UrlGenerationError(Exception):
@@ -201,7 +215,7 @@ def generate_url_cards_core(
         user_id=user_id,
         ref_key=ref_key,
     )
-    line_service.push_message(line_user_id, [carousel])
+    _get_line_service().push_message(line_user_id, [carousel])
 
     logger.info(
         f"URL card generation complete: {len(result.cards)} cards, url={url}"
@@ -218,13 +232,14 @@ def notify_generation_failure(line_user_id: str, message: str) -> None:
         message: ユーザー向けエラーメッセージ。空文字の場合は汎用エラーを送る。
     """
     try:
+        svc = _get_line_service()
         if message:
-            line_service.push_message(
+            svc.push_message(
                 line_user_id,
                 [create_url_generation_error_message(message)],
             )
         else:
-            line_service.push_message(line_user_id, [create_error_message()])
+            svc.push_message(line_user_id, [create_error_message()])
     except Exception as e:  # pragma: no cover - 通知失敗は判定に影響させない
         logger.error(f"Failed to push generation-failure notification: {e}")
 

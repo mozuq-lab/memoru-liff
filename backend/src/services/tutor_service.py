@@ -73,6 +73,10 @@ def _close_quietly(sm: Any) -> None:
 class TutorService:
     """Manages tutor session lifecycle and DynamoDB persistence."""
 
+    # L-12: 後方互換のためのデフォルト値。実際に使用される値は __init__ で
+    # インスタンス変数として再評価し (self.MAX_ROUNDS 等)、テストで os.environ を
+    # 変更した場合にも反映されるようにする。クラス変数は import 時に固定される
+    # ため、これらは「既定値の参照元」としてのみ残す。
     MAX_ROUNDS = int(os.environ.get("TUTOR_MAX_ROUNDS", "20"))
     TIMEOUT_MINUTES = int(os.environ.get("TUTOR_TIMEOUT_MINUTES", "30"))
     TTL_DAYS = 7
@@ -93,6 +97,14 @@ class TutorService:
             dynamodb_resource=dynamodb_resource,
         )
         self.table_name = self._repo.table_name
+
+        # L-12: import 時固定のクラス変数ではなく、インスタンス生成時に環境変数を
+        # 評価する。これによりテストや実行時の環境変数変更が反映される。
+        self.MAX_ROUNDS = int(os.environ.get("TUTOR_MAX_ROUNDS", "20"))
+        self.TIMEOUT_MINUTES = int(os.environ.get("TUTOR_TIMEOUT_MINUTES", "30"))
+        self.LOCK_TIMEOUT_SECONDS = int(
+            os.environ.get("TUTOR_LOCK_TIMEOUT_SECONDS", "150")
+        )
 
         self.ai_service = ai_service if ai_service is not None else create_tutor_ai_service()
         self.session_manager_factory = session_manager_factory or create_tutor_session_manager

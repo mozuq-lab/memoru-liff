@@ -26,7 +26,6 @@ from services.flex_messages import (
     create_url_generation_error_message,
     create_url_generation_progress_message,
 )
-from services.line_service import LineApiError
 from services.url_content_service import UrlContentService
 from services.url_generation_service import generate_and_push_url_cards
 from utils.url_validator import UrlValidationError, validate_url
@@ -207,13 +206,19 @@ def handle_url_card_generation(
         return
 
     # Send progress message first (reply token はここで消費される)。
+    # M-20: 進捗 reply の失敗は best-effort（生成本体のディスパッチを止めない）。
+    # LineApiError 以外の想定外例外（KeyError 等）が outer loop の release まで
+    # 伝播すると、enqueue 済みにもかかわらず LINE が再配信して二重 enqueue を
+    # 誘発しうる（SQS ワーカー側冪等で二重処理自体は防がれるが窓を残さない）。
+    # よって LineApiError に限定せず Exception 全般を握りつぶし、後段の enqueue へ
+    # 影響を波及させない。
     try:
         deps.line_service.reply_message(
             reply_token,
             [create_url_generation_progress_message(url)],
         )
-    except LineApiError:
-        logger.warning("Failed to send progress message")
+    except Exception as e:
+        logger.warning(f"Failed to send progress message: {e}")
 
     # ディスパッチ: 非同期（SQS）かインライン（同期）か。
     if _should_enqueue():
@@ -303,6 +308,11 @@ def handle_save_url_cards(
     """
     logger.info(f"Saving URL cards for user: {user_id}, ref_key: {ref_key}")
 
+    # M-21: get_pending_cards の `saved` フィールドはここでは判定に使わない
+    # （GetItem 時点のスナップショットでしかなく、複数 Lambda 同時実行下では
+    # TOCTOU になる）。`pending.get("cards")` のチェックは「レコード欠落 / TTL
+    # 期限切れ」の検出専用。二重保存防止は後段の `mark_saved`（DynamoDB の
+    # 条件付き書き込み）が唯一の権威あるゲートであり、ここに一元化している。
     pending = deps.url_cards_store.get_pending_cards(ref_key)
     if not pending or not pending.get("cards"):
         # Record missing or TTL-expired.
@@ -316,6 +326,8 @@ def handle_save_url_cards(
         return
 
     # Two-tap / double-save guard: only the first tap proceeds.
+    # M-21: 条件付き update が二重保存防止の唯一のゲート。複数 Lambda が
+    # 同時に get_pending_cards を通過しても、mark_saved に成功するのは 1 つだけ。
     if not deps.url_cards_store.mark_saved(ref_key):
         logger.info(f"URL cards already saved for ref_key: {ref_key}")
         deps.line_service.reply_message(
@@ -347,6 +359,20 @@ def handle_save_url_cards(
             saved_count += 1
         except Exception as e:
             logger.warning(f"Failed to save card: {e}")
+
+    # M-19: 全件保存に失敗した場合（DynamoDB / バリデーションエラー等）は
+    # 「✅ 0枚のカードを保存しました！」という誤成功通知を出さず、エラーを通知する。
+    # mark_saved は既に立っているため再タップでは「保存済み」扱いになるが、
+    # ユーザーには URL の再送（＝新しい ref_key での再生成）で回復できる旨を促す。
+    if saved_count == 0:
+        logger.warning(f"All cards failed to save for ref_key: {ref_key}")
+        deps.line_service.reply_message(
+            reply_token,
+            [create_url_generation_error_message(
+                "カードの保存に失敗しました。もう一度 URL を送信してください。"
+            )],
+        )
+        return
 
     deps.line_service.reply_message(
         reply_token,
@@ -427,6 +453,19 @@ def handle_save_url_cards_legacy(
                 saved_count += 1
             except Exception as e:
                 logger.warning(f"Failed to save card: {e}")
+
+        # M-19: 全件保存失敗時に「✅ 0枚のカードを保存しました！」という誤成功
+        # 通知を出さない。レガシー経路は ref_key を持たないため再送（URL 再投稿）
+        # で回復できる。
+        if saved_count == 0:
+            logger.warning(f"All cards failed to save (legacy) for url: {url}")
+            deps.line_service.reply_message(
+                reply_token,
+                [create_url_generation_error_message(
+                    "カードの保存に失敗しました。もう一度 URL を送信してください。"
+                )],
+            )
+            return
 
         deps.line_service.reply_message(
             reply_token,

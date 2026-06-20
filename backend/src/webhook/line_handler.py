@@ -63,6 +63,10 @@ _URL_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# L-21: URL 末尾に紛れ込みやすい句読点・閉じ括弧（ASCII / 全角）。
+# 例:「https://example.com/path).」→ 抽出 URL から末尾の ).等を除去する。
+_URL_TRAILING_CHARS = ".,;:!?)]}'\"。、）｝】」』！？"
+
 
 def detect_url_in_message(text: str) -> Optional[str]:
     """Detect and extract URL from message text.
@@ -79,7 +83,8 @@ def detect_url_in_message(text: str) -> Optional[str]:
     match = _URL_PATTERN.search(text)
     if not match:
         return None
-    return match.group(0)
+    # L-21: 末尾の句読点・閉じ括弧を除去し、抽出 URL と実フェッチ URL の乖離を防ぐ。
+    return match.group(0).rstrip(_URL_TRAILING_CHARS)
 
 
 def parse_postback_data(data: str) -> Dict[str, str]:
@@ -195,7 +200,10 @@ def handle_postback(event: LineEvent) -> None:
                 # Backward-compat: old-format postbacks still carry url=.
                 url = unquote(data.get("url", ""))
                 count_str = data.get("count", "10")
+                # M-22: postback の count は外部入力。上限・下限で clamp して
+                # 想定外の target_count（巨大値や 0）が下流の生成処理に渡るのを防ぐ。
                 count = int(count_str) if count_str.isdigit() else 10
+                count = max(1, min(count, 50))
                 if url:
                     handle_save_url_cards_legacy(
                         user_id, event.source_user_id, url, count, event.reply_token
@@ -212,6 +220,17 @@ def handle_postback(event: LineEvent) -> None:
                 [{"type": "text", "text": "不明なアクションです。"}],
             )
     except LineApiError as e:
+        # L-18: LINE API エラー（reply 失敗・rate limit 等）はここで握りつぶし、
+        # 呼び出し元の handler ループでは成功扱い（mark_processed）とする。
+        # これは意図的な設計判断:
+        #   - reply token の有効期限は数秒と短く、LINE が再配信しても同じ token は
+        #     既に失効しているため再 reply は成功しない（release しても無駄）。
+        #   - grade アクションは submit_review（非冪等な SRS 更新）を先に実行済みで、
+        #     reply だけが失敗するケースがある。ここで release して LINE に再配信
+        #     させると submit_review が二重実行され、SRS 状態が壊れる方が有害。
+        # よって「reply 失敗 = アクション本体は完了済み」とみなし mark_processed
+        # に倒す。本当にアクション本体まで失敗するケースは LineApiError ではなく
+        # 個別の例外（CardNotFoundError 等）として各ハンドラ内で処理される。
         logger.error(f"LINE API error: {e}")
 
 
@@ -264,10 +283,13 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
                 "body": json.dumps({"error": "Invalid signature"}),
             }
     except SignatureVerificationError as e:
+        # L-20: channel_secret 未設定など設定ミス時は fail-closed で 500 を返すが、
+        # レスポンスボディには内部のエラー名称を載せず汎用文言に留める
+        # （攻撃者にサービス設定ミスを示唆しない）。詳細はログにのみ残す。
         logger.error(f"Signature verification error: {e}")
         return {
             "statusCode": 500,
-            "body": json.dumps({"error": "Signature verification error"}),
+            "body": json.dumps({"error": "Internal server error"}),
         }
 
     # Parse and process events

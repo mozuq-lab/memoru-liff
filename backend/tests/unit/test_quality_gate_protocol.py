@@ -326,7 +326,10 @@ class TestModelProviderSelectionFinal:
         custom_model_id = "anthropic.claude-3-sonnet-20240229-v1:0"
         with patch.dict("os.environ", {"ENVIRONMENT": "prod", "BEDROCK_MODEL_ID": custom_model_id}):
             StrandsAIService()
-        mock_bedrock_cls.assert_called_once_with(model_id=custom_model_id)
+        mock_bedrock_cls.assert_called_once()
+        # max_tokens 等の付随引数に依存せず、model_id の反映のみを検証する
+        # (M-18 で BedrockModel に max_tokens=4096 を明示追加したため)
+        assert mock_bedrock_cls.call_args.kwargs["model_id"] == custom_model_id
 
     @patch("services.strands_service.BedrockModel")
     @patch("services.strands_service.OllamaModel")

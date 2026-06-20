@@ -35,6 +35,10 @@ logger = Logger()
 tracer = Tracer()
 app = APIGatewayHttpResolver()
 
+# 許可する language の許可リスト（ルーター経由の Pydantic Literal["ja", "en"] と対称にする）。
+# スタンドアロンハンドラーはクエリパラメーターを Pydantic 検証しないため、ここで明示的に検証する。
+ALLOWED_LANGUAGES = frozenset({"ja", "en"})
+
 # Register domain routers
 app.include_router(user_router)
 app.include_router(cards_router)
@@ -98,6 +102,8 @@ def grade_ai_handler(event: dict, context: Any) -> dict:
             return _make_lambda_response(400, {"error": "Invalid request", "details": json.loads(e.json())})
 
         language = (event.get("queryStringParameters") or {}).get("language", "ja")
+        if language not in ALLOWED_LANGUAGES:
+            return _make_lambda_response(400, {"error": "Unsupported language. Use 'ja' or 'en'."})
 
         try:
             card = card_service.get_card(user_id, card_id)
@@ -158,6 +164,8 @@ def advice_handler(event: dict, context: Any) -> dict:
         logger.info("Advice request", extra={"user_id": user_id})
 
         language = (event.get("queryStringParameters") or {}).get("language", "ja")
+        if language not in ALLOWED_LANGUAGES:
+            return _make_lambda_response(400, {"error": "Unsupported language. Use 'ja' or 'en'."})
 
         review_summary = review_service.get_review_summary(user_id)
         review_summary_dict = dataclasses.asdict(review_summary)

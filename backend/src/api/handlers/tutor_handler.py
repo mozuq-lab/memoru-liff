@@ -32,6 +32,9 @@ router = Router()
 
 tutor_service = TutorService()
 
+# list_sessions の status クエリパラメータ許可リスト (models/tutor.py の Literal と一致)
+VALID_SESSION_STATUSES = frozenset({"active", "ended", "timed_out"})
+
 
 @router.post("/tutor/sessions")
 @tracer.capture_method
@@ -41,6 +44,12 @@ def create_session():
 
     try:
         body = router.current_event.json_body
+        if not isinstance(body, dict):
+            return Response(
+                status_code=400,
+                content_type=content_types.APPLICATION_JSON,
+                body=json.dumps({"error": "Request body must be a JSON object"}),
+            )
         request = StartSessionRequest(**body)
     except ValidationError as e:
         logger.warning("Validation error", extra={"error": str(e)})
@@ -120,6 +129,12 @@ def send_message(session_id: str):
 
     try:
         body = router.current_event.json_body
+        if not isinstance(body, dict):
+            return Response(
+                status_code=400,
+                content_type=content_types.APPLICATION_JSON,
+                body=json.dumps({"error": "Request body must be a JSON object"}),
+            )
         request = SendMessageRequest(**body)
     except ValidationError as e:
         logger.warning("Validation error", extra={"error": str(e)})
@@ -229,6 +244,17 @@ def list_sessions():
     params = router.current_event.query_string_parameters or {}
     status = params.get("status")
     deck_id = params.get("deck_id")
+
+    # L-2/L-4: status は許可リストで検証し、不正値は 400 を返す
+    # (未検証だと存在しない status で原因不明の空リストが返るため)。
+    if status is not None and status not in VALID_SESSION_STATUSES:
+        return Response(
+            status_code=400,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps(
+                {"error": "Invalid status. Use 'active', 'ended', or 'timed_out'."}
+            ),
+        )
 
     sessions = tutor_service.list_sessions(
         user_id=user_id,

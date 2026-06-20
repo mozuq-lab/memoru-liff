@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from aws_lambda_powertools import Logger
+from botocore.exceptions import ClientError
 
 from utils.dynamodb_client import get_dynamodb_resource
 
@@ -165,12 +166,34 @@ class DynamoDBSessionManager:
         if not messages:
             return False
 
+        # M-16: GetItem で求めた last_index と UpdateItem の間に別の
+        # append_message が割り込むと、誤ったインデックスのメッセージに
+        # related_cards を書き込んでしまう (TOCTOU)。ConditionExpression で
+        # 「last_index の次の要素が存在しない (= 末尾のまま)」ことを保証し、
+        # メッセージが追加されていた場合は静かに書き込みをスキップする。
         last_index = len(messages) - 1
-        self.table.update_item(
-            Key={"user_id": self.user_id, "session_id": self.session_id},
-            UpdateExpression=f"SET messages[{last_index}].related_cards = :rc",
-            ExpressionAttributeValues={":rc": related_cards},
-        )
+        next_index = last_index + 1
+        try:
+            self.table.update_item(
+                Key={"user_id": self.user_id, "session_id": self.session_id},
+                UpdateExpression=f"SET messages[{last_index}].related_cards = :rc",
+                ConditionExpression=f"attribute_not_exists(messages[{next_index}])",
+                ExpressionAttributeValues={":rc": related_cards},
+            )
+        except ClientError as e:
+            if e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+                # 別の append_message が割り込んで末尾位置がずれた。
+                # 誤ったメッセージへの書き込みを避けるためスキップする。
+                logger.warning(
+                    "Skipped related_cards persistence: message list changed "
+                    "between read and write (concurrent append)",
+                    extra={
+                        "user_id": self.user_id,
+                        "session_id": self.session_id,
+                    },
+                )
+                return False
+            raise
         return True
 
     def read_messages(self) -> list[dict]:

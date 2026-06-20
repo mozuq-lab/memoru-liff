@@ -70,6 +70,12 @@ def submit_review(card_id: str):
 
     try:
         body = router.current_event.json_body
+        if not isinstance(body, dict):
+            return Response(
+                status_code=400,
+                content_type=content_types.APPLICATION_JSON,
+                body=json.dumps({"error": "Request body must be a JSON object"}),
+            )
         request = ReviewRequest(**body)
     except ValidationError as e:
         logger.warning("Validation error", extra={"error": str(e)})
