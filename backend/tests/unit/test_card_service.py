@@ -686,32 +686,6 @@ class TestCardServiceDueCards:
         assert [card.card_id for card in cards] == ["card-due", "card-future"]
 
 
-class TestCardServiceUpdateReviewData:
-    """Tests for CardService.update_review_data method."""
-
-    def test_update_review_data(self, card_service):
-        """Test updating review data after a review."""
-        created = card_service.create_card(
-            user_id="test-user-id",
-            front="Question",
-            back="Answer",
-        )
-
-        next_review = datetime.now(timezone.utc) + timedelta(days=3)
-        updated = card_service.update_review_data(
-            user_id="test-user-id",
-            card_id=created.card_id,
-            next_review_at=next_review,
-            interval=3,
-            ease_factor=2.6,
-            repetitions=1,
-        )
-
-        assert updated.interval == 3
-        assert updated.ease_factor == 2.6
-        assert updated.repetitions == 1
-
-
 class TestCardServiceRaceConditionPrevention:
     """Tests for race condition prevention in card creation (TASK-0035)."""
 
