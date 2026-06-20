@@ -34,6 +34,13 @@ import { authService } from "./auth";
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
 
 /**
+ * M-37: getCards の全ページ取得ループに対するタイムアウト上限（ミリ秒）。
+ * request() の 1 リクエストあたり 30 秒タイムアウトとは別に、ループ全体が
+ * 無限にハングしないよう 1 本の合成シグナルで全ページを縛る。
+ */
+const GET_CARDS_LOOP_TIMEOUT_MS = 60_000;
+
+/**
  * クエリパラメータからクエリ文字列を構築する。
  * undefined / null / 空文字の値はスキップする。
  * パラメータが 1 件以上ある場合のみ先頭に "?" を付与し、無ければ空文字を返す。
@@ -72,6 +79,16 @@ export const GENERIC_ERROR_MESSAGE =
   "エラーが発生しました。時間をおいて再度お試しください。";
 
 /**
+ * L-30: セッション切れでログイン画面へリダイレクトしようとして失敗した際に
+ * 発火するグローバルイベント名。
+ * signinRedirect の失敗（リダイレクト URL 設定ミス等）がサイレントな
+ * console.error で終わると、ユーザーは「セッション切れ」エラーだけ受け取って
+ * ログイン画面に遷移できず操作不能になる。アプリ層はこのイベントを購読して
+ * UI でログイン誘導やエラー表示を行うこと。
+ */
+export const LOGIN_REDIRECT_FAILED_EVENT = "memoru:login-redirect-failed";
+
+/**
  * E-1/E-3: ユーザー表示用のエラーメッセージを返す。
  * - ApiError かつ 4xx（業務エラー）: バックエンドのメッセージをそのまま表示
  * - それ以外（5xx・ネットワーク・非 ApiError・status 不明）: 固定文言に差し替え
@@ -92,6 +109,24 @@ class ApiClient {
 
   setAccessToken(token: string | null) {
     this.accessToken = token;
+  }
+
+  /**
+   * L-30: セッション切れ時にログイン画面へリダイレクトする。
+   * signinRedirect は通常ブラウザ遷移を起こして戻ってこないが、リダイレクト
+   * 自体が失敗するケース（設定ミス等）では Promise が reject する。その失敗を
+   * console.error だけで握りつぶすとユーザーが操作不能のまま放置されるため、
+   * グローバルイベントを発火してアプリ層が UI で対処できるようにする。
+   */
+  private redirectToLogin(): void {
+    authService.login().catch((e) => {
+      console.error("Login redirect failed:", e);
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent(LOGIN_REDIRECT_FAILED_EVENT, { detail: e }),
+        );
+      }
+    });
   }
 
   private async request<T>(
@@ -121,9 +156,7 @@ class ApiClient {
     if (response.status === 401) {
       if (_isRetry) {
         // リトライ後も 401 - ログイン画面にリダイレクト
-        authService.login().catch((e) => {
-          console.error("Login redirect failed:", e);
-        });
+        this.redirectToLogin();
         throw new Error("Session expired");
       }
 
@@ -140,9 +173,7 @@ class ApiClient {
         return this.request<T>(endpoint, options, true);
       } catch {
         // リフレッシュ失敗 - ログイン画面にリダイレクト
-        authService.login().catch((e) => {
-          console.error("Login redirect failed:", e);
-        });
+        this.redirectToLogin();
         throw new Error("Session expired");
       }
     }
@@ -187,6 +218,14 @@ class ApiClient {
     const cards: Card[] = [];
     let cursor: string | undefined;
 
+    // M-37: request() はページごとに新しい 30 秒タイムアウトを張るため、
+    // ループ全体に対するタイムアウト上限を 1 本だけ用意し、全ページに渡す。
+    // 外部 signal が渡された場合は AbortSignal.any で合成し、どちらか早い方で中断する。
+    const loopTimeout = AbortSignal.timeout(GET_CARDS_LOOP_TIMEOUT_MS);
+    const loopSignal = options?.signal
+      ? AbortSignal.any([options.signal, loopTimeout])
+      : loopTimeout;
+
     do {
       const qs = buildQueryString({ limit: 100, deck_id: deckId, cursor });
 
@@ -196,7 +235,7 @@ class ApiClient {
         cards: Card[];
         next_cursor?: string | null;
       }>(`/cards${qs}`, {
-        signal: options?.signal,
+        signal: loopSignal,
       });
       cards.push(...response.cards);
       cursor = response.next_cursor ?? undefined;

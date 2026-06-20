@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { cardsApi, reviewsApi } from "@/services/api";
 import type { DueCard, SessionCardResult, ReconfirmCard } from "@/types";
 
@@ -59,16 +59,32 @@ export const useReviewSession = (
   const [reconfirmQueue, setReconfirmQueue] = useState<ReconfirmCard[]>([]);
   const [isReconfirmMode, setIsReconfirmMode] = useState(false);
 
+  // M-29: アンマウント後の setState を防ぐためのマウントフラグ。
+  //   reviewsApi.undoReview / cardsApi.getDueCards などのフライト中リクエストが
+  //   アンマウント後に解決した際、連鎖する setState（警告・メモリリーク）を抑止する。
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   const fetchCards = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
       const response = await cardsApi.getDueCards(undefined, deckId);
+      // M-29: アンマウント済みなら state 更新を行わない
+      if (!isMountedRef.current) return;
       setCards(response.due_cards);
     } catch {
+      if (!isMountedRef.current) return;
       setError("復習カードの取得に失敗しました");
     } finally {
-      setIsLoading(false);
+      if (isMountedRef.current) {
+        setIsLoading(false);
+      }
     }
   }, [deckId]);
 
@@ -150,6 +166,8 @@ export const useReviewSession = (
         setError(null);
         try {
           const response = await reviewsApi.submitReview(result.cardId, grade);
+          // M-29: アンマウント済みなら以降の state 更新を行わない
+          if (!isMountedRef.current) return;
 
           // 【再確認キュー追加判定】: quality 0-2 の場合のみキューに追加
           if (grade < RECONFIRM_THRESHOLD) {
@@ -184,11 +202,15 @@ export const useReviewSession = (
             setIsComplete(true);
           }
         } catch {
+          // M-29: アンマウント済みなら state 更新を行わない
+          if (!isMountedRef.current) return;
           setError("再採点の送信に失敗しました");
           setRegradeCardIndex(null);
           setIsComplete(true);
         } finally {
-          setIsSubmitting(false);
+          if (isMountedRef.current) {
+            setIsSubmitting(false);
+          }
         }
         return;
       }
@@ -202,6 +224,8 @@ export const useReviewSession = (
           currentCard.card_id,
           grade,
         );
+        // M-29: アンマウント済みなら以降の state 更新を行わない
+        if (!isMountedRef.current) return;
 
         // 【再確認キュー追加判定】: quality 0-2 の場合のみキューに追加
         // W-17 fix: setReconfirmQueue を updater 関数パターンに統一し、
@@ -232,9 +256,13 @@ export const useReviewSession = (
         setReviewedCount((prev) => prev + 1);
         moveToNext(newReconfirmQueue, currentIndex, cards.length);
       } catch {
+        // M-29: アンマウント済みなら state 更新を行わない
+        if (!isMountedRef.current) return;
         setError("採点の送信に失敗しました");
       } finally {
-        setIsSubmitting(false);
+        if (isMountedRef.current) {
+          setIsSubmitting(false);
+        }
       }
     },
     [
@@ -339,6 +367,8 @@ export const useReviewSession = (
       setError(null);
       try {
         await reviewsApi.undoReview(result.cardId);
+        // M-29: アンマウント済みなら以降の state 更新を行わない
+        if (!isMountedRef.current) return;
 
         // 【再確認キューから除去】: 対象カードが存在しない場合も filter は安全に空振りする
         setReconfirmQueue((prev) =>
@@ -360,10 +390,14 @@ export const useReviewSession = (
         setIsReconfirmMode(false);
         setIsFlipped(false);
       } catch {
+        // M-29: アンマウント済みなら state 更新を行わない
+        if (!isMountedRef.current) return;
         setError("取り消しに失敗しました");
       } finally {
-        setIsUndoing(false);
-        setUndoingIndex(null);
+        if (isMountedRef.current) {
+          setIsUndoing(false);
+          setUndoingIndex(null);
+        }
       }
     },
     [reviewResults],

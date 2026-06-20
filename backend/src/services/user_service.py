@@ -273,8 +273,18 @@ class UserService:
         try:
             # TODO: GSI 導入後は Query に置き換えてスキャンコストを削減する
             # Scan the table for users with line_user_id
+            #
+            # M-8: LINELINK#<line_user_id> ロックアイテム（C-6）を明示的に除外する。
+            # 通常ロックアイテムは line_user_id 属性を持たない設計だが、将来のコード変更や
+            # 既存データ破損で line_user_id を持ったロックアイテムが Scan にヒットすると、
+            # User.from_dynamodb_item に LINELINK# プレフィックスの user_id が渡され、
+            # 通知ジョブ等の下流処理で誤動作する。NOT begins_with で多重防御する。
             scan_kwargs = {
-                "FilterExpression": "attribute_exists(line_user_id)",
+                "FilterExpression": (
+                    "attribute_exists(line_user_id) "
+                    "AND NOT begins_with(user_id, :link_prefix)"
+                ),
+                "ExpressionAttributeValues": {":link_prefix": "LINELINK#"},
             }
 
             while True:

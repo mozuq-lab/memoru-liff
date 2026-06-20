@@ -21,11 +21,36 @@ from services.ai_service import (
 logger = Logger()
 
 
+def _is_jwt_dev_fallback_enabled() -> bool:
+    """署名検証なし dev JWT フォールバックを有効化してよいか判定する.
+
+    本番混入リスクを下げるため、以下を AND で要求する:
+
+    - ``ENVIRONMENT=dev``
+    - ``AWS_SAM_LOCAL=true`` (SAM CLI が自動設定)
+    - ``ENABLE_JWT_DEV_FALLBACK`` が明示的に ``"false"`` で**無効化されていない**こと
+
+    ``ENABLE_JWT_DEV_FALLBACK`` は専用キルスイッチ。本番 Lambda には
+    ``ENABLE_JWT_DEV_FALLBACK=false`` を設定しておくことで、設定ファイルの誤流用などで
+    ``ENVIRONMENT=dev`` / ``AWS_SAM_LOCAL=true`` が紛れ込んでも署名なし JWT を確実に拒否できる。
+    既存のローカル開発フロー（dev + SAM local）の挙動は変えないため、デフォルト（未設定）は有効のまま。
+    """
+    if os.environ.get("ENVIRONMENT", "") != "dev":
+        return False
+    if os.environ.get("AWS_SAM_LOCAL", "") != "true":
+        return False
+    # 専用キルスイッチ: 明示的に "false" の場合のみ無効化（未設定はローカル開発のため有効）。
+    if os.environ.get("ENABLE_JWT_DEV_FALLBACK", "").lower() == "false":
+        return False
+    return True
+
+
 def _jwt_dev_fallback_decode(auth_header: str | None) -> str | None:
     """Decode user_id from JWT Authorization header (dev + SAM local only).
 
-    Fallback is only activated when ENVIRONMENT=dev AND AWS_SAM_LOCAL=true.
-    Logs a warning when activated to ensure visibility.
+    署名検証を行わない開発専用フォールバック。``_is_jwt_dev_fallback_enabled()``
+    が True を返す場合のみ有効化され、有効化されるたびに WARNING ログを出力する
+    (監視アラートに接続して本番混入を検知できるようにする想定)。
 
     Args:
         auth_header: Authorization header value (e.g. "Bearer <token>").
@@ -33,10 +58,7 @@ def _jwt_dev_fallback_decode(auth_header: str | None) -> str | None:
     Returns:
         User ID (sub claim) if successfully decoded, None otherwise.
     """
-    environment = os.environ.get("ENVIRONMENT", "")
-    aws_sam_local = os.environ.get("AWS_SAM_LOCAL", "")
-
-    if environment != "dev" or aws_sam_local != "true":
+    if not _is_jwt_dev_fallback_enabled():
         return None
 
     if not auth_header or not auth_header.startswith("Bearer "):
@@ -48,15 +70,21 @@ def _jwt_dev_fallback_decode(auth_header: str | None) -> str | None:
         payload += "=" * (4 - len(payload) % 4)
         decoded = json.loads(base64.urlsafe_b64decode(payload))
         user_id = decoded.get("sub")
-        if user_id:
-            logger.warning(
-                "JWT dev fallback activated",
-                extra={"user_id": user_id, "environment": environment},
-            )
-        return user_id
     except Exception as e:
-        logger.error("Failed to decode JWT from Authorization header", extra={"error": str(e)})
+        # 例外メッセージ (str(e)) にはデコード途中のトークン断片が混入し得るため、
+        # トークン本体は出さず例外クラス名のみを記録する。
+        logger.error(
+            "Failed to decode JWT from Authorization header (dev fallback)",
+            extra={"error": type(e).__name__},
+        )
         return None
+
+    if user_id:
+        logger.warning(
+            "JWT dev fallback activated (UNVERIFIED signature) — must never run in production",
+            extra={"user_id": user_id, "environment": os.environ.get("ENVIRONMENT", "")},
+        )
+    return user_id
 
 
 def get_user_id_from_context(resolver) -> str:
@@ -82,7 +110,7 @@ def get_user_id_from_context(resolver) -> str:
     except (KeyError, TypeError, AttributeError) as e:
         logger.warning("Failed to extract user_id from authorizer context", extra={"error": str(e)})
 
-    # Dev fallback: ENVIRONMENT=dev AND AWS_SAM_LOCAL=true required
+    # Dev fallback: ENVIRONMENT=dev AND AWS_SAM_LOCAL=true AND ENABLE_JWT_DEV_FALLBACK=true required
     auth_header = resolver.current_event.get_header_value("Authorization")
     user_id = _jwt_dev_fallback_decode(auth_header)
     if user_id:
@@ -114,7 +142,7 @@ def get_user_id_from_event(event: dict) -> str | None:
     except (KeyError, TypeError, AttributeError):
         pass
 
-    # Dev fallback: ENVIRONMENT=dev AND AWS_SAM_LOCAL=true required
+    # Dev fallback: ENVIRONMENT=dev AND AWS_SAM_LOCAL=true AND ENABLE_JWT_DEV_FALLBACK=true required
     auth_header = (event.get("headers") or {}).get("authorization", "")
     return _jwt_dev_fallback_decode(auth_header)
 

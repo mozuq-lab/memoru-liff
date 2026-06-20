@@ -80,4 +80,13 @@ export const oidcConfig: UserManagerSettings = {
   // localStorage は使用しない（XSS 時の永続的なトークン窃取を避けるため、
   // タブ単位・セッション単位の sessionStorage に留める）。
   userStore: new WebStorageStateStore({ store: window.sessionStorage }),
+
+  // 【stateStore設定】(M-23): 認証フロー中の PKCE code_verifier / state / nonce
+  // の保存先を sessionStorage に明示固定する。
+  // oidc-client-ts の stateStore 既定値は localStorage であり、未指定だと
+  // PKCE の秘密情報が localStorage に平文で残留し XSS による窃取リスクが残る。
+  // userStore と同じ sessionStorage に揃えることで、認証フロー中の機密データを
+  // タブ単位のストレージに閉じ込める。refresh_token 経由のサイレントリニューは
+  // iframe を使わないため sessionStorage 化による機能影響はない。
+  stateStore: new WebStorageStateStore({ store: window.sessionStorage }),
 };

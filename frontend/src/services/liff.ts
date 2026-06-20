@@ -48,12 +48,28 @@ export const getLiffProfile = async () => {
  * 【実装方針】: LIFF SDK の getIDToken API を使用
  * 【テスト対応】: getLiffIdToken テスト
  * 🔵 青信号: LIFF SDK公式APIに基づく
- * @returns {string | null} ID Token または null
+ *
+ * 【前提 (M-38)】: 本関数は `initializeLiff()` の完了後にのみ呼ぶこと。
+ * 未初期化・未ログイン状態では LINE 由来の ID トークンが存在しないため、
+ * 内部で `liff.isLoggedIn()` を確認し、未ログイン時や SDK が未初期化で
+ * 例外を投げる場合は `null` を返す。これにより呼び出し側が誤って
+ * null/無効トークンをサーバーへ送信するリスクを低減する。
+ *
+ * @returns {string | null} ID Token、未初期化・未ログイン時は null
  */
 export const getLiffIdToken = (): string | null => {
-  // 【IDトークン取得】: LINEのID Tokenを取得
-  // 🔵 青信号: LIFF SDK標準API
-  return liff.getIDToken();
+  // 【ガード】: 未初期化／未ログインなら ID トークンは取得できないため null を返す。
+  //   liff.isLoggedIn() は未初期化時に例外を投げうるため try/catch で保護する。
+  try {
+    if (!liff.isLoggedIn()) {
+      return null;
+    }
+    // 【IDトークン取得】: LINEのID Tokenを取得
+    // 🔵 青信号: LIFF SDK標準API
+    return liff.getIDToken();
+  } catch {
+    return null;
+  }
 };
 
 /**

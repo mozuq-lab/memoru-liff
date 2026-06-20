@@ -21,6 +21,7 @@ vi.mock('@/services/api', () => ({
   apiClient: {
     setAccessToken: vi.fn(),
   },
+  LOGIN_REDIRECT_FAILED_EVENT: 'memoru:login-redirect-failed',
 }));
 
 describe('AuthContext', () => {

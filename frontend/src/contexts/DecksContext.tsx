@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useMemo, type ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useMemo, useRef, type ReactNode } from 'react';
 import type { Deck, CreateDeckRequest, UpdateDeckRequest } from '@/types';
 import { decksApi } from '@/services/api';
 import { toError } from '@/utils/error';
@@ -40,26 +40,46 @@ export const DecksProvider = ({ children }: DecksProviderProps) => {
   const [decks, setDecks] = useState<Deck[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  // M-31: 最新の fetchDecks リクエスト ID を保持し、古いレスポンスによる
+  //       新しいデッキ一覧の上書き（競合状態）を防ぐ。CardsContext と同じパターン。
+  const decksRequestIdRef = useRef(0);
 
   const fetchDecks = useCallback(async () => {
+    // M-31: このリクエストの ID を採番。完了時に最新でなければ結果を破棄する
+    const requestId = ++decksRequestIdRef.current;
     setIsLoading(true);
     setError(null);
     try {
       const data = await decksApi.getDecks();
+      // M-31: 後発リクエストが走っている場合は古い結果を破棄
+      if (requestId !== decksRequestIdRef.current) return;
       setDecks(data);
     } catch (err) {
+      if (requestId !== decksRequestIdRef.current) return;
       setError(toError(err));
     } finally {
-      setIsLoading(false);
+      // M-31: 最新リクエストのときのみローディング解除
+      if (requestId === decksRequestIdRef.current) {
+        setIsLoading(false);
+      }
     }
   }, []);
 
+  // M-26 / M-33: createDeck / updateDeck / deleteDeck は catch を持たず error state を
+  //   一切セットしないため、ページ側でエラーを検知できなかった。catch で setError して
+  //   から再スローし、Context の error 監視と呼び出し元の例外処理の両方を成立させる。
   const createDeck = useCallback(async (data: CreateDeckRequest): Promise<Deck> => {
     setIsLoading(true);
     try {
       const deck = await decksApi.createDeck(data);
+      // P2: 進行中の fetchDecks の古いレスポンスがこの mutation を打ち消さないよう
+      //     世代を進め、後から解決する fetch の結果（line 55）を破棄させる。
+      decksRequestIdRef.current++;
       setDecks((prev) => [...prev, deck]);
       return deck;
+    } catch (err) {
+      setError(toError(err));
+      throw err;
     } finally {
       setIsLoading(false);
     }
@@ -69,8 +89,12 @@ export const DecksProvider = ({ children }: DecksProviderProps) => {
     setIsLoading(true);
     try {
       const deck = await decksApi.updateDeck(id, data);
+      decksRequestIdRef.current++; // P2: 進行中 fetch の古い結果で上書きされないよう世代を進める
       setDecks((prev) => prev.map((d) => (d.deck_id === id ? deck : d)));
       return deck;
+    } catch (err) {
+      setError(toError(err));
+      throw err;
     } finally {
       setIsLoading(false);
     }
@@ -80,7 +104,11 @@ export const DecksProvider = ({ children }: DecksProviderProps) => {
     setIsLoading(true);
     try {
       await decksApi.deleteDeck(id);
+      decksRequestIdRef.current++; // P2: 進行中 fetch の古い結果で上書きされないよう世代を進める
       setDecks((prev) => prev.filter((d) => d.deck_id !== id));
+    } catch (err) {
+      setError(toError(err));
+      throw err;
     } finally {
       setIsLoading(false);
     }

@@ -234,8 +234,14 @@ class LineService:
                 timeout=10,
             )
         except httpx.RequestError as e:
-            logger.error(f"ID token verification request failed: {e}")
-            raise LineApiError(f"Failed to verify ID token: {e}") from e
+            # L-3: 例外の str(e) には URL やネットワーク情報（将来 URL に機密
+            # パラメータが付く可能性）が含まれうるため、ログには型名のみを構造化
+            # 出力し、送出する例外メッセージも固定文言に留める。
+            logger.error(
+                "ID token verification request failed",
+                extra={"error_type": type(e).__name__},
+            )
+            raise LineApiError("Failed to verify ID token with LINE API") from e
 
         if response.status_code != 200:
             logger.warning(f"LINE ID token verification failed: status={response.status_code}")

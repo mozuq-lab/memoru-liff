@@ -252,6 +252,17 @@ class CardService:
             card.interval = interval
 
             # 【next_review_at 再計算】: 日付境界時刻に正規化して計算する
+            # 【L-10: 既知の一貫性の懸念】:
+            #   submit_review (review_service) は常に calculate_next_review_boundary
+            #   を使い境界正規化するが、本メソッドは user_timezone/day_start_hour が
+            #   両方与えられた時のみ正規化し、片方でも欠けると素朴な timedelta
+            #   フォールバック（境界非正規化）になる。そのため呼び出し元が tz を
+            #   渡し忘れると、カードによって due 判定の境界（day_start_hour）がズレる。
+            #   理想は next_review_at 算出を srs モジュールの単一ヘルパーへ集約し、
+            #   未指定時のデフォルト（Asia/Tokyo / 4 時）を
+            #   calculate_next_review_boundary 内へ寄せて常に境界正規化を通すこと。
+            #   ただし srs.py（担当外）の変更と、現行の timedelta フォールバックを
+            #   前提とする interval テスト群への影響があるため据え置く。
             if user_timezone is not None and day_start_hour is not None:
                 next_review_at = calculate_next_review_boundary(
                     interval=interval,
@@ -342,6 +353,19 @@ class CardService:
         ``contains`` フィルタでは文字列一致できない。そのため全件を取得し、
         アプリケーション層で references[].value の完全一致を判定する。
 
+        【M-13: 既知のパフォーマンス負債（線形コスト）】:
+        本メソッドは URL カード生成のたびに呼ばれ（ai_handler）、内部で
+        scan_all_cards によりユーザーの全カードをページネーション取得して
+        Python 側で完全一致判定する。そのためコスト・レイテンシがユーザーの
+        蓄積カード数に線形比例する（上限 MAX_CARDS_PER_USER=2000 でも、
+        生成のたびに最大 2000 件読み取り）。
+        将来的には reference URL を正規化した値を専用の GSI 投影属性
+        （例: reference_url_key）としてカードに持たせ、URL での重複検出を
+        Query 化すべき。これはカードモデル（models/card.py）と GSI 定義（CDK）の
+        変更を伴うため、本サービス層単独では対応できず据え置く。
+        当面据え置く場合のフォールバックとして、上限到達時は先頭 N 件のみ確認する
+        などの緩和も検討対象。
+
         Args:
             user_id: ユーザー ID。
             url: 検索する参照 URL。
@@ -429,6 +453,18 @@ class CardService:
         repetitions: int,
     ) -> Card:
         """Update card's review data after a review.
+
+        .. warning::
+            **本番コードからは直接呼び出さないこと（M-11）。**
+
+            このメソッドは現在テストからのみ使用されており、本番のレビュー更新パスは
+            :meth:`ReviewService._update_card_review_data`
+            (``services/review_service.py``) が担当する。あちらは
+            ``list_append`` による review_history 追記と楽観ロック（CAS）を伴うが、
+            こちらは **楽観ロックも履歴追記も持たない**。
+            レビュー後のカード更新にこのメソッドを誤って使うと、並行更新時の
+            lost update や review_history 欠落を招く。レビュー更新が必要な場合は
+            必ず ReviewService 経由で行うこと。
 
         Args:
             user_id: The user's ID.

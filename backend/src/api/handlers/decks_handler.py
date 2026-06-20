@@ -32,6 +32,12 @@ def create_deck():
 
     try:
         body = router.current_event.json_body
+        if not isinstance(body, dict):
+            return Response(
+                status_code=400,
+                content_type=content_types.APPLICATION_JSON,
+                body=json.dumps({"error": "Request body must be a JSON object"}),
+            )
         request = CreateDeckRequest(**body)
     except ValidationError as e:
         logger.warning("Validation error", extra={"error": str(e)})
@@ -108,6 +114,12 @@ def update_deck(deck_id: str):
         # raw body の key 存在チェックで null/未送信を判別する（Pydantic は
         # null と未送信を区別できないため）。
         body = router.current_event.json_body
+        if not isinstance(body, dict):
+            return Response(
+                status_code=400,
+                content_type=content_types.APPLICATION_JSON,
+                body=json.dumps({"error": "Request body must be a JSON object"}),
+            )
         # 【Pydantic バリデーション】: color フォーマット等の検証を実行。
         # model_fields_set でどのフィールドが明示的に送信されたかを取得できるが、
         # null/未送信の判別には raw body の key 存在チェックが必要。

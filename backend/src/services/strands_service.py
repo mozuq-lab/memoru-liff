@@ -59,6 +59,10 @@ _DEFAULT_BEDROCK_MODEL_ID = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
 _DEFAULT_OLLAMA_HOST = "http://localhost:11434"
 _DEFAULT_OLLAMA_MODEL = "llama3.2"
 
+# M-18: 1 呼び出しあたりの最大出力トークン数。BedrockService.MAX_TOKENS と
+# 一致させ、USE_STRANDS=true 環境のコスト保護を対称にする。
+_MAX_TOKENS = 4096
+
 # model_used フィールドに使用するプロバイダー識別子
 _MODEL_USED_BEDROCK = "strands_bedrock"
 _MODEL_USED_OLLAMA = "strands_ollama"
@@ -129,6 +133,14 @@ class StrandsAIService:
             (モデルプロバイダーインスタンス, model_used 識別子文字列) のタプル。
         """
         if self.environment == "dev":
+            # M-14: ollama パッケージ未インストール時は OllamaModel が None のままで
+            # 呼び出すと不明瞭な 'NoneType' object is not callable になる。明示的な
+            # エラーで原因とインストール方法を伝える。
+            if OllamaModel is None:
+                raise AIProviderError(
+                    "ollama package is required for dev environment. "
+                    "Install with: pip install strands-agents[ollama]"
+                )
             ollama_host = os.getenv("OLLAMA_HOST", _DEFAULT_OLLAMA_HOST)
             ollama_model = os.getenv("OLLAMA_MODEL", _DEFAULT_OLLAMA_MODEL)
             model: Model = OllamaModel(
@@ -138,8 +150,12 @@ class StrandsAIService:
             return model, _MODEL_USED_OLLAMA
         else:
             bedrock_model_id = os.getenv("BEDROCK_MODEL_ID", _DEFAULT_BEDROCK_MODEL_ID)
+            # M-18: max_tokens を明示し、BedrockService (MAX_TOKENS=4096) と
+            # コスト保護を対称にする。未指定だとモデルのハードリミット
+            # (Haiku 4.5: 8192) に従い 1 チャンク出力が最大 2 倍になりうる。
             model = BedrockModel(
                 model_id=bedrock_model_id,
+                max_tokens=_MAX_TOKENS,
             )
             return model, _MODEL_USED_BEDROCK
 
@@ -449,6 +465,11 @@ class StrandsAIService:
             raise AIParseError(
                 f"Failed to convert 'grade' to int: {data['grade']!r}"
             ) from e
+
+        # M-17: SM-2 grade は 0〜5 の範囲。LLM が範囲外を返した場合に SRS へ
+        # 異常値が渡るのを防ぐ。上位の Pydantic 検証に依存せずサニタイズする。
+        if not (0 <= grade <= 5):
+            raise AIParseError(f"grade out of range (0-5): {grade}")
 
         reasoning = str(data["reasoning"])
 

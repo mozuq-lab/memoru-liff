@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useTutorContext } from "@/contexts/TutorContext";
 import { ModeSelector } from "@/components/tutor/ModeSelector";
@@ -38,6 +38,15 @@ export const TutorPage = () => {
   // F-2: 直前に選択したモードを保持し、開始失敗時の「再試行」で再実行する
   const [lastMode, setLastMode] = useState<LearningMode | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  // M-27: アンマウント後の setState を防ぐためマウント状態を追跡する
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   // T020: セッション継続ロジック — マウント時にアクティブセッションを確認
   useEffect(() => {
@@ -61,6 +70,65 @@ export const TutorPage = () => {
   const activeView: PageView =
     session && view === "mode-select" && !pendingModeSwitch ? "chat" : view;
 
+  // L-27/M-27: ハンドラは useCallback でメモ化し、async の例外は内部で握って
+  // Promise を握りつぶさない（Context 側で catch 済みだが二重防御）。
+  // deckId 未指定時は早期 return するが、フック順序を固定するため
+  // ハンドラ定義は early return より前に置き、各ハンドラ内で deckId をガードする。
+  const handleModeSelect = useCallback(
+    async (mode: LearningMode) => {
+      if (!deckId) return;
+      setPendingModeSwitch(false);
+      setLastMode(mode);
+      await startSession(deckId, mode);
+    },
+    [deckId, startSession],
+  );
+
+  // F-2: セッション開始失敗時の再試行 — 直前に選択したモードで startSession を再実行する
+  const handleRetryStart = useCallback(async () => {
+    if (!deckId) return;
+    if (!lastMode) {
+      clearError();
+      return;
+    }
+    setPendingModeSwitch(false);
+    await startSession(deckId, lastMode);
+  }, [deckId, lastMode, startSession, clearError]);
+
+  const handleSendMessage = useCallback(
+    async (content: string) => {
+      await sendMessage(content);
+    },
+    [sendMessage],
+  );
+
+  // T025a: モード切り替え — セッションをクリアしてモード選択に戻る
+  const handleModeSwitch = useCallback(async () => {
+    if (session) {
+      await endSession();
+    }
+    // M-27: endSession の await 後にアンマウントされている可能性があるためガードする
+    if (!isMountedRef.current) return;
+    setPendingModeSwitch(true);
+    setView("mode-select");
+  }, [session, endSession]);
+
+  const handleEndSession = useCallback(async () => {
+    setShowEndConfirm(false);
+    await endSession();
+    // M-27: endSession の await 後にアンマウントされている可能性があるためガードする
+    if (!isMountedRef.current) return;
+    setView("mode-select");
+  }, [endSession]);
+
+  const handleViewHistory = useCallback(() => {
+    setView("history");
+  }, []);
+
+  const handleBackFromHistory = useCallback(() => {
+    setView(session ? "chat" : "mode-select");
+  }, [session]);
+
   if (!deckId) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -68,49 +136,6 @@ export const TutorPage = () => {
       </div>
     );
   }
-
-  const handleModeSelect = async (mode: LearningMode) => {
-    setPendingModeSwitch(false);
-    setLastMode(mode);
-    await startSession(deckId, mode);
-  };
-
-  // F-2: セッション開始失敗時の再試行 — 直前に選択したモードで startSession を再実行する
-  const handleRetryStart = async () => {
-    if (!lastMode) {
-      clearError();
-      return;
-    }
-    setPendingModeSwitch(false);
-    await startSession(deckId, lastMode);
-  };
-
-  const handleSendMessage = async (content: string) => {
-    await sendMessage(content);
-  };
-
-  // T025a: モード切り替え — セッションをクリアしてモード選択に戻る
-  const handleModeSwitch = async () => {
-    if (session) {
-      await endSession();
-    }
-    setPendingModeSwitch(true);
-    setView("mode-select");
-  };
-
-  const handleEndSession = async () => {
-    setShowEndConfirm(false);
-    await endSession();
-    setView("mode-select");
-  };
-
-  const handleViewHistory = () => {
-    setView("history");
-  };
-
-  const handleBackFromHistory = () => {
-    setView(session ? "chat" : "mode-select");
-  };
 
   // T022: セッション履歴ビュー
   if (activeView === "history") {
@@ -212,7 +237,8 @@ export const TutorPage = () => {
                 type="button"
                 onClick={() => {
                   clearError();
-                  handleModeSelect("free_talk");
+                  // M-27: async ハンドラの Promise を明示的に握りつぶす
+                  void handleModeSelect("free_talk");
                 }}
                 className="text-sm text-orange-700 hover:text-orange-900 font-medium underline"
               >
@@ -294,8 +320,13 @@ export const TutorPage = () => {
 
       {/* Messages area */}
       <div className="flex-1 overflow-y-auto p-4 bg-gray-50">
-        {messages.map((msg, idx) => (
-          <ChatMessage key={idx} message={msg} />
+        {/* M-28/M-34: 楽観的更新の追加・削除で index がずれて誤った再利用が起きる
+            ため、安定した識別子（tempId → role+timestamp）を key に使う。 */}
+        {messages.map((msg) => (
+          <ChatMessage
+            key={msg.tempId ?? `${msg.role}-${msg.timestamp}`}
+            message={msg}
+          />
         ))}
 
         {/* Loading indicator for AI response */}

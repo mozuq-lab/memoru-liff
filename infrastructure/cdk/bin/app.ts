@@ -15,6 +15,15 @@ cdk.Tags.of(app).add('ManagedBy', 'cdk');
 // 未指定時は dev のみ（prod のプレースホルダ値による誤デプロイを防止）
 const stage = app.node.tryGetContext('stage') as string | undefined;
 
+// L-34: 未知の stage（例: typo や未実装の staging）が指定されると、dev/prod の
+// どちらのブランチも実行されずスタック 0 件で synth が無音成功し、誤操作に気づけない。
+// 既知の値（未指定 / dev / prod）以外は明示的に失敗させる。staging は未実装のため拒否。
+if (stage !== undefined && stage !== 'dev' && stage !== 'prod') {
+  throw new Error(
+    `Unknown stage: "${stage}". Use -c stage=dev or -c stage=prod (staging is not implemented).`,
+  );
+}
+
 // ============================================================
 // dev 環境
 // ============================================================
@@ -83,6 +92,11 @@ if (!stage || stage === 'dev') {
 if (stage === 'prod') {
   const prod = resolveProdConfig(process.env);
 
+  // M-24: Cognito Hosted UI / cognito-idp のホストは region 依存。デプロイ先 region を
+  // 環境変数から解決する（未設定時は東京リージョンを既定）。
+  const cognitoRegion =
+    process.env.CDK_DEFAULT_REGION ?? process.env.AWS_REGION ?? 'ap-northeast-1';
+
   const prodStacks = [
     new CognitoStack(app, 'MemoruCognitoProd', {
       environment: 'prod',
@@ -109,6 +123,14 @@ if (stage === 'prod') {
       hostedZoneName: prod.hostedZoneName,
       certificateArn: prod.liffCertArn,
       hostedZoneId: prod.hostedZoneId,
+      // M-24: OIDC IdP のオリジンを CSP connect-src に許可する。Keycloak / Cognito の
+      // どちらが authority になっても token/userinfo 取得がブロックされないよう両方を渡す。
+      // （Cognito Hosted UI / cognito-idp の両ホストを許可）
+      oidcConnectSources: [
+        `https://${prod.keycloakDomain}`,
+        `https://${prod.cognitoDomainPrefix}.auth.${cognitoRegion}.amazoncognito.com`,
+        `https://cognito-idp.${cognitoRegion}.amazonaws.com`,
+      ],
     }),
   ];
   prodStacks.forEach((s) => cdk.Tags.of(s).add('Environment', 'prod'));

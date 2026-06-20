@@ -164,6 +164,16 @@ class AuthService {
   async logout(): Promise<void> {
     // 【ログアウト実行】: Keycloakからログアウト
     // 🔵 青信号: oidc-client-ts標準API
+    //
+    // 注 (L-23): ここで error を再 throw する設計は意図的。呼び出し元
+    // useAuth.logout は try/catch/finally 構造になっており、
+    //   - catch で setError によりログアウト失敗をユーザーへ通知し、
+    //   - finally で setIsLoading(false) を必ず実行する
+    // ため、本メソッドが throw しても isLoading が残留することはない。
+    // 将来この throw を安易に握りつぶすと、呼び出し元が失敗を検知できなくなる
+    // 点に注意（成功時はブラウザが IdP へ遷移しコンポーネントがアンマウント
+    // されるが、開発環境等で signoutRedirect が遷移せず resolve した場合は
+    // removeUser → userUnloaded 経由で状態がクリアされる）。
     try {
       await this.userManager.signoutRedirect();
     } catch (error) {

@@ -329,6 +329,20 @@ class CardRepository:
                     next_cursor = items[remaining - 1]["card_id"]
                     break
 
+                if len(items) == remaining:
+                    # M-10: このレスポンスで丁度 limit を満たした。
+                    # まだ続きがある (last_key あり) 場合のみカーソルが必要だが、
+                    # LastEvaluatedKey は FilterExpression 適用後ではなくスキャン停止
+                    # 位置を指すため、deck_id フィルタ時にこれをカーソルへ流用すると
+                    # 次ページで既返却カードや別 deck のカードが混ざり、境界がずれて
+                    # 空ページ/スキップが生じうる。実際に返した最後のカード
+                    # (items[remaining - 1]) をカーソルにすることで、フィルタ有無に
+                    # 関わらず継続位置が正確になる。last_key が無い (終端) 場合は
+                    # 次ページが存在しないため next_cursor は None のままにする。
+                    if last_key:
+                        next_cursor = items[remaining - 1]["card_id"]
+                    break
+
                 if not deck_id or len(collected) >= limit or not last_key:
                     if last_key:
                         next_cursor = last_key["card_id"]

@@ -76,7 +76,19 @@ def calculate_streak(
     if not sorted_dates_desc:
         return 0
 
-    today = datetime.now(ZoneInfo(user_timezone)).date()
+    # L-6: 無効なタイムゾーン文字列 (ZoneInfoNotFoundError / KeyError) でも
+    # 例外を呼び出し元へバブルアップさせず UTC にフォールバックする。
+    # srs.calculate_next_review_boundary と同じ防御方針。
+    try:
+        tz = ZoneInfo(user_timezone)
+    except Exception:
+        logger.warning(
+            "Invalid timezone for streak calculation; falling back to UTC",
+            extra={"user_timezone": user_timezone},
+        )
+        tz = ZoneInfo("UTC")
+
+    today = datetime.now(tz).date()
     latest = date.fromisoformat(sorted_dates_desc[0])
     if latest < today - timedelta(days=1):
         return 0
@@ -173,11 +185,16 @@ class StatsService:
             query_kwargs["ExclusiveStartKey"] = last_key
         return reviews
 
-    def get_stats(self, user_id: str) -> StatsResponse:
+    def get_stats(self, user_id: str, user_timezone: str = "UTC") -> StatsResponse:
         """Get learning statistics for a user.
 
         Args:
             user_id: The user's ID.
+            user_timezone: ユーザーの IANA タイムゾーン文字列（streak 計算用）。
+                M-7: サーバーのローカル時刻（UTC）固定だと、UTC+9 ユーザーが
+                日本時間の深夜にレビューした場合にストリークが誤って 0 にリセット
+                されるため、呼び出し元はユーザー設定の timezone を渡すこと。
+                デフォルトは後方互換のため "UTC"。
 
         Returns:
             StatsResponse with aggregated statistics.
@@ -218,7 +235,7 @@ class StatsService:
             {r["reviewed_at"][:10] for r in reviews},
             reverse=True,
         )
-        streak_days = calculate_streak(unique_dates)
+        streak_days = calculate_streak(unique_dates, user_timezone=user_timezone)
 
         # Tag performance（共通ヘルパー使用）
         tag_performance = calculate_tag_performance(cards, reviews)
@@ -277,7 +294,9 @@ class StatsService:
             total_count=total_count,
         )
 
-    def get_forecast(self, user_id: str, days: int = 7) -> ForecastResponse:
+    def get_forecast(
+        self, user_id: str, days: int = 7, user_timezone: str = "UTC"
+    ) -> ForecastResponse:
         """Get review forecast for the next N days.
 
         Groups cards by their next_review_at date. Cards with past due dates
@@ -286,13 +305,28 @@ class StatsService:
         Args:
             user_id: The user's ID.
             days: Number of days to forecast.
+            user_timezone: ユーザーの IANA タイムゾーン文字列。
+                M-7: 旧実装は date.today()（Lambda 実行環境＝通常 UTC のローカル時刻）
+                を「今日」としていたため、ユーザーにとっての今日が 1 日ずれる問題が
+                あった。ユーザーの timezone で「今日」を判定する。
+                デフォルトは後方互換のため "UTC"。
 
         Returns:
             ForecastResponse with daily forecast.
         """
         cards = self._fetch_all_cards(user_id)
 
-        today = date.today()
+        # M-7: ユーザータイムゾーンで「今日」を判定する。無効な timezone は
+        # UTC へフォールバックして例外を呼び出し元へ伝播させない（L-6 と同方針）。
+        try:
+            tz = ZoneInfo(user_timezone)
+        except Exception:
+            logger.warning(
+                "Invalid timezone for forecast; falling back to UTC",
+                extra={"user_timezone": user_timezone},
+            )
+            tz = ZoneInfo("UTC")
+        today = datetime.now(tz).date()
         end_date = today + timedelta(days=days - 1)
 
         # Initialize counts for each day

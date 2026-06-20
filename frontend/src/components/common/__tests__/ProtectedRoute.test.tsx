@@ -4,7 +4,7 @@
  * 【関連タスク】: TASK-0038
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, act } from '@testing-library/react';
 import { ProtectedRoute } from '../ProtectedRoute';
 import { useAuthContext } from '@/contexts/AuthContext';
 
@@ -133,64 +133,125 @@ describe('ProtectedRoute', () => {
   });
 
   describe('login() 失敗時', () => {
-    it('login() 失敗時にエラー画面が表示されること', async () => {
-      // Arrange: login失敗をモック
-      const loginError = new Error('Login failed');
-      mockLogin.mockRejectedValue(loginError);
+    // useAuth.login は失敗しても rethrow せず error state をセットする（P2）。
+    // そのため ProtectedRoute は error 分岐でエラー画面へ倒す。
+    it('認証エラー時にエラー画面が表示され、children が隠れること', () => {
       mockUseAuthContext.mockReturnValue({
         isAuthenticated: false,
         isLoading: false,
-        error: null,
+        error: new Error('Login failed'),
         login: mockLogin,
         logout: vi.fn(),
         user: null,
         refreshToken: vi.fn(),
       });
 
-      // Act: ProtectedRoute をレンダリング
       render(
         <ProtectedRoute>
           <div>Protected Content</div>
         </ProtectedRoute>
       );
 
-      // Assert: エラーメッセージが表示される
-      await waitFor(() => {
-        expect(screen.getByText('ログインに失敗しました')).toBeInTheDocument();
-      });
-
-      // children は表示されない
+      expect(screen.getByText('認証エラーが発生しました')).toBeInTheDocument();
       expect(screen.queryByText('Protected Content')).not.toBeInTheDocument();
+      // error 分岐では自動ログインを試行しない
+      expect(mockLogin).not.toHaveBeenCalled();
     });
 
-    it('login() 失敗後、再試行ボタンが表示されないこと', async () => {
-      // Arrange: login失敗をモック
-      const loginError = new Error('Login failed');
-      mockLogin.mockRejectedValue(loginError);
+    it('認証エラー時に再試行ボタンが表示されること', () => {
+      // M-25 / P2: ログイン失敗時に無限ローディングへ陥らず、エラー画面と再試行手段を提供する。
       mockUseAuthContext.mockReturnValue({
         isAuthenticated: false,
         isLoading: false,
-        error: null,
+        error: new Error('Login failed'),
         login: mockLogin,
         logout: vi.fn(),
         user: null,
         refreshToken: vi.fn(),
       });
 
-      // Act: ProtectedRoute をレンダリング
       render(
         <ProtectedRoute>
           <div>Protected Content</div>
         </ProtectedRoute>
       );
 
-      // Assert: エラーメッセージが表示される
-      await waitFor(() => {
-        expect(screen.getByText('ログインに失敗しました')).toBeInTheDocument();
-      });
+      expect(screen.getByText('認証エラーが発生しました')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /再試行/ })).toBeInTheDocument();
+    });
 
-      // 再試行ボタンが表示されないこと
-      expect(screen.queryByRole('button', { name: /再試行/ })).not.toBeInTheDocument();
+    it('リダイレクトが進まない場合、タイムアウト後にエラー画面へフォールバックすること', async () => {
+      // P2: signinRedirect が無言で進まない（login が resolve も reject もしない）場合、
+      // 8 秒のフォールバックタイマーでエラー画面へ倒れることを検証する。
+      vi.useFakeTimers();
+      try {
+        mockLogin.mockReturnValue(new Promise<void>(() => {}));
+        mockUseAuthContext.mockReturnValue({
+          isAuthenticated: false,
+          isLoading: false,
+          error: null,
+          login: mockLogin,
+          logout: vi.fn(),
+          user: null,
+          refreshToken: vi.fn(),
+        });
+
+        render(
+          <ProtectedRoute>
+            <div>Protected Content</div>
+          </ProtectedRoute>
+        );
+
+        // タイムアウト前はローディング表示
+        expect(screen.getByText(/読み込み中/)).toBeInTheDocument();
+
+        // 8 秒経過でフォールバックのエラー画面が出る
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(8000);
+        });
+
+        expect(screen.getByText(/時間をおいて再度お試しください/)).toBeInTheDocument();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('login 中に isLoading が変動してもフォールバックタイマーが維持されること', async () => {
+      // P2 回帰: login() が setIsLoading(true) で isLoading を変えても、タイマーを
+      // 解除せず 8 秒後にフォールバックが発火することを保証する（旧実装ではここで
+      // タイマーが clearTimeout され、無限ローディングへ戻っていた）。
+      vi.useFakeTimers();
+      try {
+        mockLogin.mockReturnValue(new Promise<void>(() => {}));
+        const baseAuth = {
+          isAuthenticated: false,
+          error: null,
+          login: mockLogin,
+          logout: vi.fn(),
+          user: null,
+          refreshToken: vi.fn(),
+        };
+        mockUseAuthContext.mockReturnValue({ ...baseAuth, isLoading: false });
+        const { rerender } = render(
+          <ProtectedRoute>
+            <div>Protected Content</div>
+          </ProtectedRoute>
+        );
+
+        // login 開始で isLoading が true→false と変動する状況を再現
+        mockUseAuthContext.mockReturnValue({ ...baseAuth, isLoading: true });
+        rerender(<ProtectedRoute><div>Protected Content</div></ProtectedRoute>);
+        mockUseAuthContext.mockReturnValue({ ...baseAuth, isLoading: false });
+        rerender(<ProtectedRoute><div>Protected Content</div></ProtectedRoute>);
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(8000);
+        });
+
+        expect(screen.getByText(/時間をおいて再度お試しください/)).toBeInTheDocument();
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 

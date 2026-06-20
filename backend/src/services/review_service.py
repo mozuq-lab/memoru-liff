@@ -19,7 +19,7 @@ from models.review import (
 )
 from utils.dynamodb_client import get_dynamodb_resource
 from .ai_service import ReviewSummary
-from .card_service import CardService, CardServiceError
+from .card_service import CardService
 from .srs import ReviewHistoryEntry, SM2Result, add_review_history, calculate_next_review_boundary, calculate_sm2
 from .stats_service import calculate_streak, calculate_tag_performance
 
@@ -77,6 +77,17 @@ class NoReviewHistoryError(ReviewServiceError):
 
 class ConcurrentReviewError(ReviewServiceError):
     """Raised when a concurrent review update is detected (optimistic lock failed)."""
+
+    pass
+
+
+class ReviewPersistenceError(ReviewServiceError):
+    """Raised when persisting a review (card SRS update / undo) fails.
+
+    L-9: レビュー永続化の DynamoDB 失敗を card 層の例外 (CardServiceError) ではなく
+    ReviewService 系の例外で表現し、例外階層を層ごとに揃える。get_card 由来の
+    CardNotFoundError は引き続きそのまま伝播させる（呼び出し元が 404 にマップする）。
+    """
 
     pass
 
@@ -185,7 +196,19 @@ class ReviewService:
             previous_next_review_at=card.next_review_at.isoformat() if card.next_review_at else None,
         )
 
-        # Record review in reviews table
+        # Record review in reviews table.
+        # M-9: _update_card_review_data（カードの SRS 更新＋楽観ロック＋
+        # review_history 追記）と本 _record_review（reviews 分析テーブルへの記録）は
+        # 別々の DynamoDB 操作でありアトミックではない。これは意図的な設計:
+        #   - カードの SRS 状態と review_history がレビューの「正」(source of truth)。
+        #     undo_review もカード内 review_history を参照するため、reviews テーブルの
+        #     欠落はアンドゥや SRS スケジューリングに一切影響しない。
+        #   - reviews テーブルは集計/分析用（ストリーク・タグ別正答率等）であり
+        #     ベストエフォート。_record_review は失敗してもログのみで送出しない。
+        # よって _update_card_review_data 成功後に _record_review が失敗しても、
+        # ユーザー体験上の不整合は生じない（分析値が 1 件欠ける程度）。
+        # 将来 reviews テーブルの信頼性を要件化する場合は TransactWriteItems
+        # （複数テーブル対応）か DynamoDB Streams での補完を検討すること。
         self._record_review(
             user_id=user_id,
             card_id=card_id,
@@ -333,7 +356,7 @@ class ReviewService:
                 raise ConcurrentReviewError(
                     "Undo conflict: the card was modified concurrently. Please retry."
                 ) from e
-            raise CardServiceError(f"Failed to undo review: {e}")
+            raise ReviewPersistenceError(f"Failed to undo review: {e}")
 
         # Parse due_date from restored_next_review_at
         try:
@@ -449,7 +472,7 @@ class ReviewService:
                 raise ConcurrentReviewError(
                     "Review update conflict: the card was modified concurrently. Please retry."
                 ) from e
-            raise CardServiceError(f"Failed to update card review data: {e}")
+            raise ReviewPersistenceError(f"Failed to update card review data: {e}")
 
     def _record_review(
         self,
@@ -463,6 +486,20 @@ class ReviewService:
         interval_after: int,
     ) -> None:
         """Record review in reviews table.
+
+        【L-8: 役割境界 — reviews テーブルは分析専用、undo の正は card.review_history】:
+        本メソッドが reviews テーブルへ保存するのは ease_factor / interval の
+        before/after のみで、repetitions_before / next_review_at_before は保存しない。
+        一方 _update_card_review_data はカード内 review_history にこれらも記録する。
+        これは意図的な役割分担:
+          - undo / SRS スケジューリングの「正」(source of truth) は
+            card.review_history（undo_review はこちらを参照する）。
+          - reviews テーブルはストリーク・タグ別正答率などの集計/分析専用であり、
+            undo 相当や repetitions ベースの厳密な復元には用いない。
+        したがって両者で保持カラムの粒度が異なるのは設計どおり。将来 reviews 側を
+        信頼源（undo や repetitions 分析）に使いたくなった場合は、ここで
+        repetitions_before/after・next_review_at_before/after を追加して
+        review_history と粒度を揃えること。
 
         Args:
             user_id: The user's ID.
@@ -507,6 +544,19 @@ class ReviewService:
         これにより total_due_count が limit に影響されず正確な総数を返すことができる。
         deck_id フィルタはアプリケーション層で適用し、DynamoDB クエリは全件取得する。
         🔵 REQ-005: total_due_count は limit パラメータに影響されない正確な総数を返す
+
+        【M-12: 既知のスケーラビリティ負債】:
+        本メソッドは total_due_count を正確に出すため card_service.get_due_cards(limit=None)
+        で全 due カードを取得し、deck_id フィルタと limit を Python 側で適用する。
+        読み取りキャパシティ・レイテンシがユーザーの総 due 数に線形比例する
+        （上限 MAX_CARDS_PER_USER=2000）。deck_id 指定時も DynamoDB 側で絞り込まず
+        全件読みしてからフィルタしている。
+        将来的には deck_id 指定時は deck-cards-index GSI
+        （deck_index_key = "<user_id>#<deck_id>", next_review_at <= now）を Query して
+        DynamoDB 側で絞り込み、total_due_count は Select=COUNT
+        （deck_service.get_deck_due_counts が既に GSI COUNT 化済み）で別取得、
+        本体は limit+α のみ取得する形に分離して全件メモリ展開を避けるべき。
+        現状はインターフェース・テストへの影響が大きいため据え置く。
 
         Args:
             user_id: The user's ID.
