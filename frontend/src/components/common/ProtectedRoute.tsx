@@ -20,30 +20,34 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
   const [loginError, setLoginError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isLoading && !isAuthenticated && !loginAttemptedRef.current) {
-      loginAttemptedRef.current = true;
-
-      // 【リダイレクト遅延ガード】(M-25): signinRedirect が一定時間内に
-      // ブラウザ遷移を起こさない場合、ユーザーを無限ローディングに
-      // 留めずエラー表示へフォールバックさせる。
-      const timeoutId = window.setTimeout(() => {
-        setLoginError('ログインに失敗しました。時間をおいて再度お試しください。');
-      }, LOGIN_REDIRECT_TIMEOUT_MS);
-
-      login().catch(() => {
-        window.clearTimeout(timeoutId);
-        setLoginError('ログインに失敗しました');
-      });
+    // 認証済み・認証エラー発生時・既に試行済みのいずれかなら自動ログインしない。
+    if (isLoading || isAuthenticated || error || loginAttemptedRef.current) {
+      return;
     }
-  }, [isLoading, isAuthenticated, login]);
+    loginAttemptedRef.current = true;
 
-  // 【自動ログイン再試行】(M-25): フラグをリセットしてから login() を呼び直す。
+    // 【リダイレクト遅延ガード】(M-25 / レビュー P2): signinRedirect が一定時間内に
+    // ブラウザ遷移を起こさない場合のフォールバック。useAuth.login は内部で例外を
+    // 握って rethrow しないため login() の .catch は発火しない。代わりにタイマーで
+    // 救済し、login が error をセットした場合は deps の error 変化に伴う cleanup で
+    // clearTimeout され、下の error 分岐（エラー表示）へ倒れる。
+    const timeoutId = window.setTimeout(() => {
+      setLoginError('ログインに失敗しました。時間をおいて再度お試しください。');
+    }, LOGIN_REDIRECT_TIMEOUT_MS);
+
+    void login();
+
+    // アンマウント時・isAuthenticated/error 変化時にタイマーを破棄し、認証成功後や
+    // エラー表示後に遅延エラーが誤発火するのを防ぐ。
+    return () => window.clearTimeout(timeoutId);
+  }, [isLoading, isAuthenticated, error, login]);
+
+  // 【自動ログイン再試行】: 遅延エラーを消して login をやり直す。loginAttemptedRef は
+  // true のまま据え置き、effect による二重起動を防ぐ。失敗時は useAuth が error を
+  // セットし、下の error 分岐で表示される。
   const retryLogin = () => {
-    loginAttemptedRef.current = false;
     setLoginError(null);
-    login().catch(() => {
-      setLoginError('ログインに失敗しました');
-    });
+    void login();
   };
 
   if (loginError) {

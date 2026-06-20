@@ -21,6 +21,7 @@ vi.mock("@/hooks/useAuth", () => ({
 // 【テスト前準備】: API モック設定
 vi.mock("@/services/api", () => ({
   apiClient: { setAccessToken: vi.fn() },
+  LOGIN_REDIRECT_FAILED_EVENT: "memoru:login-redirect-failed",
   cardsApi: {
     getCards: vi.fn().mockResolvedValue([]),
     getDueCards: vi

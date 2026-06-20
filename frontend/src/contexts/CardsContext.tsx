@@ -127,17 +127,22 @@ export const CardsProvider = ({ children }: CardsProviderProps) => {
     }
   }, []);
 
+  // P2: ローカルな mutation も進行中の fetchCards の古いレスポンス（line 84）で
+  //     打ち消されないよう世代を進める（DecksContext と同じ競合対策）。
   const addCard = useCallback((card: Card) => {
+    cardsRequestIdRef.current++;
     setCards(prev => [...prev, card]);
   }, []);
 
   const updateCard = useCallback((cardId: string, updates: Partial<Card>) => {
+    cardsRequestIdRef.current++;
     setCards(prev => prev.map(card =>
       card.card_id === cardId ? { ...card, ...updates } : card
     ));
   }, []);
 
   const deleteCard = useCallback((cardId: string) => {
+    cardsRequestIdRef.current++;
     setCards(prev => prev.filter(card => card.card_id !== cardId));
   }, []);
 

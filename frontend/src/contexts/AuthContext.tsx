@@ -1,7 +1,8 @@
-import { createContext, useContext, useEffect, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { AuthUser } from '@/types';
 import { useAuth } from '@/hooks/useAuth';
-import { apiClient } from '@/services/api';
+import { apiClient, LOGIN_REDIRECT_FAILED_EVENT } from '@/services/api';
+import { toError } from '@/utils/error';
 
 interface AuthContextType {
   user: AuthUser | null;
@@ -21,6 +22,8 @@ interface AuthProviderProps {
 
 export const AuthProvider = ({ children }: AuthProviderProps) => {
   const auth = useAuth();
+  // L-30: apiClient のセッション切れ再ログインリダイレクトが失敗した際のエラー。
+  const [redirectError, setRedirectError] = useState<Error | null>(null);
 
   // Sync access token with API client
   // L-31: 依存配列を auth.user にする。access_token 文字列だけを依存にすると
@@ -35,7 +38,29 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     }
   }, [auth.user]);
 
-  const value = auth;
+  // L-30 (レビュー P3): apiClient がセッション切れでログイン画面へリダイレクトしようと
+  // して失敗した場合に発火するグローバルイベントを購読し、UI へエラーを伝播する。
+  // 未購読だとユーザーは操作不能のまま放置されるため、error として表面化させる。
+  useEffect(() => {
+    const handler = (e: Event) => {
+      setRedirectError(toError((e as CustomEvent).detail));
+    };
+    window.addEventListener(LOGIN_REDIRECT_FAILED_EVENT, handler);
+    return () => window.removeEventListener(LOGIN_REDIRECT_FAILED_EVENT, handler);
+  }, []);
+
+  // 認証が回復したらリダイレクトエラーを解消する。
+  useEffect(() => {
+    if (auth.isAuthenticated && redirectError) {
+      setRedirectError(null);
+    }
+  }, [auth.isAuthenticated, redirectError]);
+
+  // auth.error（初期化・login 由来）と redirectError（リダイレクト失敗由来）を統合する。
+  const value = useMemo<AuthContextType>(
+    () => ({ ...auth, error: auth.error ?? redirectError }),
+    [auth, redirectError]
+  );
 
   return (
     <AuthContext.Provider value={value}>

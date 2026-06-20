@@ -72,6 +72,9 @@ export const DecksProvider = ({ children }: DecksProviderProps) => {
     setIsLoading(true);
     try {
       const deck = await decksApi.createDeck(data);
+      // P2: 進行中の fetchDecks の古いレスポンスがこの mutation を打ち消さないよう
+      //     世代を進め、後から解決する fetch の結果（line 55）を破棄させる。
+      decksRequestIdRef.current++;
       setDecks((prev) => [...prev, deck]);
       return deck;
     } catch (err) {
@@ -86,6 +89,7 @@ export const DecksProvider = ({ children }: DecksProviderProps) => {
     setIsLoading(true);
     try {
       const deck = await decksApi.updateDeck(id, data);
+      decksRequestIdRef.current++; // P2: 進行中 fetch の古い結果で上書きされないよう世代を進める
       setDecks((prev) => prev.map((d) => (d.deck_id === id ? deck : d)));
       return deck;
     } catch (err) {
@@ -100,6 +104,7 @@ export const DecksProvider = ({ children }: DecksProviderProps) => {
     setIsLoading(true);
     try {
       await decksApi.deleteDeck(id);
+      decksRequestIdRef.current++; // P2: 進行中 fetch の古い結果で上書きされないよう世代を進める
       setDecks((prev) => prev.filter((d) => d.deck_id !== id));
     } catch (err) {
       setError(toError(err));
