@@ -14,7 +14,6 @@
 import inspect
 import json
 import os
-import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -310,6 +309,34 @@ class TestStrandsServiceEnvironment:
         mock_ollama.assert_called_once()
         mock_bedrock.assert_not_called()
 
+    @patch.dict(os.environ, {"ENVIRONMENT": "dev", "AI_AGENT_TIMEOUT_SECONDS": "12.5"})
+    @patch("services.strands_service.Agent")
+    @patch("services.strands_service.OllamaModel")
+    def test_dev_environment_configures_ollama_timeout(self, mock_ollama, mock_agent):
+        """ENVIRONMENT=dev では Ollama HTTP クライアントに timeout を渡す."""
+        StrandsAIService()
+
+        kwargs = mock_ollama.call_args.kwargs
+        assert kwargs["ollama_client_args"]["timeout"] == 12.5
+
+    @patch.dict(os.environ, {"ENVIRONMENT": "prod", "AI_AGENT_TIMEOUT_SECONDS": "42"})
+    @patch("services.strands_service.Agent")
+    @patch("services.strands_service.BedrockModel")
+    def test_prod_environment_configures_bedrock_timeout(self, mock_bedrock, mock_agent):
+        """ENVIRONMENT=prod では Bedrock boto client に read_timeout を渡す."""
+        StrandsAIService()
+
+        config = mock_bedrock.call_args.kwargs["boto_client_config"]
+        assert config.read_timeout == 42
+        assert config.connect_timeout == 5
+
+    @patch.dict(os.environ, {"AI_AGENT_TIMEOUT_SECONDS": "inf"})
+    def test_non_finite_agent_timeout_falls_back_to_default(self):
+        """inf 等の非有限値は timeout 無効化として扱わず既定値へ戻す."""
+        from utils.agent_timeout import DEFAULT_AGENT_TIMEOUT_SECONDS, resolve_timeout_seconds
+
+        assert resolve_timeout_seconds("AI_AGENT_TIMEOUT_SECONDS") == DEFAULT_AGENT_TIMEOUT_SECONDS
+
 
 # ---------------------------------------------------------------------------
 # Category 4 (旧 5): エラーハンドリングテスト (TC-ERR)
@@ -325,24 +352,6 @@ class TestStrandsServiceErrors:
         mock_agent_instance.side_effect = TimeoutError("Agent timed out")
 
         with patch("services.strands_service.Agent", return_value=mock_agent_instance), \
-             patch("services.strands_service.BedrockModel"):
-            service = StrandsAIService()
-
-            with pytest.raises(AITimeoutError):
-                service.generate_cards(input_text="テスト")
-
-    def test_agent_call_timeout_limit_raises_ai_timeout_error(self):
-        """Agent 呼び出しが設定秒数を超えた場合に AITimeoutError が raise される."""
-        mock_agent_instance = MagicMock()
-
-        def slow_agent_call(_prompt: str) -> str:
-            time.sleep(0.05)
-            return json.dumps({"cards": [{"front": "Q", "back": "A", "tags": []}]})
-
-        mock_agent_instance.side_effect = slow_agent_call
-
-        with patch.dict(os.environ, {"AI_AGENT_TIMEOUT_SECONDS": "0.001"}), \
-             patch("services.strands_service.Agent", return_value=mock_agent_instance), \
              patch("services.strands_service.BedrockModel"):
             service = StrandsAIService()
 
@@ -448,6 +457,40 @@ class TestStrandsServiceErrors:
 
             with pytest.raises(AIRateLimitError):
                 service.generate_cards(input_text="テスト")
+
+    def test_url_chunk_timeout_returns_partial_cards(self):
+        """後続チャンクの timeout で生成済みカードを破棄しない."""
+        first_response = json.dumps({
+            "cards": [{"front": "Q1", "back": "A1", "tags": ["tag1"]}]
+        })
+        mock_agent_instance = MagicMock()
+        mock_agent_instance.side_effect = [
+            MagicMock(__str__=MagicMock(return_value=first_response)),
+            TimeoutError("chunk timed out"),
+        ]
+
+        with patch("services.strands_service.Agent", return_value=mock_agent_instance), \
+             patch("services.strands_service.BedrockModel"):
+            service = StrandsAIService()
+            result = service.generate_cards_from_chunks(
+                chunks=["chunk-1", "chunk-2"],
+                target_count=10,
+            )
+
+        assert len(result.cards) == 1
+        assert result.cards[0].front == "Q1"
+
+    def test_url_chunk_timeout_without_cards_raises_ai_timeout_error(self):
+        """全チャンクが timeout の場合は 504 マッピング用の AITimeoutError にする."""
+        mock_agent_instance = MagicMock()
+        mock_agent_instance.side_effect = TimeoutError("chunk timed out")
+
+        with patch("services.strands_service.Agent", return_value=mock_agent_instance), \
+             patch("services.strands_service.BedrockModel"):
+            service = StrandsAIService()
+
+            with pytest.raises(AITimeoutError):
+                service.generate_cards_from_chunks(chunks=["chunk-1"], target_count=10)
 
 
 # ---------------------------------------------------------------------------

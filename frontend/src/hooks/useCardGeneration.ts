@@ -160,6 +160,7 @@ export const useCardGeneration = () => {
       // M-30: アンマウント済みなら state 更新を行わない
       if (!isMountedRef.current) return;
       if (!hasGeneratedCardsPayload(response)) {
+        console.error('Invalid card generation response', response);
         throw new Error('Invalid card generation response');
       }
 
@@ -221,6 +222,7 @@ export const useCardGeneration = () => {
       // M-30: アンマウント済みなら state 更新を行わない
       if (!isMountedRef.current) return;
       if (!hasUrlGeneratedCardsPayload(response)) {
+        console.error('Invalid URL card generation response', response);
         throw new Error('Invalid URL card generation response');
       }
 

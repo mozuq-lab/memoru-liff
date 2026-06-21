@@ -5,7 +5,6 @@ related card extraction, and factory function.
 """
 
 import json
-import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -240,6 +239,41 @@ class TestStrandsTutorAIServiceInit:
             service = StrandsTutorAIService(environment="prod")
             assert service.model_used == "strands_bedrock"
 
+    def test_dev_environment_configures_ollama_timeout(self):
+        """Tutor-specific timeout should be passed to Ollama client args."""
+        from services.tutor_ai_service import StrandsTutorAIService
+
+        with patch("strands.models.ollama.OllamaModel") as mock_ollama, \
+             patch.dict(
+                 "os.environ",
+                 {
+                     "AI_AGENT_TIMEOUT_SECONDS": "30",
+                     "TUTOR_AI_AGENT_TIMEOUT_SECONDS": "11.5",
+                 },
+             ):
+            StrandsTutorAIService(environment="dev")
+
+        kwargs = mock_ollama.call_args.kwargs
+        assert kwargs["ollama_client_args"]["timeout"] == 11.5
+
+    def test_prod_environment_configures_bedrock_timeout(self):
+        """Tutor-specific timeout should be passed to Bedrock boto client config."""
+        from services.tutor_ai_service import StrandsTutorAIService
+
+        with patch("strands.models.BedrockModel") as mock_bedrock, \
+             patch.dict(
+                 "os.environ",
+                 {
+                     "AI_AGENT_TIMEOUT_SECONDS": "30",
+                     "TUTOR_AI_AGENT_TIMEOUT_SECONDS": "55",
+                 },
+             ):
+            StrandsTutorAIService(environment="prod")
+
+        config = mock_bedrock.call_args.kwargs["boto_client_config"]
+        assert config.read_timeout == 55
+        assert config.connect_timeout == 5
+
 
 class TestStrandsTutorAIServiceGenerateResponse:
     """Tests for StrandsTutorAIService.generate_response."""
@@ -318,32 +352,6 @@ class TestStrandsTutorAIServiceGenerateResponse:
             "services.tutor_ai_service.StrandsTutorAIService._create_model",
             return_value=(MagicMock(), "strands_ollama"),
         ):
-            service = StrandsTutorAIService(environment="dev")
-            service._create_agent = MagicMock(return_value=mock_agent_instance)
-
-            with pytest.raises(TutorAITimeoutError):
-                service.generate_response(
-                    system_prompt="sys",
-                    messages=[{"role": "user", "content": "hello"}],
-                )
-
-    def test_generate_response_timeout_limit(self):
-        """Strands Agent call should be bounded by AI_AGENT_TIMEOUT_SECONDS."""
-        from services.tutor_ai_service import StrandsTutorAIService, TutorAITimeoutError
-
-        mock_agent_instance = MagicMock()
-
-        def slow_agent_call(_prompt: str) -> str:
-            time.sleep(0.05)
-            return "遅い応答"
-
-        mock_agent_instance.side_effect = slow_agent_call
-
-        with patch.dict("os.environ", {"AI_AGENT_TIMEOUT_SECONDS": "0.001"}), \
-             patch(
-                 "services.tutor_ai_service.StrandsTutorAIService._create_model",
-                 return_value=(MagicMock(), "strands_ollama"),
-             ):
             service = StrandsTutorAIService(environment="dev")
             service._create_agent = MagicMock(return_value=mock_agent_instance)
 
