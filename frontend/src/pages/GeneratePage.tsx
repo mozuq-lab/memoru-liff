@@ -36,6 +36,7 @@ export const GeneratePage = () => {
     canGenerateText,
     canGenerateUrl,
     selectedCount,
+    maxGenerationSeconds,
     setInputUrl,
     setSelectedDeckId,
     setCardType,
@@ -216,7 +217,7 @@ export const GeneratePage = () => {
         {/* ローディング状態（テキストモード） */}
         {isGenerating && inputMode === 'text' && (
           <div className="mt-6" data-testid="loading">
-            <Loading message="カードを生成中...（最大30秒）" />
+            <Loading message={`カードを生成中...（最大${maxGenerationSeconds}秒）`} />
           </div>
         )}
 
