@@ -17,8 +17,19 @@ export type UrlProgressStage = 'fetching' | 'analyzing' | 'generating';
 
 export const MIN_CHARS = 5;
 export const MAX_CHARS = 2000;
-const MAX_GENERATION_TIME = 30000; // 30秒
-const MAX_URL_GENERATION_TIME = 90000; // 90秒
+
+/**
+ * Vite env から正の整数のタイムアウト(ms)を解決する。未設定・非数値・非正値・非有限値は fallback。
+ * ローカルLLM(Ollama)など低速プロバイダ利用時に .env で延長できるようにするためのヘルパー。
+ */
+export const resolveTimeoutMs = (raw: unknown, fallback: number): number => {
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+};
+
+// 既定: テキスト30秒 / URL90秒。VITE_MAX_GENERATION_TIME / VITE_MAX_URL_GENERATION_TIME(ms)で上書き可能。
+const MAX_GENERATION_TIME = resolveTimeoutMs(import.meta.env.VITE_MAX_GENERATION_TIME, 30000);
+const MAX_URL_GENERATION_TIME = resolveTimeoutMs(import.meta.env.VITE_MAX_URL_GENERATION_TIME, 90000);
 
 type GeneratedCardsPayload = {
   generated_cards: GeneratedCard[];
@@ -364,6 +375,8 @@ export const useCardGeneration = () => {
     canGenerateText,
     canGenerateUrl,
     selectedCount,
+    // 生成タイムアウト(秒)。ローディング表示の「最大◯秒」をタイムアウト設定と連動させる。
+    maxGenerationSeconds: Math.round(MAX_GENERATION_TIME / 1000),
     // setters used by presentational sub-components
     setInputUrl,
     setSelectedDeckId,
