@@ -438,18 +438,27 @@ describe('GeneratePage', () => {
 
     it('不正な成功レスポンスでもローディングが解除される', async () => {
       const user = userEvent.setup();
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
       mockGenerateCards.mockResolvedValue({ errorMessage: 'Runtime.ImportModuleError' });
 
-      renderGeneratePage();
+      try {
+        renderGeneratePage();
 
-      await user.type(screen.getByTestId('input-text'), 'テスト用のテキストです');
-      await user.click(screen.getByTestId('generate-button'));
+        await user.type(screen.getByTestId('input-text'), 'テスト用のテキストです');
+        await user.click(screen.getByTestId('generate-button'));
 
-      await waitFor(() => {
-        expect(screen.getByText('カードの生成に失敗しました。もう一度お試しください。')).toBeInTheDocument();
-      });
-      expect(screen.queryByTestId('loading')).not.toBeInTheDocument();
-      expect(screen.getByTestId('generate-button')).toHaveTextContent('AIでカードを生成');
+        await waitFor(() => {
+          expect(screen.getByText('カードの生成に失敗しました。もう一度お試しください。')).toBeInTheDocument();
+        });
+        expect(consoleError).toHaveBeenCalledWith(
+          'Invalid card generation response',
+          { errorMessage: 'Runtime.ImportModuleError' },
+        );
+        expect(screen.queryByTestId('loading')).not.toBeInTheDocument();
+        expect(screen.getByTestId('generate-button')).toHaveTextContent('AIでカードを生成');
+      } finally {
+        consoleError.mockRestore();
+      }
     });
 
     it('保存エラー時にエラーメッセージが表示される', async () => {

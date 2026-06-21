@@ -309,7 +309,11 @@ class TestModelProviderSelectionFinal:
         env = {"ENVIRONMENT": "dev", "OLLAMA_HOST": "http://custom:11434", "OLLAMA_MODEL": "gemma2"}
         with patch.dict("os.environ", env):
             StrandsAIService()
-        mock_ollama_cls.assert_called_once_with(host="http://custom:11434", model_id="gemma2")
+        mock_ollama_cls.assert_called_once()
+        kwargs = mock_ollama_cls.call_args.kwargs
+        assert kwargs["host"] == "http://custom:11434"
+        assert kwargs["model_id"] == "gemma2"
+        assert kwargs["ollama_client_args"]["timeout"] == 30.0
 
     @patch("services.strands_service.OllamaModel")
     def test_env_dev_ollama_host_default(self, mock_ollama_cls):
@@ -318,7 +322,11 @@ class TestModelProviderSelectionFinal:
         env["ENVIRONMENT"] = "dev"
         with patch.dict("os.environ", env, clear=True):
             StrandsAIService()
-        mock_ollama_cls.assert_called_once_with(host="http://localhost:11434", model_id="llama3.2")
+        mock_ollama_cls.assert_called_once()
+        kwargs = mock_ollama_cls.call_args.kwargs
+        assert kwargs["host"] == "http://localhost:11434"
+        assert kwargs["model_id"] == "llama3.2"
+        assert kwargs["ollama_client_args"]["timeout"] == 30.0
 
     @patch("services.strands_service.BedrockModel")
     def test_bedrock_model_id_env_var_reflected(self, mock_bedrock_cls):

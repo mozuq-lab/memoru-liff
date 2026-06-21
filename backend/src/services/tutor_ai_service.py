@@ -18,9 +18,10 @@ from botocore.config import Config
 from botocore.exceptions import ClientError
 
 from utils.agent_timeout import (
-    DEFAULT_AGENT_TIMEOUT_SECONDS,
+    AGENT_TIMEOUT_ENV,
+    DEFAULT_TUTOR_AGENT_TIMEOUT_SECONDS,
+    TUTOR_AGENT_TIMEOUT_ENV,
     resolve_timeout_seconds,
-    run_with_timeout,
 )
 
 if TYPE_CHECKING:
@@ -47,8 +48,6 @@ _MAX_TOKENS = 1024
 _TEMPERATURE = 0.7
 _TIMEOUT = 60
 _MAX_SYSTEM_PROMPT_CHARS = 150_000
-_AGENT_TIMEOUT_ENV = "AI_AGENT_TIMEOUT_SECONDS"
-_TUTOR_AGENT_TIMEOUT_ENV = "TUTOR_AI_AGENT_TIMEOUT_SECONDS"
 
 
 def _resolve_tutor_model_id(model_id: str | None = None) -> str:
@@ -60,19 +59,9 @@ def _resolve_tutor_model_id(model_id: str | None = None) -> str:
 
 def _resolve_strands_tutor_timeout_seconds() -> float:
     """Resolve Strands tutor timeout, allowing tutor-specific override."""
-    default = resolve_timeout_seconds(
-        _AGENT_TIMEOUT_ENV,
-        DEFAULT_AGENT_TIMEOUT_SECONDS,
-    )
-    return resolve_timeout_seconds(_TUTOR_AGENT_TIMEOUT_ENV, default)
-
-
-def _invoke_strands_agent(agent, prompt: str):
-    """Invoke a Strands tutor Agent with a bounded wall-clock timeout."""
-    return run_with_timeout(
-        lambda: agent(prompt),
-        _resolve_strands_tutor_timeout_seconds(),
-        "Strands Tutor Agent call",
+    return resolve_timeout_seconds(
+        (TUTOR_AGENT_TIMEOUT_ENV, AGENT_TIMEOUT_ENV),
+        DEFAULT_TUTOR_AGENT_TIMEOUT_SECONDS,
     )
 
 
@@ -232,13 +221,24 @@ class StrandsTutorAIService:
 
             ollama_host = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
             ollama_model = os.environ.get("OLLAMA_MODEL", "llama3.2")
-            model: Model = OllamaModel(host=ollama_host, model_id=ollama_model)
+            model: Model = OllamaModel(
+                host=ollama_host,
+                model_id=ollama_model,
+                ollama_client_args={"timeout": _resolve_strands_tutor_timeout_seconds()},
+            )
             return model, "strands_ollama"
         else:
             from strands.models import BedrockModel
 
             model_id = _resolve_tutor_model_id()
-            model = BedrockModel(model_id=model_id)
+            model = BedrockModel(
+                model_id=model_id,
+                boto_client_config=Config(
+                    read_timeout=_resolve_strands_tutor_timeout_seconds(),
+                    connect_timeout=5,
+                    retries={"max_attempts": 0},
+                ),
+            )
             return model, "strands_bedrock"
 
     def _create_agent(self, system_prompt: str, messages: list[dict] | None = None, session_manager=None):
@@ -283,7 +283,7 @@ class StrandsTutorAIService:
                     system_prompt=system_prompt[:_MAX_SYSTEM_PROMPT_CHARS],
                     session_manager=session_manager,
                 )
-                response = _invoke_strands_agent(agent, user_message)
+                response = agent(user_message)
                 content = str(response)
             else:
                 # Backward-compatible mode: messages is list[dict] with full history
@@ -307,7 +307,7 @@ class StrandsTutorAIService:
                     system_prompt=system_prompt[:_MAX_SYSTEM_PROMPT_CHARS],
                     messages=strands_messages,
                 )
-                response = _invoke_strands_agent(agent, last_user_content)
+                response = agent(last_user_content)
                 content = str(response)
 
             related_cards = extract_related_cards(content)

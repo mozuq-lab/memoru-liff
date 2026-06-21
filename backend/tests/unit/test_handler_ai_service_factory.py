@@ -622,6 +622,8 @@ class TestTemplateYamlConfig:
         # 【結果検証】: Globals 環境変数の確認
         env_vars = template["Globals"]["Function"]["Environment"]["Variables"]
         assert "USE_STRANDS" in env_vars  # 【検証項目】: USE_STRANDS が定義されている 🔵
+        assert env_vars["AI_AGENT_TIMEOUT_SECONDS"] == "30"
+        assert env_vars["TUTOR_AI_AGENT_TIMEOUT_SECONDS"] == "60"
 
     def test_template_yaml_new_lambda_functions_defined(self):
         """TC-056-020: 新 Lambda 関数が template.yaml に定義されていること.

@@ -13,6 +13,7 @@ from contextlib import contextmanager
 from typing import Generator, List
 
 from aws_lambda_powertools import Logger
+from botocore.config import Config as BotocoreConfig
 from strands import Agent
 from strands.models import BedrockModel, Model
 
@@ -54,16 +55,15 @@ from services.prompts.url_generate import (
 )
 from utils.ai_json import extract_json_from_text
 from utils.agent_timeout import (
+    AGENT_TIMEOUT_ENV,
     DEFAULT_AGENT_TIMEOUT_SECONDS,
     resolve_timeout_seconds,
-    run_with_timeout,
 )
 
 # Bedrock のデフォルトモデル ID
 _DEFAULT_BEDROCK_MODEL_ID = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
 _DEFAULT_OLLAMA_HOST = "http://localhost:11434"
 _DEFAULT_OLLAMA_MODEL = "llama3.2"
-_AGENT_TIMEOUT_ENV = "AI_AGENT_TIMEOUT_SECONDS"
 
 # M-18: 1 呼び出しあたりの最大出力トークン数。BedrockService.MAX_TOKENS と
 # 一致させ、USE_STRANDS=true 環境のコスト保護を対称にする。
@@ -76,17 +76,9 @@ _MODEL_USED_OLLAMA = "strands_ollama"
 logger = Logger()
 
 
-def _invoke_agent(agent: Agent, prompt: str) -> object:
-    """Invoke a Strands Agent with a bounded wall-clock timeout."""
-    timeout_seconds = resolve_timeout_seconds(
-        _AGENT_TIMEOUT_ENV,
-        DEFAULT_AGENT_TIMEOUT_SECONDS,
-    )
-    return run_with_timeout(
-        lambda: agent(prompt),
-        timeout_seconds,
-        "Strands Agent call",
-    )
+def _agent_timeout_seconds() -> float:
+    """Resolve provider-level timeout for Strands AI calls."""
+    return resolve_timeout_seconds(AGENT_TIMEOUT_ENV, DEFAULT_AGENT_TIMEOUT_SECONDS)
 
 
 @contextmanager
@@ -165,6 +157,7 @@ class StrandsAIService:
             model: Model = OllamaModel(
                 host=ollama_host,
                 model_id=ollama_model,
+                ollama_client_args={"timeout": _agent_timeout_seconds()},
             )
             return model, _MODEL_USED_OLLAMA
         else:
@@ -175,6 +168,11 @@ class StrandsAIService:
             model = BedrockModel(
                 model_id=bedrock_model_id,
                 max_tokens=_MAX_TOKENS,
+                boto_client_config=BotocoreConfig(
+                    read_timeout=_agent_timeout_seconds(),
+                    connect_timeout=5,
+                    retries={"max_attempts": 0},
+                ),
             )
             return model, _MODEL_USED_BEDROCK
 
@@ -214,7 +212,7 @@ class StrandsAIService:
             )
 
             agent = Agent(model=self.model, system_prompt=CARD_GENERATION_SYSTEM_PROMPT)
-            response = _invoke_agent(agent, user_prompt)
+            response = agent(user_prompt)
 
             response_text = str(response)
             cards = self._parse_generation_result(response_text)
@@ -332,43 +330,56 @@ class StrandsAIService:
         # exceed MAX_CHUNK_CALLS chunk invocations.
         processed_chunks = 0
         total_chunks = len(chunks)
-        with _handle_ai_errors():
-            for chunk_text in chunks:
-                if len(all_cards) >= target_count:
-                    break
-                if processed_chunks >= self.MAX_CHUNK_CALLS:
-                    logger.warning(
-                        "Chunk call cap reached; skipping remaining chunks",
-                        extra={
-                            "processed_chunks": processed_chunks,
-                            "total_chunks": total_chunks,
-                            "max_chunk_calls": self.MAX_CHUNK_CALLS,
-                        },
+        timed_out_chunks = 0
+        for chunk_text in chunks:
+            if len(all_cards) >= target_count:
+                break
+            if processed_chunks >= self.MAX_CHUNK_CALLS:
+                logger.warning(
+                    "Chunk call cap reached; skipping remaining chunks",
+                    extra={
+                        "processed_chunks": processed_chunks,
+                        "total_chunks": total_chunks,
+                        "max_chunk_calls": self.MAX_CHUNK_CALLS,
+                    },
+                )
+                break
+            user_prompt = get_url_card_generation_prompt(
+                chunk_text=chunk_text,
+                card_count=cards_per_chunk,
+                card_type=card_type,
+                difficulty=difficulty,
+                language=language,
+                page_title=page_title,
+            )
+
+            try:
+                with _handle_ai_errors():
+                    agent = Agent(
+                        model=self.model,
+                        system_prompt=URL_CARD_GENERATION_SYSTEM_PROMPT,
                     )
-                    break
-                user_prompt = get_url_card_generation_prompt(
-                    chunk_text=chunk_text,
-                    card_count=cards_per_chunk,
-                    card_type=card_type,
-                    difficulty=difficulty,
-                    language=language,
-                    page_title=page_title,
-                )
-
-                agent = Agent(
-                    model=self.model,
-                    system_prompt=URL_CARD_GENERATION_SYSTEM_PROMPT,
-                )
-                processed_chunks += 1
-                response = _invoke_agent(agent, user_prompt)
-
-                response_text = str(response)
-                try:
+                    processed_chunks += 1
+                    response = agent(user_prompt)
+                    response_text = str(response)
                     cards = self._parse_generation_result(response_text)
-                    all_cards.extend(cards)
-                except AIParseError:
-                    # Skip chunks that fail to parse
-                    continue
+                all_cards.extend(cards)
+            except AIParseError:
+                # Skip chunks that fail to parse
+                continue
+            except AITimeoutError:
+                timed_out_chunks += 1
+                logger.warning(
+                    "URL card generation chunk timed out; returning partial results if available",
+                    extra={
+                        "processed_chunks": processed_chunks,
+                        "cards_so_far": len(all_cards),
+                    },
+                )
+                break
+
+        if not all_cards and timed_out_chunks > 0:
+            raise AITimeoutError("URL card generation timed out")
 
         # Deduplicate by front text (case-insensitive)
         seen_fronts: set[str] = set()
@@ -427,7 +438,7 @@ class StrandsAIService:
             )
 
             agent = Agent(model=self.model, system_prompt=GRADING_SYSTEM_PROMPT)
-            response = _invoke_agent(agent, user_prompt)
+            response = agent(user_prompt)
 
             response_text = str(response)
             grade, reasoning = self._parse_grading_result(response_text)
@@ -524,7 +535,7 @@ class StrandsAIService:
             )
 
             agent = Agent(model=self.model, system_prompt=ADVICE_SYSTEM_PROMPT)
-            response = _invoke_agent(agent, user_prompt)
+            response = agent(user_prompt)
 
             response_text = str(response)
             advice_text, weak_areas, recommendations = self._parse_advice_result(response_text)
@@ -573,7 +584,7 @@ class StrandsAIService:
 
             system_prompt = get_refine_system_prompt(language=language)
             agent = Agent(model=self.model, system_prompt=system_prompt)
-            response = _invoke_agent(agent, user_prompt)
+            response = agent(user_prompt)
 
             response_text = str(response)
             refined_front, refined_back = self._parse_refine_result(response_text)

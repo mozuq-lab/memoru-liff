@@ -24,6 +24,8 @@ Globals:
         USE_STRANDS: !Ref UseStrands
         OLLAMA_HOST: ""
         OLLAMA_MODEL: ""
+        AI_AGENT_TIMEOUT_SECONDS: "30"
+        TUTOR_AI_AGENT_TIMEOUT_SECONDS: "60"
         TUTOR_SESSION_BACKEND: !Ref TutorSessionBackend
         AGENTCORE_MEMORY_ID: !Ref AgentCoreMemoryId
 
