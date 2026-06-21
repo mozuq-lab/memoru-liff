@@ -14,6 +14,7 @@
 import inspect
 import json
 import os
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -324,6 +325,24 @@ class TestStrandsServiceErrors:
         mock_agent_instance.side_effect = TimeoutError("Agent timed out")
 
         with patch("services.strands_service.Agent", return_value=mock_agent_instance), \
+             patch("services.strands_service.BedrockModel"):
+            service = StrandsAIService()
+
+            with pytest.raises(AITimeoutError):
+                service.generate_cards(input_text="テスト")
+
+    def test_agent_call_timeout_limit_raises_ai_timeout_error(self):
+        """Agent 呼び出しが設定秒数を超えた場合に AITimeoutError が raise される."""
+        mock_agent_instance = MagicMock()
+
+        def slow_agent_call(_prompt: str) -> str:
+            time.sleep(0.05)
+            return json.dumps({"cards": [{"front": "Q", "back": "A", "tags": []}]})
+
+        mock_agent_instance.side_effect = slow_agent_call
+
+        with patch.dict(os.environ, {"AI_AGENT_TIMEOUT_SECONDS": "0.001"}), \
+             patch("services.strands_service.Agent", return_value=mock_agent_instance), \
              patch("services.strands_service.BedrockModel"):
             service = StrandsAIService()
 

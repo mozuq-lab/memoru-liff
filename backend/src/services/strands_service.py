@@ -53,11 +53,17 @@ from services.prompts.url_generate import (
     get_url_card_generation_prompt,
 )
 from utils.ai_json import extract_json_from_text
+from utils.agent_timeout import (
+    DEFAULT_AGENT_TIMEOUT_SECONDS,
+    resolve_timeout_seconds,
+    run_with_timeout,
+)
 
 # Bedrock のデフォルトモデル ID
 _DEFAULT_BEDROCK_MODEL_ID = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
 _DEFAULT_OLLAMA_HOST = "http://localhost:11434"
 _DEFAULT_OLLAMA_MODEL = "llama3.2"
+_AGENT_TIMEOUT_ENV = "AI_AGENT_TIMEOUT_SECONDS"
 
 # M-18: 1 呼び出しあたりの最大出力トークン数。BedrockService.MAX_TOKENS と
 # 一致させ、USE_STRANDS=true 環境のコスト保護を対称にする。
@@ -68,6 +74,19 @@ _MODEL_USED_BEDROCK = "strands_bedrock"
 _MODEL_USED_OLLAMA = "strands_ollama"
 
 logger = Logger()
+
+
+def _invoke_agent(agent: Agent, prompt: str) -> object:
+    """Invoke a Strands Agent with a bounded wall-clock timeout."""
+    timeout_seconds = resolve_timeout_seconds(
+        _AGENT_TIMEOUT_ENV,
+        DEFAULT_AGENT_TIMEOUT_SECONDS,
+    )
+    return run_with_timeout(
+        lambda: agent(prompt),
+        timeout_seconds,
+        "Strands Agent call",
+    )
 
 
 @contextmanager
@@ -195,7 +214,7 @@ class StrandsAIService:
             )
 
             agent = Agent(model=self.model, system_prompt=CARD_GENERATION_SYSTEM_PROMPT)
-            response = agent(user_prompt)
+            response = _invoke_agent(agent, user_prompt)
 
             response_text = str(response)
             cards = self._parse_generation_result(response_text)
@@ -341,7 +360,7 @@ class StrandsAIService:
                     system_prompt=URL_CARD_GENERATION_SYSTEM_PROMPT,
                 )
                 processed_chunks += 1
-                response = agent(user_prompt)
+                response = _invoke_agent(agent, user_prompt)
 
                 response_text = str(response)
                 try:
@@ -408,7 +427,7 @@ class StrandsAIService:
             )
 
             agent = Agent(model=self.model, system_prompt=GRADING_SYSTEM_PROMPT)
-            response = agent(user_prompt)
+            response = _invoke_agent(agent, user_prompt)
 
             response_text = str(response)
             grade, reasoning = self._parse_grading_result(response_text)
@@ -505,7 +524,7 @@ class StrandsAIService:
             )
 
             agent = Agent(model=self.model, system_prompt=ADVICE_SYSTEM_PROMPT)
-            response = agent(user_prompt)
+            response = _invoke_agent(agent, user_prompt)
 
             response_text = str(response)
             advice_text, weak_areas, recommendations = self._parse_advice_result(response_text)
@@ -554,7 +573,7 @@ class StrandsAIService:
 
             system_prompt = get_refine_system_prompt(language=language)
             agent = Agent(model=self.model, system_prompt=system_prompt)
-            response = agent(user_prompt)
+            response = _invoke_agent(agent, user_prompt)
 
             response_text = str(response)
             refined_front, refined_back = self._parse_refine_result(response_text)

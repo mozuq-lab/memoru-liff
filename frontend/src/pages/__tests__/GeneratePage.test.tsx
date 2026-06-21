@@ -4,6 +4,7 @@
  * 【テスト対応】: TASK-0015 テストケース1〜9
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { StrictMode } from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
@@ -29,6 +30,7 @@ vi.mock('@/services/api', () => ({
     generateFromUrl: (...args: unknown[]) => mockGenerateFromUrl(...args),
     createCard: (...args: unknown[]) => mockCreateCard(...args),
   },
+  getUserFacingMessage: (_err: unknown, fallback?: string) => fallback ?? 'エラーが発生しました。',
 }));
 
 // DecksContext モック
@@ -44,12 +46,13 @@ vi.mock('@/contexts/DecksContext', () => ({
   }),
 }));
 
-const renderGeneratePage = () => {
-  return render(
+const renderGeneratePage = ({ strictMode = false }: { strictMode?: boolean } = {}) => {
+  const page = (
     <MemoryRouter>
       <GeneratePage />
     </MemoryRouter>
   );
+  return render(strictMode ? <StrictMode>{page}</StrictMode> : page);
 };
 
 describe('GeneratePage', () => {
@@ -415,6 +418,38 @@ describe('GeneratePage', () => {
         expect(screen.getByTestId('error')).toBeInTheDocument();
         expect(screen.getByText('カードの生成に失敗しました。もう一度お試しください。')).toBeInTheDocument();
       });
+    });
+
+    it('StrictModeでも生成エラー時にローディングが解除される', async () => {
+      const user = userEvent.setup();
+      mockGenerateCards.mockRejectedValue(new Error('API Error'));
+
+      renderGeneratePage({ strictMode: true });
+
+      await user.type(screen.getByTestId('input-text'), 'テスト用のテキストです');
+      await user.click(screen.getByTestId('generate-button'));
+
+      await waitFor(() => {
+        expect(screen.getByText('カードの生成に失敗しました。もう一度お試しください。')).toBeInTheDocument();
+      });
+      expect(screen.queryByTestId('loading')).not.toBeInTheDocument();
+      expect(screen.getByTestId('generate-button')).toHaveTextContent('AIでカードを生成');
+    });
+
+    it('不正な成功レスポンスでもローディングが解除される', async () => {
+      const user = userEvent.setup();
+      mockGenerateCards.mockResolvedValue({ errorMessage: 'Runtime.ImportModuleError' });
+
+      renderGeneratePage();
+
+      await user.type(screen.getByTestId('input-text'), 'テスト用のテキストです');
+      await user.click(screen.getByTestId('generate-button'));
+
+      await waitFor(() => {
+        expect(screen.getByText('カードの生成に失敗しました。もう一度お試しください。')).toBeInTheDocument();
+      });
+      expect(screen.queryByTestId('loading')).not.toBeInTheDocument();
+      expect(screen.getByTestId('generate-button')).toHaveTextContent('AIでカードを生成');
     });
 
     it('保存エラー時にエラーメッセージが表示される', async () => {

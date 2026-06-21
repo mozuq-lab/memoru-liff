@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { cardsApi, getUserFacingMessage } from '@/services/api';
 import { useDecksContext } from '@/contexts/DecksContext';
 import type {
+  GeneratedCard,
   GeneratedCardWithId,
   GenerateCardsRequest,
   GenerateFromUrlRequest,
@@ -18,6 +19,53 @@ export const MIN_CHARS = 5;
 export const MAX_CHARS = 2000;
 const MAX_GENERATION_TIME = 30000; // 30秒
 const MAX_URL_GENERATION_TIME = 90000; // 90秒
+
+type GeneratedCardsPayload = {
+  generated_cards: GeneratedCard[];
+};
+
+type UrlGeneratedCardsPayload = GeneratedCardsPayload & {
+  page_info: {
+    url: string;
+    title: string;
+    fetched_at?: string;
+  };
+};
+
+const hasGeneratedCardsPayload = (response: unknown): response is GeneratedCardsPayload => {
+  if (typeof response !== 'object' || response === null) return false;
+  const cards = (response as { generated_cards?: unknown }).generated_cards;
+  return Array.isArray(cards) && cards.every(card => (
+    typeof card === 'object' &&
+    card !== null &&
+    typeof (card as { front?: unknown }).front === 'string' &&
+    typeof (card as { back?: unknown }).back === 'string' &&
+    Array.isArray((card as { suggested_tags?: unknown }).suggested_tags)
+  ));
+};
+
+const hasUrlGeneratedCardsPayload = (response: unknown): response is UrlGeneratedCardsPayload => {
+  if (!hasGeneratedCardsPayload(response)) return false;
+  const pageInfo = (response as { page_info?: unknown }).page_info;
+  return (
+    typeof pageInfo === 'object' &&
+    pageInfo !== null &&
+    typeof (pageInfo as { url?: unknown }).url === 'string' &&
+    typeof (pageInfo as { title?: unknown }).title === 'string'
+  );
+};
+
+const isAbortLikeError = (err: unknown): boolean => {
+  if (typeof err !== 'object' || err === null || !('name' in err)) return false;
+  const name = (err as { name?: unknown }).name;
+  return name === 'AbortError' || name === 'TimeoutError';
+};
+
+const addTemporaryIds = (cards: GeneratedCard[]): GeneratedCardWithId[] =>
+  cards.map((card, index) => ({
+    ...card,
+    tempId: `temp-${Date.now()}-${index}`,
+  }));
 
 /**
  * 【フック概要】: AI カード生成画面（テキスト / URL の 2 モード）の状態機械を GeneratePage の
@@ -111,19 +159,17 @@ export const useCardGeneration = () => {
       clearTimeout(timeoutId);
       // M-30: アンマウント済みなら state 更新を行わない
       if (!isMountedRef.current) return;
+      if (!hasGeneratedCardsPayload(response)) {
+        throw new Error('Invalid card generation response');
+      }
 
-      const cardsWithId: GeneratedCardWithId[] = response.generated_cards.map((card, index) => ({
-        ...card,
-        tempId: `temp-${Date.now()}-${index}`,
-      }));
-
-      setGeneratedCards(cardsWithId);
+      setGeneratedCards(addTemporaryIds(response.generated_cards));
       setSelectedCards(new Set());
     } catch (err) {
       clearTimeout(timeoutId);
       // M-30: アンマウント済み（cleanup の abort 含む）なら state 更新を行わない
       if (!isMountedRef.current) return;
-      if (err instanceof DOMException && err.name === 'AbortError') {
+      if (isAbortLikeError(err)) {
         setError('生成がタイムアウトしました。もう一度お試しください。');
       } else {
         setError('カードの生成に失敗しました。もう一度お試しください。');
@@ -174,15 +220,17 @@ export const useCardGeneration = () => {
       clearTimeout(timer2);
       // M-30: アンマウント済みなら state 更新を行わない
       if (!isMountedRef.current) return;
+      if (!hasUrlGeneratedCardsPayload(response)) {
+        throw new Error('Invalid URL card generation response');
+      }
 
-      setPageInfo(response.page_info);
+      setPageInfo({
+        url: response.page_info.url,
+        title: response.page_info.title,
+        fetched_at: response.page_info.fetched_at ?? '',
+      });
 
-      const cardsWithId: GeneratedCardWithId[] = response.generated_cards.map((card, index) => ({
-        ...card,
-        tempId: `temp-${Date.now()}-${index}`,
-      }));
-
-      setGeneratedCards(cardsWithId);
+      setGeneratedCards(addTemporaryIds(response.generated_cards));
       setSelectedCards(new Set());
     } catch (err) {
       clearTimeout(timeoutId);
@@ -190,7 +238,7 @@ export const useCardGeneration = () => {
       clearTimeout(timer2);
       // M-30: アンマウント済み（cleanup の abort 含む）なら state 更新を行わない
       if (!isMountedRef.current) return;
-      if (err instanceof DOMException && err.name === 'AbortError') {
+      if (isAbortLikeError(err)) {
         setError('生成がタイムアウトしました。URLが正しいか確認してください。');
       } else {
         // E-1: 業務エラー(4xx)はメッセージを表示、想定外(5xx/ネットワーク)は固定文言
@@ -210,6 +258,7 @@ export const useCardGeneration = () => {
   //   AbortController.abort() で API リクエスト自体を中断し、タイムアウト/プログレス
   //   タイマーを clear し、isMountedRef を false にして以降の setState を抑止する。
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
       controllerRef.current?.abort();

@@ -5,6 +5,7 @@ related card extraction, and factory function.
 """
 
 import json
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -317,6 +318,32 @@ class TestStrandsTutorAIServiceGenerateResponse:
             "services.tutor_ai_service.StrandsTutorAIService._create_model",
             return_value=(MagicMock(), "strands_ollama"),
         ):
+            service = StrandsTutorAIService(environment="dev")
+            service._create_agent = MagicMock(return_value=mock_agent_instance)
+
+            with pytest.raises(TutorAITimeoutError):
+                service.generate_response(
+                    system_prompt="sys",
+                    messages=[{"role": "user", "content": "hello"}],
+                )
+
+    def test_generate_response_timeout_limit(self):
+        """Strands Agent call should be bounded by AI_AGENT_TIMEOUT_SECONDS."""
+        from services.tutor_ai_service import StrandsTutorAIService, TutorAITimeoutError
+
+        mock_agent_instance = MagicMock()
+
+        def slow_agent_call(_prompt: str) -> str:
+            time.sleep(0.05)
+            return "遅い応答"
+
+        mock_agent_instance.side_effect = slow_agent_call
+
+        with patch.dict("os.environ", {"AI_AGENT_TIMEOUT_SECONDS": "0.001"}), \
+             patch(
+                 "services.tutor_ai_service.StrandsTutorAIService._create_model",
+                 return_value=(MagicMock(), "strands_ollama"),
+             ):
             service = StrandsTutorAIService(environment="dev")
             service._create_agent = MagicMock(return_value=mock_agent_instance)
 

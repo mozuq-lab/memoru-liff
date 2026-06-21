@@ -17,6 +17,12 @@ from aws_lambda_powertools import Logger
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
+from utils.agent_timeout import (
+    DEFAULT_AGENT_TIMEOUT_SECONDS,
+    resolve_timeout_seconds,
+    run_with_timeout,
+)
+
 if TYPE_CHECKING:
     # strands は遅延 import 方針のため、型参照のみ TYPE_CHECKING 配下で行う
     from strands.models import Model
@@ -41,6 +47,8 @@ _MAX_TOKENS = 1024
 _TEMPERATURE = 0.7
 _TIMEOUT = 60
 _MAX_SYSTEM_PROMPT_CHARS = 150_000
+_AGENT_TIMEOUT_ENV = "AI_AGENT_TIMEOUT_SECONDS"
+_TUTOR_AGENT_TIMEOUT_ENV = "TUTOR_AI_AGENT_TIMEOUT_SECONDS"
 
 
 def _resolve_tutor_model_id(model_id: str | None = None) -> str:
@@ -48,6 +56,24 @@ def _resolve_tutor_model_id(model_id: str | None = None) -> str:
     tutor_model = os.environ.get("TUTOR_MODEL_ID", "")
     fallback_model = os.environ.get("BEDROCK_MODEL_ID", _DEFAULT_MODEL_ID)
     return model_id or tutor_model or fallback_model
+
+
+def _resolve_strands_tutor_timeout_seconds() -> float:
+    """Resolve Strands tutor timeout, allowing tutor-specific override."""
+    default = resolve_timeout_seconds(
+        _AGENT_TIMEOUT_ENV,
+        DEFAULT_AGENT_TIMEOUT_SECONDS,
+    )
+    return resolve_timeout_seconds(_TUTOR_AGENT_TIMEOUT_ENV, default)
+
+
+def _invoke_strands_agent(agent, prompt: str):
+    """Invoke a Strands tutor Agent with a bounded wall-clock timeout."""
+    return run_with_timeout(
+        lambda: agent(prompt),
+        _resolve_strands_tutor_timeout_seconds(),
+        "Strands Tutor Agent call",
+    )
 
 
 def extract_related_cards(text: str) -> list[str]:
@@ -257,7 +283,7 @@ class StrandsTutorAIService:
                     system_prompt=system_prompt[:_MAX_SYSTEM_PROMPT_CHARS],
                     session_manager=session_manager,
                 )
-                response = agent(user_message)
+                response = _invoke_strands_agent(agent, user_message)
                 content = str(response)
             else:
                 # Backward-compatible mode: messages is list[dict] with full history
@@ -281,7 +307,7 @@ class StrandsTutorAIService:
                     system_prompt=system_prompt[:_MAX_SYSTEM_PROMPT_CHARS],
                     messages=strands_messages,
                 )
-                response = agent(last_user_content)
+                response = _invoke_strands_agent(agent, last_user_content)
                 content = str(response)
 
             related_cards = extract_related_cards(content)
