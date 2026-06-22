@@ -5,6 +5,10 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { SpeechRate } from "@/types/speech";
 
+// 読み上げ言語。未指定だと <html lang>（= "en"）にフォールバックし、英語ボイスが
+// 日本語カードを読んで不明瞭な音になるため、日本語前提で明示する。
+const SPEECH_LANG = "ja-JP";
+
 interface UseSpeechOptions {
   /** 読み上げ速度。省略時は 1 */
   rate?: SpeechRate;
@@ -51,6 +55,7 @@ export const useSpeech = (options?: UseSpeechOptions): UseSpeechReturn => {
       // 既存の発話を停止してから新規発話を開始
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = SPEECH_LANG;
       utterance.rate = rateRef.current;
       utterance.onend = () => {
         speakingRef.current = false;

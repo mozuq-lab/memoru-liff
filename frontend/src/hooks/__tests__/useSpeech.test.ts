@@ -11,6 +11,7 @@ import type { SpeechRate } from "@/types/speech";
 // モック SpeechSynthesisUtterance インスタンス型
 interface MockUtteranceInstance {
   text: string;
+  lang: string;
   rate: number;
   onend: (() => void) | null;
   onerror: (() => void) | null;
@@ -34,6 +35,7 @@ describe("useSpeech", () => {
       text: string,
     ) {
       this.text = text;
+      this.lang = "";
       this.rate = 1;
       this.onend = null;
       this.onerror = null;
@@ -95,6 +97,14 @@ describe("useSpeech", () => {
       });
       expect(MockUtteranceClass).toHaveBeenCalledWith("読み上げテスト");
       expect(mockSpeak).toHaveBeenCalledTimes(1);
+    });
+
+    it("utterance.lang に ja-JP が設定される（英語ボイスでの不明瞭な発話を防ぐ）", () => {
+      const { result } = renderHook(() => useSpeech());
+      act(() => {
+        result.current.speak("日本語のテキスト");
+      });
+      expect(lastUtterance.lang).toBe("ja-JP");
     });
 
     it("speak 呼び出し前に cancel を先行して呼び出す（再発話のため）", () => {
