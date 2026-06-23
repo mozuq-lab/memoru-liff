@@ -57,6 +57,94 @@ def _make_strands_message(role, content):
 
 
 # ===================================================================
+# Strands SessionManager interface conformance tests
+# ===================================================================
+
+
+class TestSessionManagerInterface:
+    """Strands SDK の SessionManager インターフェース適合を検証する。
+
+    Strands SDK 更新で SessionManager に register_hooks / redact_latest_message
+    が追加された際の追従漏れ（'DynamoDBSessionManager' object has no attribute
+    'register_hooks' で Agent 構築が 503 になる）を防ぐ回帰テスト。
+    """
+
+    def test_is_subclass_of_strands_session_manager(self):
+        from strands.session import SessionManager
+
+        from services.tutor_session_manager import DynamoDBSessionManager
+
+        assert issubclass(DynamoDBSessionManager, SessionManager)
+
+    def test_instantiable_with_all_abstract_methods_implemented(self):
+        """抽象メソッド未実装なら TypeError。インスタンス化できることを確認。"""
+        from services.tutor_session_manager import DynamoDBSessionManager
+
+        sm = DynamoDBSessionManager(
+            table_name="test-table",
+            session_id="sess1",
+            user_id="user1",
+            dynamodb_resource=_make_mock_dynamodb(_make_mock_table()),
+        )
+        assert sm is not None
+
+    def test_register_hooks_is_callable(self):
+        """Agent が呼ぶ register_hooks が存在し、HookRegistry に登録できる。"""
+        from strands.hooks.registry import HookRegistry
+
+        from services.tutor_session_manager import DynamoDBSessionManager
+
+        sm = DynamoDBSessionManager(
+            table_name="test-table",
+            session_id="sess1",
+            user_id="user1",
+            dynamodb_resource=_make_mock_dynamodb(_make_mock_table()),
+        )
+        sm.register_hooks(HookRegistry())  # 例外を出さないこと
+
+    def test_redact_latest_message_overwrites_last_message(self):
+        """redact_latest_message は末尾メッセージを redact 後の内容で上書きする。"""
+        from services.tutor_session_manager import DynamoDBSessionManager
+
+        table = _make_mock_table(item={
+            "user_id": "user1",
+            "session_id": "sess1",
+            "messages": [_make_dynamo_message("user", "secret")],
+        })
+        sm = DynamoDBSessionManager(
+            table_name="test-table",
+            session_id="sess1",
+            user_id="user1",
+            dynamodb_resource=_make_mock_dynamodb(table),
+        )
+        sm.redact_latest_message(
+            _make_strands_message("user", "[REDACTED]"), _make_mock_agent()
+        )
+
+        table.update_item.assert_called_once()
+        kwargs = table.update_item.call_args.kwargs
+        assert kwargs["UpdateExpression"] == "SET messages[0] = :msg"
+        assert kwargs["ExpressionAttributeValues"][":msg"]["content"] == "[REDACTED]"
+
+    def test_redact_latest_message_no_messages_is_noop(self):
+        """メッセージが無い場合は update_item を呼ばない。"""
+        from services.tutor_session_manager import DynamoDBSessionManager
+
+        table = _make_mock_table(item=None)
+        sm = DynamoDBSessionManager(
+            table_name="test-table",
+            session_id="sess1",
+            user_id="user1",
+            dynamodb_resource=_make_mock_dynamodb(table),
+        )
+        sm.redact_latest_message(
+            _make_strands_message("user", "[REDACTED]"), _make_mock_agent()
+        )
+
+        table.update_item.assert_not_called()
+
+
+# ===================================================================
 # Message format conversion tests
 # ===================================================================
 

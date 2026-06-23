@@ -16,13 +16,15 @@ from typing import Any
 
 from aws_lambda_powertools import Logger
 from botocore.exceptions import ClientError
+from strands.session import SessionManager
+from strands.types.content import Message
 
 from utils.dynamodb_client import get_dynamodb_resource
 
 logger = Logger()
 
 
-class DynamoDBSessionManager:
+class DynamoDBSessionManager(SessionManager):
     """DynamoDB-based SessionManager implementation.
 
     Conforms to the Strands SDK SessionManager interface and manages
@@ -49,6 +51,7 @@ class DynamoDBSessionManager:
             user_id: User ID (partition key).
             dynamodb_resource: Optional DynamoDB resource for testing.
         """
+        super().__init__()
         self.table_name = table_name
         self.session_id = session_id
         self.user_id = user_id
@@ -57,7 +60,7 @@ class DynamoDBSessionManager:
 
         self.table = self.dynamodb.Table(self.table_name)
 
-    def initialize(self, agent: Any, session_id: str | None = None) -> None:
+    def initialize(self, agent: Any, session_id: str | None = None, **kwargs: Any) -> None:
         """Initialize session and restore conversation history to Agent.
 
         Reads messages from DynamoDB and sets them on Agent.messages
@@ -82,7 +85,7 @@ class DynamoDBSessionManager:
             self._dynamo_to_strands_message(msg) for msg in dynamo_messages
         ]
 
-    def append_message(self, message: dict, agent: Any) -> None:
+    def append_message(self, message: Message, agent: Any, **kwargs: Any) -> None:
         """Append a message to conversation history in DynamoDB.
 
         Converts from Strands format to DynamoDB format before storing.
@@ -102,7 +105,7 @@ class DynamoDBSessionManager:
             },
         )
 
-    def sync_agent(self, agent: Any) -> None:
+    def sync_agent(self, agent: Any, **kwargs: Any) -> None:
         """Sync all Agent.messages to DynamoDB.
 
         Converts all messages from Strands format to DynamoDB format
@@ -119,6 +122,37 @@ class DynamoDBSessionManager:
             Key={"user_id": self.user_id, "session_id": self.session_id},
             UpdateExpression="SET messages = :msgs",
             ExpressionAttributeValues={":msgs": dynamo_messages},
+        )
+
+    def redact_latest_message(
+        self, redact_message: Message, agent: Any, **kwargs: Any
+    ) -> None:
+        """Replace the most recently stored message with redacted content.
+
+        Strands SessionManager の抽象メソッド。ガードレール等で直近メッセージが
+        redact された際に呼ばれるため、DynamoDB 'messages' の末尾要素を redact 後の
+        内容で上書きし、履歴復元時に redact 済みの内容が返るようにする。
+
+        Args:
+            redact_message: redact 後の Strands 形式メッセージ。
+            agent: Strands Agent インスタンス。
+            **kwargs: 将来拡張用。
+        """
+        dynamo_msg = self._strands_to_dynamo_message(redact_message)
+
+        response = self.table.get_item(
+            Key={"user_id": self.user_id, "session_id": self.session_id}
+        )
+        item = response.get("Item")
+        messages = item.get("messages", []) if item else []
+        if not messages:
+            return
+
+        last_index = len(messages) - 1
+        self.table.update_item(
+            Key={"user_id": self.user_id, "session_id": self.session_id},
+            UpdateExpression=f"SET messages[{last_index}] = :msg",
+            ExpressionAttributeValues={":msg": dynamo_msg},
         )
 
     def close(self) -> None:
@@ -234,7 +268,7 @@ class DynamoDBSessionManager:
         }
 
     @staticmethod
-    def _strands_to_dynamo_message(strands_msg: dict) -> dict:
+    def _strands_to_dynamo_message(strands_msg: Message) -> dict:
         """Convert a Strands-format message to DynamoDB format.
 
         Strands:  {"role": "user", "content": [{"text": "hello"}]}
