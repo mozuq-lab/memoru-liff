@@ -136,6 +136,53 @@ describe('GeneratePage', () => {
     });
   });
 
+  describe('テキスト生成枚数の選択', () => {
+    const successResponse = {
+      generated_cards: [{ front: 'Q', back: 'A', suggested_tags: [] }],
+      generation_info: { input_length: 10, model_used: 'test', processing_time_ms: 100 },
+    };
+
+    it('デフォルトの生成枚数は3枚である', () => {
+      renderGeneratePage();
+      expect(screen.getByTestId('text-card-count-display')).toHaveTextContent('3');
+    });
+
+    it('デフォルトでは card_count=3 が送信される', async () => {
+      const user = userEvent.setup();
+      mockGenerateCards.mockResolvedValue(successResponse);
+
+      renderGeneratePage();
+      await user.type(screen.getByTestId('input-text'), 'テスト用のテキストです');
+      await user.click(screen.getByTestId('generate-button'));
+
+      await waitFor(() => {
+        expect(mockGenerateCards).toHaveBeenCalled();
+      });
+      expect(mockGenerateCards.mock.calls[0][0]).toMatchObject({ card_count: 3 });
+    });
+
+    it('選択した枚数が card_count として送信される', async () => {
+      const user = userEvent.setup();
+      mockGenerateCards.mockResolvedValue(successResponse);
+
+      renderGeneratePage();
+
+      // range スライダーを 7 に変更
+      fireEvent.change(screen.getByTestId('text-card-count-slider'), {
+        target: { value: '7' },
+      });
+      expect(screen.getByTestId('text-card-count-display')).toHaveTextContent('7');
+
+      await user.type(screen.getByTestId('input-text'), 'テスト用のテキストです');
+      await user.click(screen.getByTestId('generate-button'));
+
+      await waitFor(() => {
+        expect(mockGenerateCards).toHaveBeenCalled();
+      });
+      expect(mockGenerateCards.mock.calls[0][0]).toMatchObject({ card_count: 7 });
+    });
+  });
+
   describe('テストケース5: カード候補の表示', () => {
     it('生成成功時にカード候補が表示される', async () => {
       const user = userEvent.setup();
