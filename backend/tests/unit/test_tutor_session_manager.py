@@ -57,6 +57,94 @@ def _make_strands_message(role, content):
 
 
 # ===================================================================
+# Strands SessionManager interface conformance tests
+# ===================================================================
+
+
+class TestSessionManagerInterface:
+    """Strands SDK の SessionManager インターフェース適合を検証する。
+
+    Strands SDK 更新で SessionManager に register_hooks / redact_latest_message
+    が追加された際の追従漏れ（'DynamoDBSessionManager' object has no attribute
+    'register_hooks' で Agent 構築が 503 になる）を防ぐ回帰テスト。
+    """
+
+    def test_is_subclass_of_strands_session_manager(self):
+        from strands.session import SessionManager
+
+        from services.tutor_session_manager import DynamoDBSessionManager
+
+        assert issubclass(DynamoDBSessionManager, SessionManager)
+
+    def test_instantiable_with_all_abstract_methods_implemented(self):
+        """抽象メソッド未実装なら TypeError。インスタンス化できることを確認。"""
+        from services.tutor_session_manager import DynamoDBSessionManager
+
+        sm = DynamoDBSessionManager(
+            table_name="test-table",
+            session_id="sess1",
+            user_id="user1",
+            dynamodb_resource=_make_mock_dynamodb(_make_mock_table()),
+        )
+        assert sm is not None
+
+    def test_register_hooks_is_callable(self):
+        """Agent が呼ぶ register_hooks が存在し、HookRegistry に登録できる。"""
+        from strands.hooks.registry import HookRegistry
+
+        from services.tutor_session_manager import DynamoDBSessionManager
+
+        sm = DynamoDBSessionManager(
+            table_name="test-table",
+            session_id="sess1",
+            user_id="user1",
+            dynamodb_resource=_make_mock_dynamodb(_make_mock_table()),
+        )
+        sm.register_hooks(HookRegistry())  # 例外を出さないこと
+
+    def test_redact_latest_message_overwrites_last_message(self):
+        """redact_latest_message は末尾メッセージを redact 後の内容で上書きする。"""
+        from services.tutor_session_manager import DynamoDBSessionManager
+
+        table = _make_mock_table(item={
+            "user_id": "user1",
+            "session_id": "sess1",
+            "messages": [_make_dynamo_message("user", "secret")],
+        })
+        sm = DynamoDBSessionManager(
+            table_name="test-table",
+            session_id="sess1",
+            user_id="user1",
+            dynamodb_resource=_make_mock_dynamodb(table),
+        )
+        sm.redact_latest_message(
+            _make_strands_message("user", "[REDACTED]"), _make_mock_agent()
+        )
+
+        table.update_item.assert_called_once()
+        kwargs = table.update_item.call_args.kwargs
+        assert kwargs["UpdateExpression"] == "SET messages[0] = :msg"
+        assert kwargs["ExpressionAttributeValues"][":msg"]["content"] == "[REDACTED]"
+
+    def test_redact_latest_message_no_messages_is_noop(self):
+        """メッセージが無い場合は update_item を呼ばない。"""
+        from services.tutor_session_manager import DynamoDBSessionManager
+
+        table = _make_mock_table(item=None)
+        sm = DynamoDBSessionManager(
+            table_name="test-table",
+            session_id="sess1",
+            user_id="user1",
+            dynamodb_resource=_make_mock_dynamodb(table),
+        )
+        sm.redact_latest_message(
+            _make_strands_message("user", "[REDACTED]"), _make_mock_agent()
+        )
+
+        table.update_item.assert_not_called()
+
+
+# ===================================================================
 # Message format conversion tests
 # ===================================================================
 
@@ -408,6 +496,53 @@ class TestSyncAgent:
         call_kwargs = table.update_item.call_args[1]
         dynamo_messages = call_kwargs["ExpressionAttributeValues"][":msgs"]
         assert dynamo_messages == []
+
+    def test_sync_agent_preserves_existing_related_cards_and_timestamp(self):
+        """既存メッセージの related_cards / timestamp が sync_agent で失われないこと.
+
+        SessionManager 継承後は MessageAddedEvent / AfterInvocationEvent ごとに
+        sync_agent が呼ばれる。initialize() が Strands 形式へ戻す際に metadata を
+        落とすため、素朴な full-replace では _persist_related_cards が保存した
+        related_cards が次ターンで [] / 新 timestamp に戻ってしまう（PR #69 レビュー
+        指摘 P1）。index 単位で metadata を引き継ぐことを保証する回帰テスト。
+        """
+        from services.tutor_session_manager import DynamoDBSessionManager
+
+        stored = _make_dynamo_message(
+            "assistant",
+            "前回の回答",
+            timestamp="2026-06-01T00:00:00+00:00",
+            related_cards=["card_001"],
+        )
+        table = _make_mock_table(item={
+            "user_id": "user1",
+            "session_id": "sess1",
+            "messages": [stored],
+        })
+        dynamodb = _make_mock_dynamodb(table)
+
+        sm = DynamoDBSessionManager(
+            table_name="test-table",
+            session_id="sess1",
+            user_id="user1",
+            dynamodb_resource=dynamodb,
+        )
+
+        # 復元 → 新規ユーザー発話を追加 → sync（次ターン開始相当）
+        agent = _make_mock_agent()
+        sm.initialize(agent)
+        agent.messages.append(_make_strands_message("user", "次の質問"))
+        sm.sync_agent(agent)
+
+        written = table.update_item.call_args[1]["ExpressionAttributeValues"][":msgs"]
+        assert len(written) == 2
+        # 既存 assistant メッセージの metadata が保持される
+        assert written[0]["content"] == "前回の回答"
+        assert written[0]["related_cards"] == ["card_001"]
+        assert written[0]["timestamp"] == "2026-06-01T00:00:00+00:00"
+        # 新規メッセージは通常どおり（related_cards 空・新 timestamp）
+        assert written[1]["content"] == "次の質問"
+        assert written[1]["related_cards"] == []
 
 
 # ===================================================================
