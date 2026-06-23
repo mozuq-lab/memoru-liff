@@ -497,6 +497,53 @@ class TestSyncAgent:
         dynamo_messages = call_kwargs["ExpressionAttributeValues"][":msgs"]
         assert dynamo_messages == []
 
+    def test_sync_agent_preserves_existing_related_cards_and_timestamp(self):
+        """既存メッセージの related_cards / timestamp が sync_agent で失われないこと.
+
+        SessionManager 継承後は MessageAddedEvent / AfterInvocationEvent ごとに
+        sync_agent が呼ばれる。initialize() が Strands 形式へ戻す際に metadata を
+        落とすため、素朴な full-replace では _persist_related_cards が保存した
+        related_cards が次ターンで [] / 新 timestamp に戻ってしまう（PR #69 レビュー
+        指摘 P1）。index 単位で metadata を引き継ぐことを保証する回帰テスト。
+        """
+        from services.tutor_session_manager import DynamoDBSessionManager
+
+        stored = _make_dynamo_message(
+            "assistant",
+            "前回の回答",
+            timestamp="2026-06-01T00:00:00+00:00",
+            related_cards=["card_001"],
+        )
+        table = _make_mock_table(item={
+            "user_id": "user1",
+            "session_id": "sess1",
+            "messages": [stored],
+        })
+        dynamodb = _make_mock_dynamodb(table)
+
+        sm = DynamoDBSessionManager(
+            table_name="test-table",
+            session_id="sess1",
+            user_id="user1",
+            dynamodb_resource=dynamodb,
+        )
+
+        # 復元 → 新規ユーザー発話を追加 → sync（次ターン開始相当）
+        agent = _make_mock_agent()
+        sm.initialize(agent)
+        agent.messages.append(_make_strands_message("user", "次の質問"))
+        sm.sync_agent(agent)
+
+        written = table.update_item.call_args[1]["ExpressionAttributeValues"][":msgs"]
+        assert len(written) == 2
+        # 既存 assistant メッセージの metadata が保持される
+        assert written[0]["content"] == "前回の回答"
+        assert written[0]["related_cards"] == ["card_001"]
+        assert written[0]["timestamp"] == "2026-06-01T00:00:00+00:00"
+        # 新規メッセージは通常どおり（related_cards 空・新 timestamp）
+        assert written[1]["content"] == "次の質問"
+        assert written[1]["related_cards"] == []
+
 
 # ===================================================================
 # close tests

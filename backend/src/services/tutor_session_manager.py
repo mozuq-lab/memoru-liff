@@ -106,17 +106,37 @@ class DynamoDBSessionManager(SessionManager):
         )
 
     def sync_agent(self, agent: Any, **kwargs: Any) -> None:
-        """Sync all Agent.messages to DynamoDB.
+        """Sync all Agent.messages to DynamoDB, preserving per-message metadata.
 
-        Converts all messages from Strands format to DynamoDB format
-        and overwrites the messages field.
+        SessionManager 継承により hooks が有効化されると、Strands SDK は
+        MessageAddedEvent / AfterInvocationEvent のたびに sync_agent を呼ぶ。
+        Strands のメッセージ形式は role/content のみで、DynamoDB 側が持つ
+        timestamp / related_cards を表現できない。素朴に全件 full-replace すると
+        過去メッセージの related_cards（_persist_related_cards が保存）や元の
+        timestamp が次ターンで [] / 現在時刻に上書きされてしまう。
+
+        これを防ぐため、既存メッセージを読み出して index 単位で timestamp /
+        related_cards を引き継ぐ（content は agent 側の最新を採用し、redaction や
+        編集にも追従する）。会話メッセージは追記中心で index が安定している前提。
 
         Args:
             agent: Strands Agent instance.
+            **kwargs: 将来拡張用。
         """
-        dynamo_messages = [
-            self._strands_to_dynamo_message(msg) for msg in agent.messages
-        ]
+        response = self.table.get_item(
+            Key={"user_id": self.user_id, "session_id": self.session_id}
+        )
+        existing = (response.get("Item") or {}).get("messages", [])
+
+        dynamo_messages = []
+        for index, msg in enumerate(agent.messages):
+            converted = self._strands_to_dynamo_message(msg)
+            if index < len(existing):
+                prior = existing[index]
+                # 既存メッセージの metadata を引き継ぐ（content は最新を採用）
+                converted["timestamp"] = prior.get("timestamp", converted["timestamp"])
+                converted["related_cards"] = prior.get("related_cards", [])
+            dynamo_messages.append(converted)
 
         self.table.update_item(
             Key={"user_id": self.user_id, "session_id": self.session_id},
