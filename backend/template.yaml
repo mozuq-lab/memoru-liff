@@ -613,6 +613,13 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /cards/generate
             Method: POST
+        # AI Refine endpoint
+        RefineCard:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /cards/refine
+            Method: POST
         # Deck endpoints
         ListDecks:
           Type: HttpApi

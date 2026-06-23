@@ -578,6 +578,27 @@ class TestTemplateYamlConfig:
         assert "true" in param["AllowedValues"]  # 【検証項目】: "true" が許可値に含まれる 🔵
         assert "false" in param["AllowedValues"]  # 【検証項目】: "false" が許可値に含まれる 🔵
 
+    def test_template_yaml_has_cards_refine_route(self):
+        """POST /cards/refine の HttpApi ルートが ApiFunction に登録されていること.
+
+        ハンドラー (@router.post("/cards/refine")) は存在するが template.yaml の
+        Events 登録が漏れると API Gateway がルート不一致で 403 を返し（CORS ヘッダーも
+        付かないため UI は CORS エラー）、AI 補足が常に失敗する。ルート定義の欠落を
+        防ぐ回帰テスト。
+        """
+        template = self._load_template()
+
+        events = template["Resources"]["ApiFunction"]["Properties"]["Events"]
+        refine_routes = [
+            event["Properties"]
+            for event in events.values()
+            if event.get("Type") == "HttpApi"
+            and event.get("Properties", {}).get("Path") == "/cards/refine"
+        ]
+
+        assert refine_routes, "POST /cards/refine ルートが template.yaml に存在しない"
+        assert refine_routes[0]["Method"] == "POST"
+
     def test_template_yaml_conditions_section_exists(self):
         """TC-056-017: Conditions セクション定義の確認.
 
