@@ -228,11 +228,17 @@ class StrandsTutorAIService:
             )
             return model, "strands_ollama"
         else:
-            from strands.models import BedrockModel
+            from strands.models import BedrockModel, CacheConfig
 
             model_id = _resolve_tutor_model_id()
             model = BedrockModel(
                 model_id=model_id,
+                # システムプロンプト（デッキ全カードの文脈）はセッション中不変だが、
+                # 毎ターン再送されるため入力トークンが会話長に比例して増える。Anthropic 系
+                # モデルの自動プロンプトキャッシュを有効化し、2 ターン目以降はプレフィックス
+                # （system + 会話履歴）をキャッシュヒットさせて入力コストを削減する。
+                # 非 Anthropic モデルでは自動的に no-op（警告ログのみ）。
+                cache_config=CacheConfig(strategy="auto"),
                 boto_client_config=Config(
                     read_timeout=_resolve_strands_tutor_timeout_seconds(),
                     connect_timeout=5,

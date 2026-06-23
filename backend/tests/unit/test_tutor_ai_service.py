@@ -274,6 +274,23 @@ class TestStrandsTutorAIServiceInit:
         assert config.read_timeout == 55
         assert config.connect_timeout == 5
 
+    def test_prod_environment_enables_prompt_cache(self):
+        """Bedrock tutor model は自動プロンプトキャッシュ(cache_config)を有効化する.
+
+        システムプロンプト（デッキ全カード）が毎ターン再送されるコストを、
+        プレフィックスのキャッシュヒットで削減するための設定。
+        """
+        from strands.models import CacheConfig
+
+        from services.tutor_ai_service import StrandsTutorAIService
+
+        with patch("strands.models.BedrockModel") as mock_bedrock:
+            StrandsTutorAIService(environment="prod")
+
+        cache_config = mock_bedrock.call_args.kwargs["cache_config"]
+        assert isinstance(cache_config, CacheConfig)
+        assert cache_config.strategy == "auto"
+
 
 class TestStrandsTutorAIServiceGenerateResponse:
     """Tests for StrandsTutorAIService.generate_response."""
