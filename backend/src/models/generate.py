@@ -15,7 +15,7 @@ class GenerateCardsRequest(BaseModel):
         description="Source text to generate cards from",
     )
     card_count: int = Field(
-        default=5,
+        default=3,
         ge=1,
         le=10,
         description="Number of cards to generate",

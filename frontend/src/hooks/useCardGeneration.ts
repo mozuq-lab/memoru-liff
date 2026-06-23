@@ -17,6 +17,10 @@ export type UrlProgressStage = 'fetching' | 'analyzing' | 'generating';
 
 export const MIN_CHARS = 5;
 export const MAX_CHARS = 2000;
+// テキスト生成のカード枚数: ユーザーが 1〜10 枚で選択（既定 3）。
+export const TEXT_CARD_COUNT_MIN = 1;
+export const TEXT_CARD_COUNT_MAX = 10;
+export const DEFAULT_TEXT_CARD_COUNT = 3;
 
 /**
  * Vite env から正の整数のタイムアウト(ms)を解決する。未設定・非数値・非正値・非有限値は fallback。
@@ -99,6 +103,8 @@ export const useCardGeneration = () => {
 
   // テキストモード state
   const [inputText, setInputText] = useState('');
+  // テキスト生成のカード枚数（1〜10、既定 3）。URL モードの targetCount とは独立。
+  const [textCardCount, setTextCardCount] = useState(DEFAULT_TEXT_CARD_COUNT);
 
   // URLモード state
   const [inputUrl, setInputUrl] = useState('');
@@ -164,6 +170,7 @@ export const useCardGeneration = () => {
     try {
       const request: GenerateCardsRequest = {
         input_text: inputText,
+        card_count: textCardCount,
         language: 'ja',
       };
       const response = await cardsApi.generateCards(request, { signal: controller.signal });
@@ -193,7 +200,7 @@ export const useCardGeneration = () => {
         setIsGenerating(false);
       }
     }
-  }, [canGenerateText, inputText]);
+  }, [canGenerateText, inputText, textCardCount]);
 
   // URLからカード生成
   const handleGenerateFromUrl = useCallback(async () => {
@@ -368,6 +375,7 @@ export const useCardGeneration = () => {
     cardType,
     targetCount,
     difficulty,
+    textCardCount,
     // derived
     charCount,
     isUnderLimit,
@@ -383,6 +391,7 @@ export const useCardGeneration = () => {
     setCardType,
     setTargetCount,
     setDifficulty,
+    setTextCardCount,
     // handlers
     handleInputChange,
     handleTabSwitch,

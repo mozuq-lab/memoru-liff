@@ -564,3 +564,23 @@ class TestHandlerCoveragePaths:
 
         with pytest.raises(ValidationError):
             GenerateCardsRequest(input_text="          ")
+
+    def test_generate_cards_request_default_card_count_is_3(self):
+        """card_count 未指定時の既定値が 3 枚であること（テキスト生成の既定）."""
+        from models.generate import GenerateCardsRequest
+
+        request = GenerateCardsRequest(input_text="十分な長さのテキスト")
+        assert request.card_count == 3
+
+    def test_generate_cards_request_card_count_range_1_to_10(self):
+        """card_count は 1〜10 を受け付け、範囲外は ValidationError になること."""
+        from pydantic import ValidationError
+        from models.generate import GenerateCardsRequest
+
+        text = "十分な長さのテキスト"
+        assert GenerateCardsRequest(input_text=text, card_count=1).card_count == 1
+        assert GenerateCardsRequest(input_text=text, card_count=10).card_count == 10
+        with pytest.raises(ValidationError):
+            GenerateCardsRequest(input_text=text, card_count=0)
+        with pytest.raises(ValidationError):
+            GenerateCardsRequest(input_text=text, card_count=11)

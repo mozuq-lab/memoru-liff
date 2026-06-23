@@ -12,7 +12,13 @@ import { GenerateOptions } from '@/components/GenerateOptions';
 // NOTE: BrowserProfileSettings は AgentCore Browser 連携の再有効化時に復活させる。
 //       現状バックエンドが profile_id 付きリクエストに 501 を返すため import を一時停止。
 // import { BrowserProfileSettings } from '@/components/BrowserProfileSettings';
-import { useCardGeneration, MIN_CHARS, MAX_CHARS } from '@/hooks/useCardGeneration';
+import {
+  useCardGeneration,
+  MIN_CHARS,
+  MAX_CHARS,
+  TEXT_CARD_COUNT_MIN,
+  TEXT_CARD_COUNT_MAX,
+} from '@/hooks/useCardGeneration';
 
 export const GeneratePage = () => {
   const {
@@ -30,6 +36,7 @@ export const GeneratePage = () => {
     cardType,
     targetCount,
     difficulty,
+    textCardCount,
     charCount,
     isUnderLimit,
     isOverLimit,
@@ -42,6 +49,7 @@ export const GeneratePage = () => {
     setCardType,
     setTargetCount,
     setDifficulty,
+    setTextCardCount,
     handleInputChange,
     handleTabSwitch,
     handleGenerateFromText,
@@ -119,6 +127,31 @@ export const GeneratePage = () => {
                     文字数制限を超えています
                   </span>
                 )}
+              </div>
+            </section>
+
+            <section className="mb-4" aria-label="生成枚数">
+              <label
+                htmlFor="text-card-count"
+                className="block text-sm font-medium text-gray-700 mb-2"
+              >
+                生成枚数: <span data-testid="text-card-count-display">{textCardCount}</span>枚
+              </label>
+              <input
+                id="text-card-count"
+                type="range"
+                min={TEXT_CARD_COUNT_MIN}
+                max={TEXT_CARD_COUNT_MAX}
+                step={1}
+                value={textCardCount}
+                onChange={(e) => setTextCardCount(Number(e.target.value))}
+                disabled={isGenerating}
+                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                data-testid="text-card-count-slider"
+              />
+              <div className="flex justify-between text-xs text-gray-400 mt-1">
+                <span>{TEXT_CARD_COUNT_MIN}</span>
+                <span>{TEXT_CARD_COUNT_MAX}</span>
               </div>
             </section>
 
