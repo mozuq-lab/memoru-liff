@@ -1000,4 +1000,54 @@ describe('ApiClient', () => {
       );
     });
   });
+
+  describe('Tutor API のタイムアウト', () => {
+    // チューターの start/sendMessage は AI 生成を伴い遅いため、request() 既定の 30 秒では
+    // ローカル LLM 利用時に中断され「セッションの開始に失敗しました」になる。
+    // 既定 30 秒ではなくチューター用タイムアウト(既定 90 秒)で signal を作ることを検証する。
+    it('startTutorSession はチューター用タイムアウト(既定90秒)の signal を使う', async () => {
+      const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+      mockFetch.mockResolvedValue(
+        new Response(JSON.stringify({ session_id: 's1' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+      const { apiClient } = await import('@/services/api');
+      await apiClient.startTutorSession({ deck_id: 'd1', mode: 'free_talk' });
+
+      expect(timeoutSpy).toHaveBeenCalledWith(90_000);
+      expect(timeoutSpy).not.toHaveBeenCalledWith(30_000);
+      const [, options] = mockFetch.mock.calls[0];
+      expect(options.signal).toBeInstanceOf(AbortSignal);
+
+      timeoutSpy.mockRestore();
+    });
+
+    it('sendTutorMessage もチューター用タイムアウト(既定90秒)の signal を使う', async () => {
+      const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+      mockFetch.mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            message: {},
+            session_id: 's1',
+            message_count: 1,
+            is_limit_reached: false,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      );
+
+      const { apiClient } = await import('@/services/api');
+      await apiClient.sendTutorMessage('s1', { content: 'hi' });
+
+      expect(timeoutSpy).toHaveBeenCalledWith(90_000);
+      expect(timeoutSpy).not.toHaveBeenCalledWith(30_000);
+      const [, options] = mockFetch.mock.calls[0];
+      expect(options.signal).toBeInstanceOf(AbortSignal);
+
+      timeoutSpy.mockRestore();
+    });
+  });
 });

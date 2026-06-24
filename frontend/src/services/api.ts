@@ -30,6 +30,7 @@ import type {
   SessionListResponse,
 } from "@/types";
 import { authService } from "./auth";
+import { TUTOR_AI_TIMEOUT_MS } from "@/constants/tutor";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
 
@@ -399,10 +400,14 @@ class ApiClient {
   }
 
   // Tutor API
+  // start / sendMessage は AI 生成（あいさつ・応答）を伴い遅いため、request() の既定
+  // 30 秒ではなく TUTOR_AI_TIMEOUT_MS を使う。ローカル LLM で生成が 30 秒を超えると
+  // フロントが先に abort し「セッションの開始に失敗しました」になる問題への対処。
   async startTutorSession(data: StartSessionRequest): Promise<TutorSession> {
     return this.request<TutorSession>("/tutor/sessions", {
       method: "POST",
       body: JSON.stringify(data),
+      signal: AbortSignal.timeout(TUTOR_AI_TIMEOUT_MS),
     });
   }
 
@@ -415,6 +420,7 @@ class ApiClient {
       {
         method: "POST",
         body: JSON.stringify(data),
+        signal: AbortSignal.timeout(TUTOR_AI_TIMEOUT_MS),
       },
     );
   }
