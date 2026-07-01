@@ -1,5 +1,11 @@
 # memoru-liff データベーススキーマ
 
+> ⚠️ **この資料は MVP 初期設計（2026-01-05）であり、現行実装と乖離しています。**
+> テーブル数（実際は 7）、reviews テーブルの役割（実際は分析専用の追記ログ）、
+> SRS 状態の置き場所（実際は cards テーブル）などが現在と異なります。
+> **最新の正は [`docs/database-schema.md`](../../database-schema.md) を参照してください。**
+> 本ファイルは設計経緯の歴史的参考として残しています。
+
 **作成日**: 2026-01-05
 **関連設計**: [architecture.md](architecture.md)
 **関連要件定義**: [requirements.md](../../spec/memoru-liff/requirements.md)
