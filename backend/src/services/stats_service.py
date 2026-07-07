@@ -58,6 +58,48 @@ def calculate_tag_performance(
     }
 
 
+def unique_local_review_dates_desc(
+    reviews: List[Dict],
+    user_timezone: str = "UTC",
+) -> List[str]:
+    """reviewed_at (UTC ISO 8601) をユーザーローカル日付に変換し、ユニーク日付の降順リストを返す。
+
+    従来は `reviewed_at[:10]`（UTC 日付）をそのまま streak 計算に使っていたため、
+    UTC+9 のユーザーが同じローカル日の深夜（例: 00:30 JST）と日中（10:00 JST）に
+    レビューすると UTC では前日/当日の 2 日に分裂し、streak が過大になっていた。
+    calculate_streak の「今日」判定と同じタイムゾーンで日付を作ることで一致させる。
+
+    無効な timezone は calculate_streak と同じく UTC にフォールバックする（L-6 と同方針）。
+    パース不能な reviewed_at は従来どおり先頭 10 文字（UTC 日付）にフォールバックする。
+    """
+    try:
+        tz = ZoneInfo(user_timezone)
+    except Exception:
+        logger.warning(
+            "Invalid timezone for review dates; falling back to UTC",
+            extra={"user_timezone": user_timezone},
+        )
+        tz = ZoneInfo("UTC")
+
+    dates: set[str] = set()
+    for review in reviews:
+        raw = review.get("reviewed_at")
+        if not raw:
+            continue
+        try:
+            dt = datetime.fromisoformat(str(raw))
+        except (ValueError, TypeError):
+            fallback = str(raw)[:10]
+            if fallback:
+                dates.add(fallback)
+            continue
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        dates.add(dt.astimezone(tz).date().isoformat())
+
+    return sorted(dates, reverse=True)
+
+
 def calculate_streak(
     sorted_dates_desc: List[str],
     user_timezone: str = "UTC",
@@ -201,10 +243,8 @@ class StatsService:
         )
 
         # Streak calculation（共通ヘルパー使用）
-        unique_dates = sorted(
-            {r["reviewed_at"][:10] for r in reviews},
-            reverse=True,
-        )
+        # reviewed_at はユーザーローカル日付へ変換してから streak を計算する
+        unique_dates = unique_local_review_dates_desc(reviews, user_timezone)
         streak_days = calculate_streak(unique_dates, user_timezone=user_timezone)
 
         # Tag performance（共通ヘルパー使用）

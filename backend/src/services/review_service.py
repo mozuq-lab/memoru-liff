@@ -29,7 +29,11 @@ from .srs import (
     calculate_sm2,
     to_user_local_date,
 )
-from .stats_service import calculate_streak, calculate_tag_performance
+from .stats_service import (
+    calculate_streak,
+    calculate_tag_performance,
+    unique_local_review_dates_desc,
+)
 
 logger = Logger()
 
@@ -720,10 +724,10 @@ class ReviewService:
             )
 
             # Unique review dates, newest first
-            unique_dates = sorted(
-                {r["reviewed_at"][:10] for r in reviews},
-                reverse=True,
-            )
+            # reviewed_at はユーザーローカル日付へ変換してから streak /
+            # recent_review_dates を作る（UTC 日付のままだと JST の同一ローカル日が
+            # 2 日に分裂して streak が過大になる）。
+            unique_dates = unique_local_review_dates_desc(reviews, user_timezone)
 
             # M-7: 共通ヘルパー関数に委譲（m-6: user_timezone 対応済み）
             streak_days = calculate_streak(unique_dates, user_timezone=user_timezone)

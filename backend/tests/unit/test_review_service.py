@@ -1873,3 +1873,35 @@ class TestRecordReviewLogging:
 
         assert result.card_id == "test-card-id"
         assert result.grade == 4
+
+
+class TestGetReviewSummaryLocalDates:
+    """get_review_summary の reviewed_at ローカル日付変換（PR #76 指摘の回帰防止）。
+
+    UTC 日付のままだと JST の同一ローカル日（深夜 00:30 と日中 10:00）が
+    2 日に分裂し、streak が過大・recent_review_dates が UTC 日付になっていた。
+    """
+
+    def test_streak_counts_same_jst_day_once(
+        self, review_service_with_gsi, dynamodb_tables_with_gsi
+    ):
+        jst = ZoneInfo("Asia/Tokyo")
+        today_jst = datetime.now(jst).date()
+
+        for i, (hour, minute) in enumerate([(0, 30), (10, 0)]):
+            reviewed_at = datetime(
+                today_jst.year, today_jst.month, today_jst.day,
+                hour, minute, 0, tzinfo=jst,
+            ).astimezone(timezone.utc)
+            _put_review(
+                dynamodb_tables_with_gsi, "user-1", f"card-{i}", 4,
+                reviewed_at.isoformat(),
+            )
+
+        result = review_service_with_gsi.get_review_summary(
+            "user-1", user_timezone="Asia/Tokyo"
+        )
+
+        # 同一ローカル日として 1 日にまとまる（旧実装では 2）
+        assert result.streak_days == 1
+        assert result.recent_review_dates == [today_jst.isoformat()]

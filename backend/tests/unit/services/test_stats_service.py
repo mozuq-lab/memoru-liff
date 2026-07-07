@@ -431,3 +431,87 @@ class TestGetForecast:
         # JST ローカル日付のバケットに 1 件、UTC 日付のバケットには入らない
         assert forecast_map[jst_date] == 1
         assert forecast_map.get(utc_date, 0) == 0
+
+
+class TestUniqueLocalReviewDates:
+    """reviewed_at のローカル日付変換（PR #76 レビュー指摘の回帰防止）。"""
+
+    def test_same_jst_day_reviews_merge_into_one_date(self):
+        """JST の同一ローカル日（深夜 00:30 と日中 10:00）が 1 日にまとまる。
+
+        UTC 日付のままだと 2026-07-06 / 2026-07-07 の 2 日に分裂していた。
+        """
+        from services.stats_service import unique_local_review_dates_desc
+
+        reviews = [
+            # 2026-07-07 00:30 JST = 2026-07-06 15:30 UTC
+            {"reviewed_at": "2026-07-06T15:30:00+00:00"},
+            # 2026-07-07 10:00 JST = 2026-07-07 01:00 UTC
+            {"reviewed_at": "2026-07-07T01:00:00+00:00"},
+        ]
+
+        result = unique_local_review_dates_desc(reviews, "Asia/Tokyo")
+
+        assert result == ["2026-07-07"]
+
+    def test_descending_order(self):
+        from services.stats_service import unique_local_review_dates_desc
+
+        reviews = [
+            {"reviewed_at": "2026-07-01T01:00:00+00:00"},
+            {"reviewed_at": "2026-07-03T01:00:00+00:00"},
+            {"reviewed_at": "2026-07-02T01:00:00+00:00"},
+        ]
+        result = unique_local_review_dates_desc(reviews, "UTC")
+        assert result == ["2026-07-03", "2026-07-02", "2026-07-01"]
+
+    def test_utc_timezone_keeps_utc_dates(self):
+        from services.stats_service import unique_local_review_dates_desc
+
+        reviews = [{"reviewed_at": "2026-07-06T15:30:00+00:00"}]
+        assert unique_local_review_dates_desc(reviews, "UTC") == ["2026-07-06"]
+
+    def test_unparsable_reviewed_at_falls_back_to_prefix(self):
+        from services.stats_service import unique_local_review_dates_desc
+
+        reviews = [{"reviewed_at": "2026-07-06Tがぞんび"}, {"reviewed_at": ""}]
+        assert unique_local_review_dates_desc(reviews, "Asia/Tokyo") == ["2026-07-06"]
+
+    def test_naive_timestamp_treated_as_utc(self):
+        from services.stats_service import unique_local_review_dates_desc
+
+        # naive は UTC とみなす: 15:30 UTC = 翌日 00:30 JST
+        reviews = [{"reviewed_at": "2026-07-06T15:30:00"}]
+        assert unique_local_review_dates_desc(reviews, "Asia/Tokyo") == ["2026-07-07"]
+
+    def test_get_stats_streak_counts_same_jst_day_once(
+        self, stats_service, dynamodb_tables
+    ):
+        """get_stats: JST 同一ローカル日の複数レビューで streak が 1 になる。
+
+        旧実装（UTC 日付分裂）では 2 と誤計上されていた。日付は「今日 (JST)」
+        基準で相対的に構築し、streak 判定（latest >= today - 1）を成立させる。
+        """
+        from zoneinfo import ZoneInfo
+
+        jst = ZoneInfo("Asia/Tokyo")
+        today_jst = datetime.now(jst).date()
+
+        reviews_table = dynamodb_tables.Table("memoru-reviews-test")
+        for hour, minute in [(0, 30), (10, 0)]:
+            reviewed_at = datetime(
+                today_jst.year, today_jst.month, today_jst.day,
+                hour, minute, 0, tzinfo=jst,
+            ).astimezone(timezone.utc)
+            reviews_table.put_item(
+                Item={
+                    "user_id": "user-1",
+                    "reviewed_at": reviewed_at.isoformat(),
+                    "card_id": f"card-{hour}",
+                    "grade": 4,
+                }
+            )
+
+        result = stats_service.get_stats("user-1", user_timezone="Asia/Tokyo")
+
+        assert result.streak_days == 1
