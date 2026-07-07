@@ -252,6 +252,46 @@ describe('KeycloakStack', () => {
     });
   });
 
+  describe('可用性（SPOF 緩和策）', () => {
+    // Keycloak 24.0 (< 26.1) は JDBC_PING 分散ディスカバリが既定でないため、
+    // desiredCount は既定 1 のまま sticky session + デプロイ時無停止で緩和する。
+    test('既定の DesiredCount が 1 である（prod も同様）', () => {
+      const template = Template.fromStack(createStack(prodProps));
+      template.hasResourceProperties('AWS::ECS::Service', {
+        DesiredCount: 1,
+      });
+    });
+
+    test('desiredCount prop でタスク数を変更できる', () => {
+      const template = Template.fromStack(
+        createStack({ ...prodProps, desiredCount: 2 }),
+      );
+      template.hasResourceProperties('AWS::ECS::Service', {
+        DesiredCount: 2,
+      });
+    });
+
+    test('デプロイ時無停止のため MinimumHealthyPercent 100 / MaximumPercent 200 である', () => {
+      const template = Template.fromStack(createStack(prodProps));
+      template.hasResourceProperties('AWS::ECS::Service', {
+        DeploymentConfiguration: Match.objectLike({
+          MinimumHealthyPercent: 100,
+          MaximumPercent: 200,
+        }),
+      });
+    });
+
+    test('ターゲットグループに cookie ベースの sticky session が有効化されている', () => {
+      const template = Template.fromStack(createStack(prodProps));
+      template.hasResourceProperties('AWS::ElasticLoadBalancingV2::TargetGroup', {
+        TargetGroupAttributes: Match.arrayWith([
+          Match.objectLike({ Key: 'stickiness.enabled', Value: 'true' }),
+          Match.objectLike({ Key: 'stickiness.type', Value: 'lb_cookie' }),
+        ]),
+      });
+    });
+  });
+
   describe('ヘルスチェック', () => {
     test('TargetGroup のヘルスチェックパスが /health/ready である', () => {
       const template = Template.fromStack(createStack(devProps));

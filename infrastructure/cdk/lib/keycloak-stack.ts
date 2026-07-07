@@ -30,6 +30,16 @@ export interface KeycloakStackProps extends cdk.StackProps {
    * 未指定時は従来どおり 0.0.0.0/0 を許可する（後方互換）。
    */
   albIngressCidr?: string;
+  /**
+   * ECS タスク数（既定 1）。
+   * 注意: 既定イメージの Keycloak 24.0 は Infinispan 分散キャッシュのディスカバリを
+   * 追加設定なしでは構成できない（JDBC_PING が既定になるのは Keycloak 26.1 以降）。
+   * そのため無条件に 2 以上へスケールすると、タスク間でログインセッション（authn
+   * フロー途中の状態等）が共有されず不整合が起きるリスクがある。2 以上を指定する
+   * 場合は JDBC_PING 等の分散構成を検証したうえで利用すること（ALB の sticky
+   * session は有効化済みだが、フェイルオーバー時のセッション喪失は防げない）。
+   */
+  desiredCount?: number;
 }
 
 export class KeycloakStack extends cdk.Stack {
@@ -189,7 +199,19 @@ export class KeycloakStack extends cdk.Stack {
         serviceName: resourceName(props.environment, 'keycloak-service'),
         cpu: 512,
         memoryLimitMiB: 1024,
-        desiredCount: 1,
+        // NOTE (SPOF): prod でも既定は単一タスク構成であり、タスク障害時は ECS の
+        // 再スケジュール（数分）までログイン機能が停止する。Keycloak 24.0 (< 26.1)
+        // は JDBC_PING による分散ディスカバリが既定でないため、無条件に 2 タスク化
+        // するとセッション不整合のリスクがあり、当面は以下の緩和策に留める:
+        //   (a) ターゲットグループの sticky session 有効化（下記）
+        //   (b) minHealthyPercent 100 / maxHealthyPercent 200 によるデプロイ時無停止
+        //   (c) desiredCount prop の公開（分散構成を検証した上でスケールアウト可能に）
+        // Keycloak 26.1+ へのアップグレード後に desiredCount >= 2 での冗長化を検討する。
+        desiredCount: props.desiredCount ?? 1,
+        // (b) ローリングデプロイ時に新タスクが healthy になるまで旧タスクを維持し、
+        // 一時的に 2 タスク併存させることでデプロイ起因のダウンタイムをなくす。
+        minHealthyPercent: 100,
+        maxHealthyPercent: 200,
         // Place tasks in public subnets for dev (no NAT), private for prod
         taskSubnets: {
           subnetType: isProd
@@ -279,6 +301,12 @@ export class KeycloakStack extends cdk.Stack {
       path: '/health/ready',
       healthyHttpCodes: '200',
     });
+
+    // (a) sticky session (cookie ベース / lb_cookie): デプロイ時の 2 タスク併存や
+    // 将来の desiredCount >= 2 の際に、authn フロー途中のリクエストが同一タスクへ
+    // 着地するようにする（Keycloak 24.0 はタスク間でセッションを共有しないため）。
+    // 単一タスク運用の現状でも無害。
+    service.targetGroup.enableCookieStickiness(cdk.Duration.days(1));
 
     // Allow ECS tasks to connect to RDS
     dbSecurityGroup.addIngressRule(
