@@ -74,6 +74,19 @@ Parameters:
     Default: ""
     Description: LINE Login Channel ID for ID token verification
 
+  # NOTE (CORS): 本番 LIFF フロントの Origin は実環境固有値のためコミットせず、
+  # デプロイ時に注入する（Makefile: LIFF_ORIGIN / deploy.yml: vars.LIFF_ORIGIN）。
+  # prod では Rules セクション (ProdRequiresLiffOrigin) で必須化しており、
+  # 未指定のままだと changeset 作成前に fail-fast する。
+  LiffOrigin:
+    Type: String
+    Default: ""
+    Description: >-
+      LIFF frontend origin to allow in CORS AllowOrigins
+      (e.g. https://liff.<your-domain>). Required for prod deployments
+      (asserted by the ProdRequiresLiffOrigin rule); optional for dev/staging
+      where localhost origins are also allowed.
+
   # NOTE: Tutor 機能 (TutorService) は SessionManager 経由のマルチターン会話を使うため
   # USE_STRANDS=true が必須。false のままだと start_session / send_message が 503
   # (code=tutor_unavailable) を返す — BedrockTutorAIService は SessionManager 非対応のため。
@@ -100,11 +113,26 @@ Parameters:
     Default: ""
     Description: AgentCore Memory ID for tutor session management
 
+Rules:
+  # prod では LiffOrigin の指定を必須にする。未指定のままだと CORS AllowOrigins に
+  # 本番 LIFF フロントの Origin が含まれず、ブラウザから全 API が呼べなくなるため、
+  # changeset 作成前にアサーションで fail-fast する（空文字の混入も防ぐ）。
+  ProdRequiresLiffOrigin:
+    RuleCondition: !Equals [!Ref Environment, prod]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref LiffOrigin, ""]]
+        AssertDescription: >-
+          LiffOrigin is required for prod deployments (e.g.
+          https://liff.<your-domain>). Set the LIFF_ORIGIN environment variable
+          for "make deploy-prod" or the LIFF_ORIGIN GitHub Environment Variable
+          for deploy.yml. See docs/deployment-guide-prod.md.
+
 Conditions:
   IsProd: !Equals [!Ref Environment, prod]
   IsNotProd: !Not [!Equals [!Ref Environment, prod]]
   HasTutorModelId: !Not [!Equals [!Ref TutorModelId, ""]]
   UseAgentCore: !Equals [!Ref TutorSessionBackend, "agentcore"]
+  HasLiffOrigin: !Not [!Equals [!Ref LiffOrigin, ""]]
 
 Resources:
   #============================================================
@@ -412,14 +440,23 @@ Resources:
     Properties:
       StageName: !Ref Environment
       CorsConfiguration:
+        # LiffOrigin は実環境の LIFF フロント Origin（デプロイ時に注入）。
+        # prod は Rules (ProdRequiresLiffOrigin) で必須化済みのため常に含める。
+        # dev/staging は未指定でも動くよう localhost 系を維持し、指定時のみ追加する
+        # （空文字を AllowOrigins に混入させない）。
         AllowOrigins: !If
           - IsNotProd
+          - !If
+            - HasLiffOrigin
+            - - https://liff.line.me
+              - !Ref LiffOrigin
+              - http://localhost:5173
+              - http://localhost:3000
+            - - https://liff.line.me
+              - http://localhost:5173
+              - http://localhost:3000
           - - https://liff.line.me
-            - https://liff.example.com
-            - http://localhost:5173
-            - http://localhost:3000
-          - - https://liff.line.me
-            - https://liff.example.com
+            - !Ref LiffOrigin
         AllowHeaders:
           - Content-Type
           - Authorization
