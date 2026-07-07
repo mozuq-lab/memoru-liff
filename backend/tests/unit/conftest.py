@@ -137,15 +137,16 @@ def make_grade_ai_event(
 
 
 def make_advice_event(user_id: str = "test-user-id") -> dict:
-    """GET /advice 用のイベントを構築する.
+    """POST /advice 用のイベントを構築する.
 
     【機能概要】: 学習アドバイスエンドポイントへのリクエストイベントを生成する。
     【再利用性】: エンドポイント動作テストとエラーマッピングテストで共通利用できる。
     🔵 信頼性: 既存 test_quality_gate.py の _make_advice_event() を名称統一してリネーム。
+    ai-async-jobs: ジョブ作成が非冪等のため GET → POST に変更（設計 SH-7）。
     """
     return {
         "version": "2.0",
-        "routeKey": "GET /advice",
+        "routeKey": "POST /advice",
         "rawPath": "/advice",
         "rawQueryString": "",
         "pathParameters": None,
@@ -158,9 +159,9 @@ def make_advice_event(user_id: str = "test-user-id") -> dict:
                     "scopes": ["openid", "profile"],
                 }
             },
-            "http": {"method": "GET"},
+            "http": {"method": "POST"},
             "requestId": "test-request-id",
-            "routeKey": "GET /advice",
+            "routeKey": "POST /advice",
             "stage": "$default",
         },
         "headers": {"content-type": "application/json"},
