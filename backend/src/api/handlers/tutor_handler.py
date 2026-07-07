@@ -6,14 +6,19 @@ from aws_lambda_powertools import Logger, Tracer
 from aws_lambda_powertools.event_handler import Response, content_types
 from aws_lambda_powertools.event_handler.api_gateway import Router
 
-from api.shared import check_ai_rate_limit, get_user_id_from_context, parse_json_body
+from api.shared import (
+    check_ai_rate_limit,
+    get_user_id_from_context,
+    make_job_accepted_response,
+    parse_json_body,
+)
 from models.tutor import (
     SendMessageRequest,
     SessionListResponse,
     StartSessionRequest,
 )
+from services.ai_job_service import submit_ai_job
 from services.tutor_service import (
-    ConcurrentSendError,
     DeckNotFoundError,
     EmptyDeckError,
     InsufficientReviewDataError,
@@ -23,7 +28,6 @@ from services.tutor_service import (
     TutorService,
     TutorServiceError,
 )
-from services.tutor_ai_service import TutorAITimeoutError, TutorAIServiceError
 
 logger = Logger()
 tracer = Tracer()
@@ -50,16 +54,14 @@ def create_session():
         return parsed
     request = parsed
 
+    # ai-async-jobs: 事前検証（fail-fast）のみ同期で行い、AI 実行はワーカーに委ねる。
+    # ステータス・文言は変換前の同期実装と完全一致させる（フロントは 422 + 文言で
+    # UI を出し分ける。設計レビュー C-3）。
     try:
-        session = tutor_service.start_session(
+        tutor_service.validate_start_session(
             user_id=user_id,
             deck_id=request.deck_id,
             mode=request.mode,
-        )
-        return Response(
-            status_code=201,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps(session.model_dump(mode="json")),
         )
     except DeckNotFoundError as e:
         return Response(
@@ -79,35 +81,23 @@ def create_session():
             content_type=content_types.APPLICATION_JSON,
             body=json.dumps({"error": str(e)}),
         )
-    except TutorAITimeoutError:
-        logger.warning("AI greeting timed out during session creation")
-        return Response(
-            status_code=504,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "AI応答がタイムアウトしました。もう一度お試しください。"}),
-        )
-    except TutorAIServiceError as e:
-        # USE_STRANDS=false 等で BedrockTutorAIService が SessionManager を拒否する等、
-        # AI サービスの構成不備/利用不可。原因不明の 500 ではなく 503 で明示する (N-1)。
-        logger.error(
-            "Tutor AI service unavailable during session creation "
-            "(check USE_STRANDS / model configuration)",
-            extra={"error": str(e)},
-        )
-        return Response(
-            status_code=503,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps(
-                {"error": "チューター機能が現在利用できません。", "code": "tutor_unavailable"}
-            ),
-        )
     except TutorServiceError as e:
-        logger.error("Failed to start tutor session", extra={"error": str(e)})
+        logger.error("Failed to validate tutor session start", extra={"error": str(e)})
         return Response(
             status_code=500,
             content_type=content_types.APPLICATION_JSON,
             body=json.dumps({"error": "チューターセッションの開始に失敗しました。"}),
         )
+
+    job = submit_ai_job(
+        user_id=user_id,
+        job_type="tutor_start",
+        payload={
+            "deck_id": request.deck_id,
+            "mode": request.mode,
+        },
+    )
+    return make_job_accepted_response(job)
 
 
 @router.post("/tutor/sessions/<session_id>/messages")
@@ -125,13 +115,11 @@ def send_message(session_id: str):
         return parsed
     request = parsed
 
+    # ai-async-jobs: 事前検証（fail-fast）のみ同期で行い、AI 実行はワーカーに委ねる。
+    # in-flight ロック取得と最終的な状態遷移の権威はワーカー内の send_message が持つ
+    # （二重 submit はワーカーで ConcurrentSendError → failed(409) になる）。
     try:
-        result = tutor_service.send_message(
-            user_id=user_id,
-            session_id=session_id,
-            content=request.content,
-        )
-        return result.model_dump(mode="json")
+        tutor_service.validate_send_message(user_id=user_id, session_id=session_id)
     except SessionNotFoundError:
         return Response(
             status_code=404,
@@ -144,48 +132,29 @@ def send_message(session_id: str):
             content_type=content_types.APPLICATION_JSON,
             body=json.dumps({"error": f"Session has reached message limit: {session_id}"}),
         )
-    except ConcurrentSendError:
-        return Response(
-            status_code=409,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps(
-                {"error": "別のメッセージを処理中です。少し待ってからお試しください。"}
-            ),
-        )
     except SessionEndedError:
         return Response(
             status_code=409,
             content_type=content_types.APPLICATION_JSON,
             body=json.dumps({"error": f"Session is ended or timed out: {session_id}"}),
         )
-    except TutorAITimeoutError:
-        logger.warning("AI response timed out", extra={"session_id": session_id})
-        return Response(
-            status_code=504,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "AI応答がタイムアウトしました。もう一度お試しください。"}),
-        )
-    except TutorAIServiceError as e:
-        # AI サービスの構成不備/利用不可 (例: USE_STRANDS=false)。503 で明示する (N-1)。
-        logger.error(
-            "Tutor AI service unavailable while sending message "
-            "(check USE_STRANDS / model configuration)",
-            extra={"error": str(e), "session_id": session_id},
-        )
-        return Response(
-            status_code=503,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps(
-                {"error": "チューター機能が現在利用できません。", "code": "tutor_unavailable"}
-            ),
-        )
     except TutorServiceError as e:
-        logger.error("Failed to send message", extra={"error": str(e), "session_id": session_id})
+        logger.error("Failed to validate message send", extra={"error": str(e), "session_id": session_id})
         return Response(
             status_code=500,
             content_type=content_types.APPLICATION_JSON,
             body=json.dumps({"error": "メッセージの送信に失敗しました。"}),
         )
+
+    job = submit_ai_job(
+        user_id=user_id,
+        job_type="tutor_message",
+        payload={
+            "session_id": session_id,
+            "content": request.content,
+        },
+    )
+    return make_job_accepted_response(job)
 
 
 @router.delete("/tutor/sessions/<session_id>")
