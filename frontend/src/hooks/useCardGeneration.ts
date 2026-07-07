@@ -31,8 +31,10 @@ export const resolveTimeoutMs = (raw: unknown, fallback: number): number => {
   return Number.isFinite(value) && value > 0 ? value : fallback;
 };
 
-// 既定: テキスト30秒 / URL90秒。VITE_MAX_GENERATION_TIME / VITE_MAX_URL_GENERATION_TIME(ms)で上書き可能。
-const MAX_GENERATION_TIME = resolveTimeoutMs(import.meta.env.VITE_MAX_GENERATION_TIME, 30000);
+// 既定: テキスト45秒 / URL90秒。VITE_MAX_GENERATION_TIME / VITE_MAX_URL_GENERATION_TIME(ms)で上書き可能。
+// テキスト生成は非同期ジョブ基盤のポーリングオーバーヘッド分を見込み 30 秒 → 45 秒
+// （docs/design/ai-async-jobs/architecture.md §9）。
+const MAX_GENERATION_TIME = resolveTimeoutMs(import.meta.env.VITE_MAX_GENERATION_TIME, 45000);
 const MAX_URL_GENERATION_TIME = resolveTimeoutMs(import.meta.env.VITE_MAX_URL_GENERATION_TIME, 90000);
 
 type GeneratedCardsPayload = {

@@ -1,4 +1,5 @@
 import type {
+  AiJobResponse,
   Card,
   CreateCardRequest,
   UpdateCardRequest,
@@ -81,6 +82,52 @@ export const GENERIC_ERROR_MESSAGE =
 
 /** request() の 1 リクエストあたり既定タイムアウト（ミリ秒）。 */
 export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+
+/**
+ * AI 非同期ジョブ（GET /ai-jobs/{id}）のポーリング間隔（ミリ秒）。
+ * docs/design/ai-async-jobs/api-endpoints.md「ポーリング仕様」: 1.5 秒固定。
+ */
+export const AI_JOB_POLL_INTERVAL_MS = 1_500;
+
+/**
+ * ポーリング GET 1 回あたりのタイムアウト（ミリ秒）。
+ * 全体デッドラインとは別に、個々の GET が単発でハングしないよう短めに縛る。
+ */
+export const AI_JOB_POLL_REQUEST_TIMEOUT_MS = 10_000;
+
+/** submit レスポンス（2xx）のボディから job_id を取り出す。無ければ null（旧同期形式）。 */
+const getAiJobId = (body: unknown): string | null => {
+  if (typeof body !== "object" || body === null) return null;
+  const jobId = (body as { job_id?: unknown }).job_id;
+  return typeof jobId === "string" ? jobId : null;
+};
+
+/** abort 済み signal の reason を返す（reason 未設定環境向けの AbortError フォールバック付き）。 */
+const toAbortReason = (signal: AbortSignal): unknown =>
+  signal.reason ?? new DOMException("The operation was aborted.", "AbortError");
+
+/**
+ * signal が abort されない限り ms 待機する Promise。
+ * abort 時は signal.reason（TimeoutError / AbortError）で reject し、
+ * 待機用の setTimeout と 'abort' リスナーを確実にクリーンアップする
+ * （ポーリング待機中のタイマーリーク防止）。
+ */
+const sleepUnlessAborted = (ms: number, signal: AbortSignal): Promise<void> =>
+  new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(toAbortReason(signal));
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timerId);
+      reject(toAbortReason(signal));
+    };
+    const timerId = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 
 /**
  * 外部の中断用 signal とタイムアウトを常に合成した AbortSignal を生成する。
@@ -190,11 +237,19 @@ class ApiClient {
     });
   }
 
-  private async request<T>(
+  /**
+   * 低レベルリクエスト: 2xx 時に HTTP ステータスとボディの両方を返す。
+   * 認証ヘッダー付与・401 リフレッシュ・タイムアウト合成・ApiError 変換は
+   * request() と共通（request() は本メソッドへ委譲する。ロジックの重複実装をしない）。
+   *
+   * AI 非同期ジョブの submit のように「202 + job_id か旧同期形式か」を
+   * 呼び出し側がボディで判定する必要がある場合に使う（レビュー H-3）。
+   */
+  async requestWithStatus(
     endpoint: string,
     options: RequestInit & { timeoutMs?: number } = {},
     _isRetry = false,
-  ): Promise<T> {
+  ): Promise<{ status: number; body: unknown }> {
     const { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, ...init } = options;
 
     const headers: HeadersInit = {
@@ -241,7 +296,7 @@ class ApiClient {
           throw new Error("Session expired");
         }
         // リフレッシュ成功後に元のリクエストを再実行（_isRetry=true で再帰を1回に制限）
-        return await this.request<T>(endpoint, options, true);
+        return await this.requestWithStatus(endpoint, options, true);
       }
 
       if (!response.ok) {
@@ -257,11 +312,90 @@ class ApiClient {
       }
 
       if (response.status === 204) {
-        return undefined as T;
+        return { status: response.status, body: undefined };
       }
-      return await response.json();
+      return { status: response.status, body: await response.json() };
     } finally {
       // フォールバック合成時のリスナー・タイマーをリークさせない
+      cleanup();
+    }
+  }
+
+  private async request<T>(
+    endpoint: string,
+    options: RequestInit & { timeoutMs?: number } = {},
+    _isRetry = false,
+  ): Promise<T> {
+    const { body } = await this.requestWithStatus(endpoint, options, _isRetry);
+    return body as T;
+  }
+
+  /**
+   * AI 非同期ジョブの submit + ポーリング（docs/design/ai-async-jobs/dataflow.md）。
+   *
+   * 1. 全体デッドラインを内部で必ず合成する: createRequestSignal(timeoutMs ?? 既定, signal)。
+   *    generate 系（外部 signal 方式）と tutor 系（timeoutMs 方式・signal なし）の
+   *    両方の呼び出し規約を吸収する（レビュー H-3）。
+   * 2. submit を実行し、2xx かつ body に job_id が無ければ旧同期形式として
+   *    そのまま返す（ステータス数値の一致に依存しない判定。tutor_start の
+   *    現行 201 も安全に旧形式と判定される。レビュー H-2/H-5）。
+   * 3. job_id があれば GET /ai-jobs/{job_id} を pollIntervalMs 間隔でポーリング
+   *    （個々の GET は AI_JOB_POLL_REQUEST_TIMEOUT_MS で縛る）。
+   *    completed → result / failed → error.status・message から ApiError を組み立てて
+   *    throw（既存のエラー分類・表示ロジックがそのまま機能する）。
+   * 4. デッドライン超過・abort → 従来どおり TimeoutError / AbortError を伝播する。
+   *
+   * @param submit 合成済みデッドライン signal と全体タイムアウト(ms)を受け取り、
+   *               ステータス可視の POST を実行するコールバック
+   */
+  async submitAndPollAiJob<T>(
+    submit: (
+      signal: AbortSignal,
+      timeoutMs: number,
+    ) => Promise<{ status: number; body: unknown }>,
+    options?: {
+      timeoutMs?: number;
+      signal?: AbortSignal | null;
+      pollIntervalMs?: number;
+    },
+  ): Promise<T> {
+    const timeoutMs = options?.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    const pollIntervalMs = options?.pollIntervalMs ?? AI_JOB_POLL_INTERVAL_MS;
+    const { signal: deadline, cleanup } = createRequestSignal(
+      timeoutMs,
+      options?.signal,
+    );
+
+    try {
+      const { status, body } = await submit(deadline, timeoutMs);
+      const jobId = status >= 200 && status < 300 ? getAiJobId(body) : null;
+      if (jobId === null) {
+        // 旧同期形式（移行互換）: 2xx で job_id が無ければ結果そのもの
+        return body as T;
+      }
+
+      for (;;) {
+        await sleepUnlessAborted(pollIntervalMs, deadline);
+        const job = await this.request<AiJobResponse>(
+          `/ai-jobs/${encodeURIComponent(jobId)}`,
+          { signal: deadline, timeoutMs: AI_JOB_POLL_REQUEST_TIMEOUT_MS },
+        );
+        if (job.status === "completed") {
+          return job.result as T;
+        }
+        if (job.status === "failed") {
+          // error.status / message は現行同期ハンドラーと同一分類・文言のため、
+          // 既存の ApiError ベースの分岐（getUserFacingMessage / 422+文言判定）が機能する
+          throw new ApiError(
+            job.error?.message || GENERIC_ERROR_MESSAGE,
+            job.error?.status ?? 500,
+            job.error?.code,
+          );
+        }
+        // queued / processing → 継続
+      }
+    } finally {
+      // デッドライン合成（フォールバック時のタイマー・リスナー）を必ず解放する
       cleanup();
     }
   }
@@ -342,37 +476,53 @@ class ApiClient {
     });
   }
 
+  // AI 生成系 API は非同期ジョブ基盤（202 + job_id → GET /ai-jobs/{id} ポーリング）
+  // 経由で実行する。呼び出し元から渡ってくる signal / timeoutMs はそのまま
+  // submitAndPollAiJob に接続され、全体デッドラインとして内部合成される。
+  // 旧同期形式レスポンス（job_id なしの 2xx）もそのまま返す（移行互換）。
   async generateCards(
     data: GenerateCardsRequest,
     options?: { signal?: AbortSignal; timeoutMs?: number },
   ): Promise<GenerateCardsResponse> {
-    return this.request<GenerateCardsResponse>("/cards/generate", {
-      method: "POST",
-      body: JSON.stringify(data),
-      signal: options?.signal,
-      timeoutMs: options?.timeoutMs,
-    });
+    return this.submitAndPollAiJob<GenerateCardsResponse>(
+      (signal, timeoutMs) =>
+        this.requestWithStatus("/cards/generate", {
+          method: "POST",
+          body: JSON.stringify(data),
+          signal,
+          timeoutMs,
+        }),
+      { signal: options?.signal, timeoutMs: options?.timeoutMs },
+    );
   }
 
   async generateFromUrl(data: GenerateFromUrlRequest, options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<GenerateFromUrlResponse> {
-    return this.request<GenerateFromUrlResponse>('/cards/generate-from-url', {
-      method: 'POST',
-      body: JSON.stringify(data),
-      signal: options?.signal,
-      timeoutMs: options?.timeoutMs,
-    });
+    return this.submitAndPollAiJob<GenerateFromUrlResponse>(
+      (signal, timeoutMs) =>
+        this.requestWithStatus('/cards/generate-from-url', {
+          method: 'POST',
+          body: JSON.stringify(data),
+          signal,
+          timeoutMs,
+        }),
+      { signal: options?.signal, timeoutMs: options?.timeoutMs },
+    );
   }
 
   async refineCard(
     data: RefineCardRequest,
     options?: { signal?: AbortSignal; timeoutMs?: number },
   ): Promise<RefineCardResponse> {
-    return this.request<RefineCardResponse>("/cards/refine", {
-      method: "POST",
-      body: JSON.stringify(data),
-      signal: options?.signal,
-      timeoutMs: options?.timeoutMs,
-    });
+    return this.submitAndPollAiJob<RefineCardResponse>(
+      (signal, timeoutMs) =>
+        this.requestWithStatus("/cards/refine", {
+          method: "POST",
+          body: JSON.stringify(data),
+          signal,
+          timeoutMs,
+        }),
+      { signal: options?.signal, timeoutMs: options?.timeoutMs },
+    );
   }
 
   async getDueCards(
@@ -479,25 +629,37 @@ class ApiClient {
   // start / sendMessage は AI 生成（あいさつ・応答）を伴い遅いため、request() の既定
   // 30 秒ではなく TUTOR_AI_TIMEOUT_MS を使う。ローカル LLM で生成が 30 秒を超えると
   // フロントが先に abort し「セッションの開始に失敗しました」になる問題への対処。
+  // 非同期ジョブ基盤経由（tutor 系は signal を渡さず timeoutMs のみだが、
+  // submitAndPollAiJob が内部でデッドラインを合成するため打ち切りが効く）。
   async startTutorSession(data: StartSessionRequest): Promise<TutorSession> {
-    return this.request<TutorSession>("/tutor/sessions", {
-      method: "POST",
-      body: JSON.stringify(data),
-      timeoutMs: TUTOR_AI_TIMEOUT_MS,
-    });
+    return this.submitAndPollAiJob<TutorSession>(
+      (signal, timeoutMs) =>
+        this.requestWithStatus("/tutor/sessions", {
+          method: "POST",
+          body: JSON.stringify(data),
+          signal,
+          timeoutMs,
+        }),
+      { timeoutMs: TUTOR_AI_TIMEOUT_MS },
+    );
   }
 
   async sendTutorMessage(
     sessionId: string,
     data: SendMessageRequest,
   ): Promise<SendMessageResponse> {
-    return this.request<SendMessageResponse>(
-      `/tutor/sessions/${encodeURIComponent(sessionId)}/messages`,
-      {
-        method: "POST",
-        body: JSON.stringify(data),
-        timeoutMs: TUTOR_AI_TIMEOUT_MS,
-      },
+    return this.submitAndPollAiJob<SendMessageResponse>(
+      (signal, timeoutMs) =>
+        this.requestWithStatus(
+          `/tutor/sessions/${encodeURIComponent(sessionId)}/messages`,
+          {
+            method: "POST",
+            body: JSON.stringify(data),
+            signal,
+            timeoutMs,
+          },
+        ),
+      { timeoutMs: TUTOR_AI_TIMEOUT_MS },
     );
   }
 

@@ -1,3 +1,4 @@
+export type * from "./ai-job";
 export type * from "./auth";
 export type * from "./card";
 export type * from "./deck";
