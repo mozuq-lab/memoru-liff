@@ -5,7 +5,8 @@
  * 🟡 黄信号: user-stories.md 3.3より
  */
 import { useEffect, useRef, useState } from 'react';
-import { cardsApi } from '@/services/api';
+import { cardsApi, ApiError } from '@/services/api';
+import { REFINE_AI_TIMEOUT_MS } from '@/constants/refine';
 import { ReferenceEditor } from '@/components/ReferenceEditor';
 import type { Reference } from '@/types/card';
 
@@ -68,34 +69,70 @@ export const CardForm = ({
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
+    // 【タイムアウト】: バックエンドの refine は AI_AGENT_TIMEOUT_SECONDS=30 秒 +
+    // API Gateway 上限 30 秒のため、他の AI 呼び出し（useCardGeneration / Tutor 系）と
+    // 同様に一定時間で中断する。手動 abort（アンマウント・再クリック）と区別できるよう
+    // didTimeout フラグと TimeoutError reason を併用する。
+    let didTimeout = false;
+    const timeoutId = setTimeout(() => {
+      didTimeout = true;
+      controller.abort(
+        new DOMException('The operation timed out.', 'TimeoutError'),
+      );
+    }, REFINE_AI_TIMEOUT_MS);
+
     setIsRefining(true);
     setRefineError(null);
 
     try {
       const result = await cardsApi.refineCard(
         { front, back },
-        { signal: controller.signal },
+        { signal: controller.signal, timeoutMs: REFINE_AI_TIMEOUT_MS },
       );
       if (!controller.signal.aborted) {
         setFront(result.refined_front);
         setBack(result.refined_back);
       }
     } catch (err: unknown) {
-      if (err instanceof Error && err.name === 'AbortError') return;
-      const message = err instanceof Error ? err.message : '';
-      if (message.includes('504') || message.toLowerCase().includes('timeout')) {
+      // DOMException は環境により Error を継承しないため、name プロパティで判定する
+      // （useCardGeneration の isAbortLikeError と同じパターン）
+      const errorName =
+        typeof err === 'object' && err !== null && 'name' in err
+          ? String((err as { name?: unknown }).name)
+          : '';
+      const isTimeout = didTimeout || errorName === 'TimeoutError';
+      // 手動中断（アンマウント・再クリック）は無視。タイムアウト起因はエラー表示する
+      if (errorName === 'AbortError' && !isTimeout) return;
+
+      if (isTimeout) {
         setRefineError('AIの処理がタイムアウトしました。再度お試しください');
-      } else if (message.includes('429') || message.toLowerCase().includes('rate')) {
-        setRefineError('リクエスト制限に達しました。しばらくお待ちください');
-      } else if (message.includes('503')) {
-        setRefineError('AIサービスが一時的に利用できません');
-      } else if (message.includes('400')) {
-        setRefineError('入力内容を確認してください');
+      } else if (err instanceof ApiError) {
+        // バックエンドは {"error": "..."} 形式でメッセージに数字を含まないため、
+        // 文字列スニッフィングではなく status で分類する
+        switch (err.status) {
+          case 504:
+            setRefineError('AIの処理がタイムアウトしました。再度お試しください');
+            break;
+          case 429:
+            setRefineError('リクエスト制限に達しました。しばらくお待ちください');
+            break;
+          case 503:
+            setRefineError('AIサービスが一時的に利用できません');
+            break;
+          case 400:
+            setRefineError('入力内容を確認してください');
+            break;
+          default:
+            setRefineError('AI補足に失敗しました。再度お試しください');
+        }
       } else {
+        // ネットワークエラー等 ApiError でないケースの汎用フォールバック
         setRefineError('AI補足に失敗しました。再度お試しください');
       }
     } finally {
-      if (!controller.signal.aborted) {
+      clearTimeout(timeoutId);
+      // タイムアウト時は signal が aborted でも UI を処理中のまま残さない
+      if (!controller.signal.aborted || didTimeout) {
         setIsRefining(false);
       }
     }

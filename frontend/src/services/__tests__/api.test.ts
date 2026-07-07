@@ -1001,6 +1001,175 @@ describe('ApiClient', () => {
     });
   });
 
+  // ---------------------------------------------------------------------------
+  // H-1: options.signal 指定時に既定 30 秒タイムアウトが無効化される問題の修正
+  // 外部 signal（中断専用）とタイムアウト signal を常に合成することを検証する
+  // ---------------------------------------------------------------------------
+  describe('H-1: request() の外部 signal とタイムアウトの合成', () => {
+    it('外部 signal なしでも既定 30 秒タイムアウトの signal が設定される', async () => {
+      const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+      mockFetch.mockResolvedValue(
+        new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+      const { apiClient } = await import('@/services/api');
+      await apiClient['request']<object>('/cards', { method: 'GET' });
+
+      // 【検証項目】: 既定 30 秒のタイムアウトが張られ、fetch に signal が渡ること
+      expect(timeoutSpy).toHaveBeenCalledWith(30_000);
+      const [, options] = mockFetch.mock.calls[0];
+      expect(options.signal).toBeInstanceOf(AbortSignal);
+
+      timeoutSpy.mockRestore();
+    });
+
+    it('外部 signal（中断専用）を渡しても既定 30 秒タイムアウトが合成される', async () => {
+      const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+      const anySpy = vi.spyOn(AbortSignal, 'any');
+      mockFetch.mockResolvedValue(
+        new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+      const { apiClient } = await import('@/services/api');
+      const external = new AbortController();
+      await apiClient['request']<object>('/cards', {
+        method: 'GET',
+        signal: external.signal,
+      });
+
+      // 【検証項目】: 外部 signal がタイムアウトを無効化せず、合成 signal が fetch に渡ること
+      expect(timeoutSpy).toHaveBeenCalledWith(30_000);
+      expect(anySpy).toHaveBeenCalled();
+      const [, options] = mockFetch.mock.calls[0];
+      expect(options.signal).toBeInstanceOf(AbortSignal);
+      expect(options.signal).not.toBe(external.signal);
+
+      timeoutSpy.mockRestore();
+      anySpy.mockRestore();
+    });
+
+    it('外部 signal の abort でリクエストが中断される（AbortError を維持）', async () => {
+      mockFetch.mockImplementation(
+        (_url: string, init: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            const signal = init.signal!;
+            if (signal.aborted) {
+              reject(signal.reason);
+              return;
+            }
+            signal.addEventListener('abort', () => reject(signal.reason));
+          }),
+      );
+
+      const { apiClient } = await import('@/services/api');
+      const external = new AbortController();
+      const promise = apiClient['request']<object>('/cards', {
+        method: 'GET',
+        signal: external.signal,
+      });
+
+      external.abort();
+
+      // 【検証項目】: 外部中断は AbortError として伝播する（タイムアウトと区別可能）
+      await expect(promise).rejects.toMatchObject({ name: 'AbortError' });
+    });
+
+    describe('createRequestSignal フォールバック（AbortSignal.any 未実装環境）', () => {
+      // iOS 17.4 未満の WKWebView を想定し AbortSignal.any を一時的に無効化する
+      let originalAny: typeof AbortSignal.any;
+
+      beforeEach(() => {
+        originalAny = AbortSignal.any;
+        // @ts-expect-error 古い WebView（AbortSignal.any 未実装）をシミュレート
+        AbortSignal.any = undefined;
+        vi.useFakeTimers();
+      });
+
+      afterEach(() => {
+        AbortSignal.any = originalAny;
+        vi.useRealTimers();
+      });
+
+      it('タイムアウト経過で TimeoutError として中断される（外部 signal ありでも有効）', async () => {
+        const { createRequestSignal } = await import('@/services/api');
+        const external = new AbortController();
+        const { signal } = createRequestSignal(30_000, external.signal);
+
+        expect(signal.aborted).toBe(false);
+        vi.advanceTimersByTime(30_000);
+
+        // 【検証項目】: タイムアウト起因の abort reason は TimeoutError を維持する
+        expect(signal.aborted).toBe(true);
+        expect((signal.reason as DOMException).name).toBe('TimeoutError');
+      });
+
+      it('外部 signal の abort が合成 signal に伝播する（reason 維持）', async () => {
+        const { createRequestSignal } = await import('@/services/api');
+        const external = new AbortController();
+        const { signal } = createRequestSignal(30_000, external.signal);
+
+        external.abort();
+
+        expect(signal.aborted).toBe(true);
+        expect((signal.reason as DOMException).name).toBe('AbortError');
+      });
+
+      it('abort 済みの外部 signal を渡すと即座に中断済みになる', async () => {
+        const { createRequestSignal } = await import('@/services/api');
+        const external = new AbortController();
+        external.abort();
+
+        const { signal } = createRequestSignal(30_000, external.signal);
+
+        expect(signal.aborted).toBe(true);
+        expect((signal.reason as DOMException).name).toBe('AbortError');
+      });
+
+      it('cleanup 後はタイマーとリスナーが解除されリークしない', async () => {
+        const { createRequestSignal } = await import('@/services/api');
+        const external = new AbortController();
+        const { signal, cleanup } = createRequestSignal(1_000, external.signal);
+
+        cleanup();
+
+        // 【検証項目】: cleanup 後はタイムアウトも外部 abort も合成 signal に影響しない
+        vi.advanceTimersByTime(5_000);
+        expect(signal.aborted).toBe(false);
+        external.abort();
+        expect(signal.aborted).toBe(false);
+      });
+
+      it('フォールバック環境でも request() のタイムアウトが TimeoutError として伝播する', async () => {
+        mockFetch.mockImplementation(
+          (_url: string, init: RequestInit) =>
+            new Promise((_resolve, reject) => {
+              const signal = init.signal!;
+              signal.addEventListener('abort', () => reject(signal.reason));
+            }),
+        );
+
+        const { apiClient } = await import('@/services/api');
+        const external = new AbortController();
+        const promise = apiClient['request']<object>('/cards', {
+          method: 'GET',
+          signal: external.signal,
+        });
+        // 【検証項目】: 外部 signal（中断専用）を渡しても既定 30 秒でタイムアウトする
+        const assertion = expect(promise).rejects.toMatchObject({
+          name: 'TimeoutError',
+        });
+        vi.advanceTimersByTime(30_000);
+        await assertion;
+      });
+    });
+  });
+
   describe('Tutor API のタイムアウト', () => {
     // チューターの start/sendMessage は AI 生成を伴い遅いため、request() 既定の 30 秒では
     // ローカル LLM 利用時に中断され「セッションの開始に失敗しました」になる。

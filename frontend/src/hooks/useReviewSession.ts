@@ -63,26 +63,61 @@ export const useReviewSession = (
   //   reviewsApi.undoReview / cardsApi.getDueCards などのフライト中リクエストが
   //   アンマウント後に解決した際、連鎖する setState（警告・メモリリーク）を抑止する。
   const isMountedRef = useRef(true);
+  // F-3（CardsContext と同パターン）: 最新リクエスト ID を保持し、同一マウント内で
+  //   deck_id だけが変わる遷移（/review?deck_id=A → ?deck_id=B）の際に、
+  //   古いデッキのレスポンスが後着して cards を上書きするのを防ぐ。
+  const fetchRequestIdRef = useRef(0);
+  // 前回の取得リクエストを実際に中断するための AbortController
+  const fetchAbortRef = useRef<AbortController | null>(null);
   useEffect(() => {
     isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
+      // アンマウント時はフライト中の取得リクエストを中断する
+      fetchAbortRef.current?.abort();
     };
   }, []);
 
   const fetchCards = useCallback(async () => {
+    // F-3: このリクエストの ID を採番。完了時に最新でなければ結果を破棄する
+    const requestId = ++fetchRequestIdRef.current;
+    // 前回リクエストが残っていれば中断してから新しいリクエストを開始する
+    fetchAbortRef.current?.abort();
+    const controller = new AbortController();
+    fetchAbortRef.current = controller;
+
     setIsLoading(true);
     setError(null);
     try {
-      const response = await cardsApi.getDueCards(undefined, deckId);
-      // M-29: アンマウント済みなら state 更新を行わない
-      if (!isMountedRef.current) return;
+      const response = await cardsApi.getDueCards(undefined, deckId, {
+        signal: controller.signal,
+      });
+      // M-29: アンマウント済み / F-3: 後発リクエストありなら state 更新を行わない
+      if (!isMountedRef.current || requestId !== fetchRequestIdRef.current)
+        return;
       setCards(response.due_cards);
+      // deckId 切替（/review?deck_id=A → ?deck_id=B）で cards だけ差し替えると、
+      // 前のデッキのセッション進行状態（完了フラグ・採点結果・再確認キュー等）が
+      // 残り、完了済み A → B の遷移で isComplete === true のまま復習画面に
+      // 戻れなくなる。最新リクエストの成功時にセッション状態を初期化する
+      // （fetchCards はマウント時・deckId 変更時・エラーリトライ時のみ呼ばれるため、
+      // セッション進行中に走ることはない）。
+      setCurrentIndex(0);
+      setIsFlipped(false);
+      setReviewedCount(0);
+      setIsComplete(false);
+      setReviewResults([]);
+      setRegradeCardIndex(null);
+      setReconfirmQueue([]);
+      setIsReconfirmMode(false);
     } catch {
-      if (!isMountedRef.current) return;
+      // 中断（アンマウント・デッキ切替）起因のエラーは requestId / mount ガードで除外される
+      if (!isMountedRef.current || requestId !== fetchRequestIdRef.current)
+        return;
       setError("復習カードの取得に失敗しました");
     } finally {
-      if (isMountedRef.current) {
+      // F-3: 最新リクエストのときのみローディング解除
+      if (isMountedRef.current && requestId === fetchRequestIdRef.current) {
         setIsLoading(false);
       }
     }

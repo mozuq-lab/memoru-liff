@@ -3,6 +3,7 @@
  * 【テスト対象】: ReferenceEditor コンポーネント
  * 【テスト対応】: TASK-0159
  */
+import { useState } from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -225,6 +226,71 @@ describe('ReferenceEditor', () => {
       expect(onChange).toHaveBeenCalledWith([
         { type: 'url', value: 'https://updated.com' },
       ]);
+    });
+
+    // 【回帰テスト】: 編集中に別の行を削除すると editingIndex がずれて
+    // 保存時に別の行が編集内容で上書きされる問題（HIGH）の修正確認。
+    // 親の state 更新を反映させるため、useState を持つラッパーで検証する。
+    describe('編集中の行削除によるインデックスずれ', () => {
+      const StatefulEditor = ({ initial }: { initial: Reference[] }) => {
+        const [refs, setRefs] = useState<Reference[]>(initial);
+        return <ReferenceEditor references={refs} onChange={setRefs} />;
+      };
+
+      const initialRefs: Reference[] = [
+        { type: 'url', value: 'https://a.example.com' },
+        { type: 'book', value: '書籍B' },
+        { type: 'note', value: 'メモC' },
+      ];
+
+      it('[A,B,C] で C を編集開始 → A を削除 → 保存で C の位置が正しく更新される', async () => {
+        const user = userEvent.setup();
+        render(<StatefulEditor initial={initialRefs} />);
+
+        // C（index 2）の編集を開始
+        await user.click(screen.getByTestId('reference-item-2'));
+        expect(screen.getByTestId('reference-edit-value-2')).toHaveValue('メモC');
+
+        // A（index 0）を削除 → 編集対象 C は index 1 にずれる
+        await user.click(screen.getByTestId('reference-delete-0'));
+
+        // 編集フォームが C の新しい位置（index 1）に追従していること
+        const editInput = screen.getByTestId('reference-edit-value-1');
+        expect(editInput).toHaveValue('メモC');
+
+        // 値を変更して保存
+        await user.clear(editInput);
+        await user.type(editInput, 'メモC更新');
+        await user.click(screen.getByTestId('reference-edit-save-1'));
+
+        // C の位置の要素だけが更新され、B は壊れないこと
+        expect(screen.getByTestId('reference-item-0')).toHaveTextContent('書籍B');
+        expect(screen.getByTestId('reference-item-1')).toHaveTextContent('メモC更新');
+        expect(screen.queryByTestId('reference-item-2')).not.toBeInTheDocument();
+      });
+
+      it('編集中の行より後ろの行を削除しても編集位置は変わらない', async () => {
+        const user = userEvent.setup();
+        render(<StatefulEditor initial={initialRefs} />);
+
+        // B（index 1）の編集を開始
+        await user.click(screen.getByTestId('reference-item-1'));
+        expect(screen.getByTestId('reference-edit-value-1')).toHaveValue('書籍B');
+
+        // C（index 2）を削除 → 編集対象 B の位置は変わらない
+        await user.click(screen.getByTestId('reference-delete-2'));
+
+        const editInput = screen.getByTestId('reference-edit-value-1');
+        expect(editInput).toHaveValue('書籍B');
+
+        await user.clear(editInput);
+        await user.type(editInput, '書籍B更新');
+        await user.click(screen.getByTestId('reference-edit-save-1'));
+
+        expect(screen.getByTestId('reference-item-0')).toHaveTextContent('https://a.example.com');
+        expect(screen.getByTestId('reference-item-1')).toHaveTextContent('書籍B更新');
+      });
+
     });
 
     it('編集をキャンセルすると元の表示に戻る', async () => {

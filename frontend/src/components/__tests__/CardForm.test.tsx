@@ -4,21 +4,42 @@
  * 【テスト対応】: TASK-0017 テストケース2〜5, TASK-0141 AI補足機能
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CardForm } from '../CardForm';
+import { REFINE_AI_TIMEOUT_MS } from '@/constants/refine';
 
-// cardsApi モック
-vi.mock('@/services/api', () => ({
-  cardsApi: {
-    refineCard: vi.fn(),
-  },
-}));
+// cardsApi モック（CardForm が import する ApiError も同モジュールから提供する）
+vi.mock('@/services/api', () => {
+  class ApiError extends Error {
+    readonly status: number;
+    readonly code?: string;
+
+    constructor(message: string, status: number, code?: string) {
+      super(message);
+      this.name = 'ApiError';
+      this.status = status;
+      this.code = code;
+    }
+  }
+  return {
+    cardsApi: {
+      refineCard: vi.fn(),
+    },
+    ApiError,
+  };
+});
 
 // モック関数を取得
 const getRefineCardMock = async () => {
   const { cardsApi } = await import('@/services/api');
   return cardsApi.refineCard as ReturnType<typeof vi.fn>;
+};
+
+// モックモジュールの ApiError クラスを取得（instanceof 判定を成立させるため）
+const getApiError = async () => {
+  const { ApiError } = await import('@/services/api');
+  return ApiError;
 };
 
 const defaultProps = {
@@ -334,10 +355,15 @@ describe('CardForm', () => {
       expect(screen.getByTestId('input-back')).toHaveValue('元の回答');
     });
 
-    it('タイムアウトエラー時に適切なメッセージが表示される', async () => {
+    // バックエンドの実レスポンスは {"error": "AI service unavailable"} のように
+    // ステータスコードの数字を含まないため、ApiError の status で分類されることを検証する
+    it('タイムアウトエラー（504）時に適切なメッセージが表示される', async () => {
       const user = userEvent.setup();
       const mockRefineCard = await getRefineCardMock();
-      mockRefineCard.mockRejectedValue(new Error('HTTP 504'));
+      const ApiError = await getApiError();
+      mockRefineCard.mockRejectedValue(
+        new ApiError('AI processing timed out', 504),
+      );
 
       renderCardForm();
 
@@ -350,10 +376,13 @@ describe('CardForm', () => {
       });
     });
 
-    it('レート制限エラー時に適切なメッセージが表示される', async () => {
+    it('レート制限エラー（429）時に適切なメッセージが表示される', async () => {
       const user = userEvent.setup();
       const mockRefineCard = await getRefineCardMock();
-      mockRefineCard.mockRejectedValue(new Error('HTTP 429'));
+      const ApiError = await getApiError();
+      mockRefineCard.mockRejectedValue(
+        new ApiError('Rate limit exceeded', 429),
+      );
 
       renderCardForm();
 
@@ -366,10 +395,13 @@ describe('CardForm', () => {
       });
     });
 
-    it('AIサービス障害時に適切なメッセージが表示される', async () => {
+    it('AIサービス障害（503）時に適切なメッセージが表示される', async () => {
       const user = userEvent.setup();
       const mockRefineCard = await getRefineCardMock();
-      mockRefineCard.mockRejectedValue(new Error('HTTP 503'));
+      const ApiError = await getApiError();
+      mockRefineCard.mockRejectedValue(
+        new ApiError('AI service unavailable', 503),
+      );
 
       renderCardForm();
 
@@ -378,6 +410,117 @@ describe('CardForm', () => {
       await waitFor(() => {
         expect(screen.getByTestId('refine-error')).toHaveTextContent(
           'AIサービスが一時的に利用できません'
+        );
+      });
+    });
+
+    it('入力エラー（400）時に適切なメッセージが表示される', async () => {
+      const user = userEvent.setup();
+      const mockRefineCard = await getRefineCardMock();
+      const ApiError = await getApiError();
+      mockRefineCard.mockRejectedValue(new ApiError('Invalid input', 400));
+
+      renderCardForm();
+
+      await user.click(screen.getByTestId('refine-button'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('refine-error')).toHaveTextContent(
+          '入力内容を確認してください'
+        );
+      });
+    });
+
+    it('その他の ApiError（500）は汎用メッセージが表示される', async () => {
+      const user = userEvent.setup();
+      const mockRefineCard = await getRefineCardMock();
+      const ApiError = await getApiError();
+      mockRefineCard.mockRejectedValue(
+        new ApiError('Internal server error', 500),
+      );
+
+      renderCardForm();
+
+      await user.click(screen.getByTestId('refine-button'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('refine-error')).toHaveTextContent(
+          'AI補足に失敗しました。再度お試しください'
+        );
+      });
+    });
+
+    it('ApiError でないエラー（ネットワークエラー等）は汎用メッセージが表示される', async () => {
+      const user = userEvent.setup();
+      const mockRefineCard = await getRefineCardMock();
+      mockRefineCard.mockRejectedValue(new Error('Network error'));
+
+      renderCardForm();
+
+      await user.click(screen.getByTestId('refine-button'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('refine-error')).toHaveTextContent(
+          'AI補足に失敗しました。再度お試しください'
+        );
+      });
+    });
+
+    it('タイムアウト経過で abort されタイムアウトメッセージが表示される', async () => {
+      // 【テスト内容】: handleRefine のタイムアウト（REFINE_AI_TIMEOUT_MS）経過で
+      //               リクエストが中断され、処理中状態が解除されてメッセージが出ること
+      // fake timers と userEvent の相性問題を避けるため fireEvent.click を使用する
+      vi.useFakeTimers();
+      try {
+        const mockRefineCard = await getRefineCardMock();
+        mockRefineCard.mockImplementation(
+          (_req: unknown, opts: { signal: AbortSignal }) =>
+            new Promise((_resolve, reject) => {
+              opts.signal.addEventListener('abort', () =>
+                reject(opts.signal.reason),
+              );
+            }),
+        );
+
+        renderCardForm();
+
+        fireEvent.click(screen.getByTestId('refine-button'));
+        expect(screen.getByTestId('refine-button')).toHaveTextContent(
+          'AI 処理中...'
+        );
+
+        await act(async () => {
+          vi.advanceTimersByTime(REFINE_AI_TIMEOUT_MS);
+        });
+
+        expect(screen.getByTestId('refine-error')).toHaveTextContent(
+          'AIの処理がタイムアウトしました。再度お試しください'
+        );
+        // 処理中のまま固まらないこと
+        expect(screen.getByTestId('refine-button')).toHaveTextContent(
+          'AI で補足'
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('APIレイヤーのタイムアウト（TimeoutError）でもタイムアウトメッセージが表示される', async () => {
+      // 【テスト内容】: request() 側のタイムアウト合成（timeoutMs）による
+      //               TimeoutError もタイムアウトとして分類されること
+      const user = userEvent.setup();
+      const mockRefineCard = await getRefineCardMock();
+      mockRefineCard.mockRejectedValue(
+        new DOMException('The operation timed out.', 'TimeoutError'),
+      );
+
+      renderCardForm();
+
+      await user.click(screen.getByTestId('refine-button'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('refine-error')).toHaveTextContent(
+          'AIの処理がタイムアウトしました。再度お試しください'
         );
       });
     });
@@ -397,7 +540,7 @@ describe('CardForm', () => {
       await waitFor(() => {
         expect(mockRefineCard).toHaveBeenCalledWith(
           { front: '元の質問', back: '元の回答' },
-          { signal: expect.any(AbortSignal) },
+          { signal: expect.any(AbortSignal), timeoutMs: REFINE_AI_TIMEOUT_MS },
         );
       });
     });
