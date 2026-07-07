@@ -146,7 +146,12 @@ class TestUndoReviewConflictMapping:
             path_parameters={"card_id": "test-card-id"},
         )
 
-        with patch("api.handlers.review_handler.review_service") as mock_service:
+        with patch("api.handlers.review_handler.review_service") as mock_service, patch(
+            "api.handlers.review_handler.user_service"
+        ) as mock_user_service:
+            mock_user_service.get_or_create_user.return_value.settings = {
+                "timezone": "Asia/Tokyo"
+            }
             mock_service.undo_review.side_effect = ConcurrentReviewError("conflict")
             from api.handler import handler
 
@@ -171,7 +176,12 @@ class TestDueCardsLimitValidation:
             query_string_parameters={"limit": "0"},
         )
 
-        with patch("api.handlers.review_handler.review_service") as mock_service:
+        with patch("api.handlers.review_handler.review_service") as mock_service, patch(
+            "api.handlers.review_handler.user_service"
+        ) as mock_user_service:
+            mock_user_service.get_or_create_user.return_value.settings = {
+                "timezone": "Asia/Tokyo"
+            }
             mock_service.get_due_cards.return_value = self._empty_due_response()
             from api.handler import handler
 
@@ -188,7 +198,12 @@ class TestDueCardsLimitValidation:
             query_string_parameters={"limit": "-10"},
         )
 
-        with patch("api.handlers.review_handler.review_service") as mock_service:
+        with patch("api.handlers.review_handler.review_service") as mock_service, patch(
+            "api.handlers.review_handler.user_service"
+        ) as mock_user_service:
+            mock_user_service.get_or_create_user.return_value.settings = {
+                "timezone": "Asia/Tokyo"
+            }
             mock_service.get_due_cards.return_value = self._empty_due_response()
             from api.handler import handler
 
@@ -205,7 +220,12 @@ class TestDueCardsLimitValidation:
             query_string_parameters={"limit": "xyz"},
         )
 
-        with patch("api.handlers.review_handler.review_service") as mock_service:
+        with patch("api.handlers.review_handler.review_service") as mock_service, patch(
+            "api.handlers.review_handler.user_service"
+        ) as mock_user_service:
+            mock_user_service.get_or_create_user.return_value.settings = {
+                "timezone": "Asia/Tokyo"
+            }
             mock_service.get_due_cards.return_value = self._empty_due_response()
             from api.handler import handler
 

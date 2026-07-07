@@ -21,8 +21,19 @@ from .ai_service import ReviewSummary
 from .card_repository import CardRepository, CardServiceError, OptimisticLockError
 from .card_service import CardService
 from .review_repository import ReviewRepository
-from .srs import ReviewHistoryEntry, SM2Result, add_review_history, calculate_next_review_boundary, calculate_sm2
-from .stats_service import calculate_streak, calculate_tag_performance
+from .srs import (
+    ReviewHistoryEntry,
+    SM2Result,
+    add_review_history,
+    calculate_next_review_boundary,
+    calculate_sm2,
+    to_user_local_date,
+)
+from .stats_service import (
+    calculate_streak,
+    calculate_tag_performance,
+    unique_local_review_dates_desc,
+)
 
 logger = Logger()
 
@@ -171,11 +182,13 @@ class ReviewService:
         card = self.card_service.get_card(user_id, card_id)
 
         # Store previous state
+        # due_date はユーザーローカル日付で返す（UTC のまま date() を取ると
+        # day_start_hour 正規化により 1 日早い日付になる）。
         previous = ReviewPreviousState(
             ease_factor=card.ease_factor,
             interval=card.interval,
             repetitions=card.repetitions,
-            due_date=card.next_review_at.date().isoformat() if card.next_review_at else None,
+            due_date=to_user_local_date(card.next_review_at, user_timezone),
         )
 
         # Calculate new SRS parameters
@@ -240,7 +253,7 @@ class ReviewService:
             ease_factor=result.ease_factor,
             interval=result.interval,
             repetitions=result.repetitions,
-            due_date=result.next_review_at.date().isoformat(),
+            due_date=to_user_local_date(result.next_review_at, user_timezone),
         )
 
         return ReviewResponse(
@@ -255,6 +268,7 @@ class ReviewService:
         self,
         user_id: str,
         card_id: str,
+        user_timezone: str = "Asia/Tokyo",
     ) -> UndoReviewResponse:
         """Undo the latest review for a card and restore SRS parameters.
 
@@ -269,6 +283,7 @@ class ReviewService:
         Args:
             user_id: The user's ID.
             card_id: The card's ID.
+            user_timezone: User's IANA timezone string (restored due_date の表示用)。
 
         Returns:
             UndoReviewResponse with restored state.
@@ -368,10 +383,10 @@ class ReviewService:
         except CardServiceError as e:
             raise ReviewPersistenceError(f"Failed to undo review: {e}") from e
 
-        # Parse due_date from restored_next_review_at
-        try:
-            due_date = datetime.fromisoformat(restored_next_review_at).date().isoformat()
-        except (ValueError, TypeError):
+        # Parse due_date from restored_next_review_at (ユーザーローカル日付に変換。
+        # パース不能な場合は従来どおり元の文字列をそのまま返す)
+        due_date = to_user_local_date(restored_next_review_at, user_timezone)
+        if due_date is None:
             due_date = restored_next_review_at
 
         restored = UndoRestoredState(
@@ -543,6 +558,7 @@ class ReviewService:
         limit: int = 20,
         include_future: bool = False,
         deck_id: Optional[str] = None,
+        user_timezone: str = "Asia/Tokyo",
     ) -> DueCardsResponse:
         """Get cards due for review.
 
@@ -569,6 +585,7 @@ class ReviewService:
                             When true, total_due_count includes those future cards.
             deck_id: Optional filter by deck ID.
                      指定した場合、total_due_count はそのデッキ内の復習対象カード総数を返す。
+            user_timezone: User's IANA timezone string（due_date / next_due_date の表示用）。
 
         Returns:
             DueCardsResponse with due cards and metadata.
@@ -621,7 +638,7 @@ class ReviewService:
                     front=card.front,
                     back=card.back,
                     deck_id=card.deck_id,
-                    due_date=card.next_review_at.date().isoformat() if card.next_review_at else None,
+                    due_date=to_user_local_date(card.next_review_at, user_timezone),
                     overdue_days=overdue_days,
                     references=card.references,
                 )
@@ -631,7 +648,7 @@ class ReviewService:
         # due_cards が空（全カード復習済み or カードなし）の場合のみクエリを実行する。
         next_due_date = None
         if not due_card_infos:
-            next_due_date = self._get_next_due_date(user_id)
+            next_due_date = self._get_next_due_date(user_id, user_timezone)
 
         return DueCardsResponse(
             due_cards=due_card_infos,
@@ -639,7 +656,9 @@ class ReviewService:
             next_due_date=next_due_date,
         )
 
-    def _get_next_due_date(self, user_id: str) -> Optional[str]:
+    def _get_next_due_date(
+        self, user_id: str, user_timezone: str = "Asia/Tokyo"
+    ) -> Optional[str]:
         """Get the next due date for a user's cards.
 
         Only returns future dates (next_review_at > now).  Past due dates are
@@ -648,6 +667,7 @@ class ReviewService:
 
         Args:
             user_id: The user's ID.
+            user_timezone: User's IANA timezone string（表示用日付の変換に使用）。
 
         Returns:
             ISO format date string of next due date, or None.
@@ -656,8 +676,7 @@ class ReviewService:
         # L-7: GSI クエリは Repository 経由。失敗時は None を返す。
         item = self._card_repo.query_next_due_after(user_id, now)
         if item and "next_review_at" in item:
-            next_review = datetime.fromisoformat(item["next_review_at"])
-            return next_review.date().isoformat()
+            return to_user_local_date(item["next_review_at"], user_timezone)
         return None
 
     def get_review_summary(self, user_id: str, user_timezone: str = "UTC") -> ReviewSummary:
@@ -705,10 +724,10 @@ class ReviewService:
             )
 
             # Unique review dates, newest first
-            unique_dates = sorted(
-                {r["reviewed_at"][:10] for r in reviews},
-                reverse=True,
-            )
+            # reviewed_at はユーザーローカル日付へ変換してから streak /
+            # recent_review_dates を作る（UTC 日付のままだと JST の同一ローカル日が
+            # 2 日に分裂して streak が過大になる）。
+            unique_dates = unique_local_review_dates_desc(reviews, user_timezone)
 
             # M-7: 共通ヘルパー関数に委譲（m-6: user_timezone 対応済み）
             streak_days = calculate_streak(unique_dates, user_timezone=user_timezone)

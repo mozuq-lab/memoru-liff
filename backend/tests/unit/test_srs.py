@@ -8,6 +8,7 @@ from services.srs import (
     calculate_sm2,
     calculate_next_review_boundary,
     add_review_history,
+    to_user_local_date,
     ReviewHistoryEntry,
     EASE_FACTOR_MINIMUM,
 )
@@ -513,3 +514,52 @@ class TestReviewHistory:
         assert history[-1]["grade"] == 5
         # Oldest entry should have been removed
         assert history[0]["reviewed_at"] != "2024-01-01T12:00:00+00:00"
+
+
+class TestToUserLocalDate:
+    """Tests for to_user_local_date (UTC → ユーザーローカル日付変換)."""
+
+    def test_jst_boundary_converts_to_next_local_date(self):
+        """JST 04:00 境界 (= 前日 19:00 UTC) はローカルの翌日日付になる。
+
+        calculate_next_review_boundary が保存する UTC 値を UTC のまま date() すると
+        1 日早い日付になる回帰（レビュー指摘 #4）の再発防止テスト。
+        """
+        # 2026-07-10 19:00 UTC = 2026-07-11 04:00 JST
+        dt = datetime(2026, 7, 10, 19, 0, 0, tzinfo=timezone.utc)
+        assert to_user_local_date(dt, "Asia/Tokyo") == "2026-07-11"
+
+    def test_utc_timezone_keeps_utc_date(self):
+        """UTC 指定時は UTC 日付のまま。"""
+        dt = datetime(2026, 7, 10, 19, 0, 0, tzinfo=timezone.utc)
+        assert to_user_local_date(dt, "UTC") == "2026-07-10"
+
+    def test_accepts_iso_string(self):
+        """ISO 8601 文字列も受け付ける。"""
+        assert to_user_local_date("2026-07-10T19:00:00+00:00", "Asia/Tokyo") == "2026-07-11"
+
+    def test_naive_datetime_treated_as_utc(self):
+        """naive datetime は UTC とみなす（レガシーデータ互換）。"""
+        dt = datetime(2026, 7, 10, 19, 0, 0)
+        assert to_user_local_date(dt, "Asia/Tokyo") == "2026-07-11"
+
+    def test_none_returns_none(self):
+        assert to_user_local_date(None, "Asia/Tokyo") is None
+
+    def test_invalid_string_returns_none(self):
+        assert to_user_local_date("not-a-date", "Asia/Tokyo") is None
+
+    def test_invalid_timezone_falls_back_to_asia_tokyo(self):
+        """無効な timezone は calculate_next_review_boundary と同じく Asia/Tokyo。"""
+        dt = datetime(2026, 7, 10, 19, 0, 0, tzinfo=timezone.utc)
+        assert to_user_local_date(dt, "Invalid/Zone") == "2026-07-11"
+
+    def test_roundtrip_with_calculate_next_review_boundary(self):
+        """境界計算 → 日付変換のラウンドトリップでローカル日付が一致する。"""
+        boundary = calculate_next_review_boundary(
+            interval=1, user_timezone="Asia/Tokyo", day_start_hour=4
+        )
+        from zoneinfo import ZoneInfo
+
+        expected = boundary.astimezone(ZoneInfo("Asia/Tokyo")).date().isoformat()
+        assert to_user_local_date(boundary, "Asia/Tokyo") == expected

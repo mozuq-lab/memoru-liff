@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from typing import List, Optional, overload
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from aws_lambda_powertools import Logger
@@ -136,6 +136,55 @@ def calculate_next_review_boundary(
         tzinfo=user_tz,
     )
     return boundary.astimezone(timezone.utc).replace(microsecond=0)
+
+
+@overload
+def to_user_local_date(value: datetime, user_timezone: str = ...) -> str: ...
+
+
+@overload
+def to_user_local_date(
+    value: "str | None", user_timezone: str = ...
+) -> Optional[str]: ...
+
+
+def to_user_local_date(
+    value: "datetime | str | None",
+    user_timezone: str = "Asia/Tokyo",
+) -> Optional[str]:
+    """UTC の日時をユーザーローカルの日付文字列 (YYYY-MM-DD) に変換する。
+
+    calculate_next_review_boundary はローカルの day_start_hour を UTC に変換して
+    保存する（例: JST 04:00 → 前日 19:00 UTC）ため、UTC のまま date() を取ると
+    ローカル日付より 1 日早い日付になる。表示用の due_date は必ず本関数を通すこと。
+    無効な timezone は calculate_next_review_boundary と同じく Asia/Tokyo に
+    フォールバックし、境界計算と表示で同じタイムゾーンを使う。
+
+    Args:
+        value: 変換対象の datetime または ISO 8601 文字列。naive の場合は UTC とみなす。
+        user_timezone: User's IANA timezone string.
+
+    Returns:
+        ローカル日付の ISO 文字列。value が None またはパース不能な場合は None。
+    """
+    if value is None:
+        return None
+    dt = value
+    if isinstance(dt, str):
+        try:
+            dt = datetime.fromisoformat(dt)
+        except (ValueError, TypeError):
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+
+    try:
+        user_tz = ZoneInfo(user_timezone)
+    except (ZoneInfoNotFoundError, KeyError):
+        logger.warning(f"Invalid timezone '{user_timezone}', falling back to Asia/Tokyo")
+        user_tz = ZoneInfo("Asia/Tokyo")
+
+    return dt.astimezone(user_tz).date().isoformat()
 
 
 @dataclass

@@ -29,6 +29,7 @@ from models.advice import LearningAdviceResponse
 from pydantic import ValidationError
 from services.card_service import CardService, CardNotFoundError
 from services.review_service import ReviewService
+from services.user_service import UserService
 from services.ai_service import create_ai_service, AIServiceError
 
 logger = Logger()
@@ -52,6 +53,7 @@ app.include_router(tutor_router)
 # Services for standalone Lambda handlers
 card_service = CardService()
 review_service = ReviewService()
+user_service = UserService()
 
 
 # Keep backward compatibility alias
@@ -167,7 +169,14 @@ def advice_handler(event: dict, context: Any) -> dict:
         if language not in ALLOWED_LANGUAGES:
             return _make_lambda_response(400, {"error": "Unsupported language. Use 'ja' or 'en'."})
 
-        review_summary = review_service.get_review_summary(user_id)
+        # streak・cards_due_today の「今日」判定をユーザーのタイムゾーンで行う
+        # （UTC 固定だと JST 深夜〜朝のレビューでストリークが 0 に見える）。
+        user = user_service.get_or_create_user(user_id)
+        user_timezone = user.settings.get("timezone", "Asia/Tokyo")
+
+        review_summary = review_service.get_review_summary(
+            user_id, user_timezone=user_timezone
+        )
         review_summary_dict = dataclasses.asdict(review_summary)
 
         try:

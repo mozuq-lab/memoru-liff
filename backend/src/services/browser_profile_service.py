@@ -6,10 +6,11 @@ import os
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Any, List, Optional
 
-import boto3
 from boto3.dynamodb.conditions import Key
+
+from utils.dynamodb_client import get_dynamodb_resource
 
 
 class BrowserProfileError(Exception):
@@ -35,11 +36,18 @@ class BrowserProfileService:
     enabling access to login-required pages.
     """
 
-    def __init__(self, table_name: str | None = None) -> None:
+    def __init__(
+        self,
+        table_name: str | None = None,
+        dynamodb_resource: Optional[Any] = None,
+    ) -> None:
         self._table_name: str = (
             table_name or os.getenv("BROWSER_PROFILES_TABLE") or "memoru-browser-profiles-dev"
         )
-        dynamodb = boto3.resource("dynamodb")
+        # 他サービスと同じ共通ファクトリを使う: ローカル実行時の
+        # DYNAMODB_ENDPOINT_URL / AWS_ENDPOINT_URL 差し替えとテスト用の
+        # リソース注入 (DI) をサポートする。
+        dynamodb = get_dynamodb_resource(dynamodb_resource)
         self._table = dynamodb.Table(self._table_name)
 
     def create_profile(

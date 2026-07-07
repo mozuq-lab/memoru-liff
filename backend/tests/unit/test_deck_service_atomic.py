@@ -206,3 +206,20 @@ class TestAtomicDeckLimit:
         # user-2 can still create
         deck = deck_service.create_deck(user_id="user-2", name="User2 Deck")
         assert deck.user_id == "user-2"
+
+
+class TestDeckCountConsistentRead:
+    """_get_deck_count の強い整合性読み取り（レビュー指摘 #11）。
+
+    上限チェックが結果整合性読み取りだと、上限付近の並行作成で古いカウントを
+    読んで MAX_DECKS_PER_USER を突破できるため、ConsistentRead=True を要求する。
+    """
+
+    def test_get_deck_count_uses_consistent_read(self, deck_service):
+        with patch.object(deck_service, "table") as mock_table:
+            mock_table.query.return_value = {"Count": 3}
+
+            count = deck_service._get_deck_count("user-1")
+
+        assert count == 3
+        assert mock_table.query.call_args.kwargs["ConsistentRead"] is True

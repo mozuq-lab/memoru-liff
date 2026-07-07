@@ -367,8 +367,9 @@ class TestSubmitReviewDayBoundaryNormalization:
         # effective_date = 2024-06-15, target_date = 2024-06-16
         # next_review_at = 2024-06-16 04:00 JST = 2024-06-15 19:00 UTC
         actual_due_date = response.updated.due_date
-        # due_date is the UTC date portion of next_review_at (2024-06-15 19:00 UTC)
-        assert actual_due_date == "2024-06-15"
+        # due_date is the user-local (JST) date of next_review_at
+        # (2024-06-15 19:00 UTC = 2024-06-16 04:00 JST)
+        assert actual_due_date == "2024-06-16"
 
     def test_next_review_at_stored_in_dynamodb_as_normalized(self, review_service, sample_card, dynamodb_tables):
         """Test that the normalized next_review_at is actually stored in DynamoDB."""
@@ -436,8 +437,8 @@ class TestSubmitReviewDayBoundaryNormalization:
         # Before boundary: effective_date = 2024-06-14 (前日扱い)
         # interval=1, target_date = 2024-06-15
         # next_review_at = 2024-06-15 04:00 JST = 2024-06-14 19:00 UTC
-        # due_date uses UTC date from next_review_at
-        assert response.updated.due_date == "2024-06-14"
+        # due_date uses the user-local (JST) date of next_review_at
+        assert response.updated.due_date == "2024-06-15"
 
         # Verify the actual stored next_review_at is correct
         table = dynamodb_tables.Table("memoru-cards-test")
@@ -1749,7 +1750,9 @@ class TestGetNextDueDateFutureFilter:
 
         result = review_service._get_next_due_date("u1")
 
-        assert result == future_date.date().isoformat()
+        # 既定タイムゾーン (Asia/Tokyo) のローカル日付で返る
+        expected = future_date.astimezone(ZoneInfo("Asia/Tokyo")).date().isoformat()
+        assert result == expected
 
     def test_next_due_date_returns_none_when_only_past(self, review_service, dynamodb_tables):
         """過去のカードしかない場合は None を返す。"""
@@ -1870,3 +1873,35 @@ class TestRecordReviewLogging:
 
         assert result.card_id == "test-card-id"
         assert result.grade == 4
+
+
+class TestGetReviewSummaryLocalDates:
+    """get_review_summary の reviewed_at ローカル日付変換（PR #76 指摘の回帰防止）。
+
+    UTC 日付のままだと JST の同一ローカル日（深夜 00:30 と日中 10:00）が
+    2 日に分裂し、streak が過大・recent_review_dates が UTC 日付になっていた。
+    """
+
+    def test_streak_counts_same_jst_day_once(
+        self, review_service_with_gsi, dynamodb_tables_with_gsi
+    ):
+        jst = ZoneInfo("Asia/Tokyo")
+        today_jst = datetime.now(jst).date()
+
+        for i, (hour, minute) in enumerate([(0, 30), (10, 0)]):
+            reviewed_at = datetime(
+                today_jst.year, today_jst.month, today_jst.day,
+                hour, minute, 0, tzinfo=jst,
+            ).astimezone(timezone.utc)
+            _put_review(
+                dynamodb_tables_with_gsi, "user-1", f"card-{i}", 4,
+                reviewed_at.isoformat(),
+            )
+
+        result = review_service_with_gsi.get_review_summary(
+            "user-1", user_timezone="Asia/Tokyo"
+        )
+
+        # 同一ローカル日として 1 日にまとまる（旧実装では 2）
+        assert result.streak_days == 1
+        assert result.recent_review_dates == [today_jst.isoformat()]

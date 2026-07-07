@@ -195,3 +195,40 @@ class TestNotifyHelper:
         monkeypatch.setattr(svc, "line_service", line)
         # 例外を伝播しない。
         svc.notify_generation_failure("line-1", "msg")
+
+
+class TestPreviewSaveConsistency:
+    """プレビュー枚数と保存枚数の一致（レビュー指摘 #5 の回帰防止）。
+
+    カルーセルはサマリーバブルを除く MAX_PREVIEW_CARDS 件しか表示できないため、
+    store_pending_cards へ渡す保存対象も同じ枚数に切り詰められていること。
+    """
+
+    def test_store_receives_at_most_preview_cards(self, patched):
+        from services.flex_messages import MAX_PREVIEW_CARDS
+
+        patched["ai"].generate_cards_from_chunks.return_value = _result_with_cards(12)
+
+        svc.generate_url_cards_core("u", "line-1", "https://example.com/a")
+
+        stored_cards = patched["store"].store_pending_cards.call_args.kwargs["cards"]
+        assert len(stored_cards) == MAX_PREVIEW_CARDS
+
+    def test_stored_cards_match_preview_head(self, patched):
+        """保存対象はプレビュー先頭 N 件と同一内容・同一順序。"""
+        from services.flex_messages import MAX_PREVIEW_CARDS
+
+        patched["ai"].generate_cards_from_chunks.return_value = _result_with_cards(12)
+
+        svc.generate_url_cards_core("u", "line-1", "https://example.com/a")
+
+        stored_cards = patched["store"].store_pending_cards.call_args.kwargs["cards"]
+        assert [c["front"] for c in stored_cards] == [
+            f"q{i}" for i in range(MAX_PREVIEW_CARDS)
+        ]
+
+    def test_under_limit_stores_all(self, patched):
+        """上限未満（既定 3 枚）の場合は全件保存される（既存挙動維持）。"""
+        svc.generate_url_cards_core("u", "line-1", "https://example.com/a")
+        stored_cards = patched["store"].store_pending_cards.call_args.kwargs["cards"]
+        assert len(stored_cards) == 3

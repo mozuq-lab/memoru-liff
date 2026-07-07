@@ -178,42 +178,67 @@ class TutorSessionRepository:
 
         AI 成功後にロック解放 (REMOVE processing_started_at) と count++ を同一 update_item で行う。
         ``ttl`` が与えられた場合 (limit reached) は session を ended に遷移させる。
+
+        ConditionExpression には in-flight ロックの存在に加えて ``status = active`` を
+        要求する。AI 呼び出し中に別経路（新規セッション開始時の auto-end / 明示的な
+        end_session）でセッションが ended に遷移した場合、終了済みセッションへの
+        message_count++ や状態上書きを行わず、警告ログのみで正常 return する
+        （AI 応答自体は呼び出し元からユーザーへ返る）。
         """
-        if ttl is not None:
-            self.table.update_item(
-                Key={"user_id": user_id, "session_id": session_id},
-                UpdateExpression=(
-                    "SET message_count = :cnt, "
-                    "#st = :ended, "
-                    "ended_at = :ended_at, "
-                    "#ttl = :ttl, "
-                    "updated_at = :upd "
-                    "REMOVE processing_started_at"
-                ),
-                ConditionExpression="attribute_exists(processing_started_at)",
-                ExpressionAttributeValues={
-                    ":cnt": new_count,
-                    ":ended": "ended",
-                    ":ended_at": completion_iso,
-                    ":ttl": ttl,
-                    ":upd": completion_iso,
-                },
-                ExpressionAttributeNames={"#st": "status", "#ttl": "ttl"},
-            )
-        else:
-            self.table.update_item(
-                Key={"user_id": user_id, "session_id": session_id},
-                UpdateExpression=(
-                    "SET message_count = :cnt, "
-                    "updated_at = :upd "
-                    "REMOVE processing_started_at"
-                ),
-                ConditionExpression="attribute_exists(processing_started_at)",
-                ExpressionAttributeValues={
-                    ":cnt": new_count,
-                    ":upd": completion_iso,
-                },
-            )
+        try:
+            if ttl is not None:
+                self.table.update_item(
+                    Key={"user_id": user_id, "session_id": session_id},
+                    UpdateExpression=(
+                        "SET message_count = :cnt, "
+                        "#st = :ended, "
+                        "ended_at = :ended_at, "
+                        "#ttl = :ttl, "
+                        "updated_at = :upd "
+                        "REMOVE processing_started_at"
+                    ),
+                    ConditionExpression=(
+                        "attribute_exists(processing_started_at) AND #st = :active"
+                    ),
+                    ExpressionAttributeValues={
+                        ":cnt": new_count,
+                        ":ended": "ended",
+                        ":ended_at": completion_iso,
+                        ":ttl": ttl,
+                        ":upd": completion_iso,
+                        ":active": "active",
+                    },
+                    ExpressionAttributeNames={"#st": "status", "#ttl": "ttl"},
+                )
+            else:
+                self.table.update_item(
+                    Key={"user_id": user_id, "session_id": session_id},
+                    UpdateExpression=(
+                        "SET message_count = :cnt, "
+                        "updated_at = :upd "
+                        "REMOVE processing_started_at"
+                    ),
+                    ConditionExpression=(
+                        "attribute_exists(processing_started_at) AND #st = :active"
+                    ),
+                    ExpressionAttributeValues={
+                        ":cnt": new_count,
+                        ":upd": completion_iso,
+                        ":active": "active",
+                    },
+                    ExpressionAttributeNames={"#st": "status"},
+                )
+        except ClientError as e:
+            if e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+                # セッションが AI 応答待ちの間に ended/timed_out へ遷移した、
+                # または stale ロックが別送信に引き継がれたケース。終了済み
+                # セッションの状態を上書きしないことを優先し、更新はスキップする。
+                logger.warning(
+                    "complete_send skipped: session no longer active or lock lost",
+                    extra={"user_id": user_id, "session_id": session_id},
+                )
+                return
+            raise
 
     # ---- Status transitions ----
 

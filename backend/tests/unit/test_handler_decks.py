@@ -303,7 +303,12 @@ class TestGetDueCardsWithDeckId:
             "next_due_date": None,
         }
 
-        with patch("api.handlers.review_handler.review_service") as mock_service:
+        with patch("api.handlers.review_handler.review_service") as mock_service, patch(
+            "api.handlers.review_handler.user_service"
+        ) as mock_user_service:
+            mock_user_service.get_or_create_user.return_value.settings = {
+                "timezone": "Asia/Tokyo"
+            }
             mock_service.get_due_cards.return_value = mock_response
             from api.handler import handler
 
@@ -330,7 +335,12 @@ class TestGetDueCardsWithDeckId:
             "next_due_date": None,
         }
 
-        with patch("api.handlers.review_handler.review_service") as mock_service:
+        with patch("api.handlers.review_handler.review_service") as mock_service, patch(
+            "api.handlers.review_handler.user_service"
+        ) as mock_user_service:
+            mock_user_service.get_or_create_user.return_value.settings = {
+                "timezone": "Asia/Tokyo"
+            }
             mock_service.get_due_cards.return_value = mock_response
             from api.handler import handler
 

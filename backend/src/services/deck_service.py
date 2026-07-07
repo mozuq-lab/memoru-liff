@@ -467,10 +467,15 @@ class DeckService:
             Number of decks.
         """
         try:
+            # ConsistentRead: 上限チェック（create_deck の事前/事後カウント）が
+            # 結果整合性読み取りだと、上限付近の並行作成で古いカウントを読んで
+            # MAX_DECKS_PER_USER を突破できてしまう。プライマリキーへの Query
+            # なので強い整合性読み取りを指定できる（GSI では不可）。
             response = self.table.query(
                 KeyConditionExpression="user_id = :user_id",
                 ExpressionAttributeValues={":user_id": user_id},
                 Select="COUNT",
+                ConsistentRead=True,
             )
             return response.get("Count", 0)
         except ClientError as e:

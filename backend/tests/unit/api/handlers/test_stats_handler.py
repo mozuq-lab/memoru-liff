@@ -15,6 +15,18 @@ from models.stats import (
 from services.stats_service import StatsServiceError  # noqa: F401
 
 
+@pytest.fixture(autouse=True)
+def mock_user_service():
+    """UserService のモック（user_timezone 取得用）。
+
+    stats_handler は各エンドポイントでユーザー設定から timezone を取得して
+    StatsService に渡すため、全テストで自動的にパッチする。
+    """
+    with patch("api.handlers.stats_handler.user_service") as mock:
+        mock.get_or_create_user.return_value.settings = {"timezone": "Asia/Tokyo"}
+        yield mock
+
+
 # =============================================================================
 # テスト共通ヘルパー
 # =============================================================================
@@ -155,7 +167,9 @@ class TestGetStatsEndpoint:
 
             handler(event, lambda_context)
 
-        mock_service.get_stats.assert_called_once_with("specific-user-123")
+        mock_service.get_stats.assert_called_once_with(
+            "specific-user-123", user_timezone="Asia/Tokyo"
+        )
 
     def test_get_stats_service_error(self, api_gateway_event, lambda_context):
         """サービス層でエラーが発生した場合は例外が伝播する."""
@@ -388,7 +402,9 @@ class TestGetForecastEndpoint:
 
             handler(event, lambda_context)
 
-        mock_service.get_forecast.assert_called_once_with("test-user-id", days=14)
+        mock_service.get_forecast.assert_called_once_with(
+            "test-user-id", days=14, user_timezone="Asia/Tokyo"
+        )
 
     def test_get_forecast_days_capped_at_30(self, api_gateway_event, lambda_context):
         """days が 30 を超える場合は 30 に制限されること."""
@@ -406,7 +422,9 @@ class TestGetForecastEndpoint:
 
             handler(event, lambda_context)
 
-        mock_service.get_forecast.assert_called_once_with("test-user-id", days=30)
+        mock_service.get_forecast.assert_called_once_with(
+            "test-user-id", days=30, user_timezone="Asia/Tokyo"
+        )
 
     def test_get_forecast_default_days(self, api_gateway_event, lambda_context):
         """days 未指定時はデフォルト 7."""
@@ -423,7 +441,9 @@ class TestGetForecastEndpoint:
 
             handler(event, lambda_context)
 
-        mock_service.get_forecast.assert_called_once_with("test-user-id", days=7)
+        mock_service.get_forecast.assert_called_once_with(
+            "test-user-id", days=7, user_timezone="Asia/Tokyo"
+        )
 
     def test_get_forecast_empty(self, api_gateway_event, lambda_context):
         """予測データがない場合は空のリスト."""
@@ -477,7 +497,9 @@ class TestGetForecastEndpoint:
 
             handler(event, lambda_context)
 
-        mock_service.get_forecast.assert_called_once_with("test-user-id", days=1)
+        mock_service.get_forecast.assert_called_once_with(
+            "test-user-id", days=1, user_timezone="Asia/Tokyo"
+        )
 
     def test_get_forecast_service_error(self, api_gateway_event, lambda_context):
         """サービス層でエラーが発生した場合は例外が伝播する."""

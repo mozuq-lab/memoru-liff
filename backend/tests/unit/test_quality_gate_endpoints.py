@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+
 from services.ai_service import (
     AIInternalError,
     AIParseError,
@@ -29,6 +30,18 @@ from tests.unit.conftest import (
     make_mock_card,
     make_mock_review_summary,
 )
+
+
+@pytest.fixture(autouse=True)
+def _mock_advice_user_service():
+    """advice_handler の user_timezone 取得用に api.handler.user_service を自動モック。
+
+    advice_handler はユーザー設定から timezone を取得して get_review_summary に
+    渡すため、実 UserService（DynamoDB アクセス）に到達しないようパッチする。
+    """
+    with patch("api.handler.user_service") as mock:
+        mock.get_or_create_user.return_value.settings = {"timezone": "Asia/Tokyo"}
+        yield mock
 
 
 # =============================================================================

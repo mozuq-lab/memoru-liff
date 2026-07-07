@@ -22,6 +22,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+
 from api.handler import handler, grade_ai_handler, advice_handler
 from services.ai_service import (
     AITimeoutError,
@@ -33,6 +34,18 @@ from services.ai_service import (
     LearningAdvice,
     ReviewSummary,
 )
+
+
+@pytest.fixture(autouse=True)
+def _mock_advice_user_service():
+    """advice_handler の user_timezone 取得用に api.handler.user_service を自動モック。
+
+    advice_handler はユーザー設定から timezone を取得して get_review_summary に
+    渡すため、実 UserService（DynamoDB アクセス）に到達しないようパッチする。
+    """
+    with patch("api.handler.user_service") as mock:
+        mock.get_or_create_user.return_value.settings = {"timezone": "Asia/Tokyo"}
+        yield mock
 
 
 # =============================================================================
@@ -482,7 +495,9 @@ class TestEndpointE2EFlow:
         # create_ai_service が 1 回呼ばれること
         mock_factory.assert_called_once()
         # review_service.get_review_summary が正しい引数で呼ばれること
-        mock_rs.get_review_summary.assert_called_once_with("test-user-id")
+        mock_rs.get_review_summary.assert_called_once_with(
+            "test-user-id", user_timezone="Asia/Tokyo"
+        )
         # get_learning_advice が review_summary (dict) と language で呼ばれること
         mock_service.get_learning_advice.assert_called_once()
         call_kwargs = mock_service.get_learning_advice.call_args.kwargs
