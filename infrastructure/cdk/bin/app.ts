@@ -102,9 +102,13 @@ if (stage === 'prod') {
   const cognitoRegion =
     process.env.CDK_DEFAULT_REGION ?? process.env.AWS_REGION ?? 'ap-northeast-1';
 
+  // prod スタックは誤操作による cdk destroy / CloudFormation スタック削除を防ぐため
+  // terminationProtection を有効にする（dev には付けない）。解除はコード変更ではなく
+  // CloudFormation コンソール / update-termination-protection で明示的に行う。
   const prodStacks = [
     new CognitoStack(app, 'MemoruCognitoProd', {
       environment: 'prod',
+      terminationProtection: true,
       cognitoDomainPrefix: prod.cognitoDomainPrefix,
       callbackUrls: prod.callbackUrls,
       logoutUrls: prod.logoutUrls,
@@ -116,6 +120,7 @@ if (stage === 'prod') {
 
     new KeycloakStack(app, 'MemoruKeycloakProd', {
       environment: 'prod',
+      terminationProtection: true,
       domainName: prod.keycloakDomain,
       hostedZoneName: prod.hostedZoneName,
       certificateArn: prod.keycloakCertArn,
@@ -124,6 +129,7 @@ if (stage === 'prod') {
 
     new LiffHostingStack(app, 'MemoruLiffHostingProd', {
       environment: 'prod',
+      terminationProtection: true,
       domainName: prod.liffDomain,
       hostedZoneName: prod.hostedZoneName,
       certificateArn: prod.liffCertArn,
