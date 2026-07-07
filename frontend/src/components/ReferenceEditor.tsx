@@ -53,11 +53,18 @@ export const ReferenceEditor = ({
   };
 
   // 【削除ハンドラ】
+  // 編集中の行より前の行を削除すると editingIndex がずれ、保存時に別の行を
+  // 上書きしてしまうため、削除位置に応じて editingIndex を補正する。
   const handleDelete = (index: number) => {
     const updated = references.filter((_, i) => i !== index);
     onChange(updated);
-    if (editingIndex === index) {
+    if (editingIndex === null) return;
+    if (index === editingIndex) {
+      // 編集中の行自体を削除 → 編集をキャンセル
       setEditingIndex(null);
+    } else if (index < editingIndex) {
+      // 編集中の行より前を削除 → 編集対象が 1 つ前にずれる
+      setEditingIndex(editingIndex - 1);
     }
   };
 
