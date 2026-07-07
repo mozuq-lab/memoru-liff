@@ -566,16 +566,22 @@ class TestHandlerCoveragePaths:
         body = json.loads(response["body"])
         assert body["error"] == "Internal Server Error"
 
-    def test_generate_cards_generic_exception_raises(self):
-        """generate_cards エンドポイントが submit 時の非 AIServiceError 例外を re-raise する."""
+    def test_generate_cards_submit_infra_error_returns_500(self):
+        """submit（DynamoDB/SQS）のインフラ例外は Lambda 未処理例外にせず統一 500 を返す.
+
+        実装レビュー #1: スタンドアロンハンドラー（grade_ai/advice）と同じ
+        {"error": ...} 形式で返し、API Gateway 独自形式の 500 を露出させない。
+        """
         from api.handler import handler
 
-        # The unhandled exception propagates through the resolver stack
         with patch("api.handlers.ai_handler.submit_ai_job") as mock_submit:
             mock_submit.side_effect = RuntimeError("unexpected infrastructure error")
 
-            with pytest.raises((RuntimeError, Exception)):
-                handler(make_generate_event(), MagicMock())
+            response = handler(make_generate_event(), MagicMock())
+
+        assert response["statusCode"] == 500
+        body = json.loads(response["body"])
+        assert body["error"] == "Internal Server Error"
 
     def test_generate_cards_request_whitespace_only_raises_validation_error(self):
         """GenerateCardsRequest が空白のみのテキストで ValueError を raise する."""

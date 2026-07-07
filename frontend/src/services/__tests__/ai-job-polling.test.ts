@@ -445,3 +445,118 @@ describe('AI 系 API メソッドの 202 経路', () => {
     await expect(promise).resolves.toEqual(resultBody);
   });
 });
+
+// 実装レビュー FH-1: ポーリング GET の単発失敗（ネットワーク瞬断・個別タイムアウト・5xx）で
+// 全体を落とさず、全体デッドライン内なら次の間隔で再試行することの検証。
+describe('ポーリング GET の再試行（実装レビュー FH-1）', () => {
+  const JSON_HEADERS = { 'Content-Type': 'application/json' };
+  const jsonResponse = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: JSON_HEADERS });
+
+  let mockFetch: ReturnType<typeof vi.fn>;
+  let originalAny: typeof AbortSignal.any;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+    vi.stubEnv('VITE_API_BASE_URL', 'https://api.example.com');
+    mockFetch = vi.fn();
+    (globalThis as Record<string, unknown>).fetch = mockFetch;
+    originalAny = AbortSignal.any;
+    // @ts-expect-error AbortSignal.any 未実装環境をシミュレート（fake timers 対応）
+    AbortSignal.any = undefined;
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    AbortSignal.any = originalAny;
+    vi.useRealTimers();
+    vi.clearAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  const completedResponse = (result: unknown) =>
+    jsonResponse({
+      job_id: 'aijob_1',
+      job_type: 'generate',
+      status: 'completed',
+      result,
+      created_at: '2026-07-07T00:00:00+00:00',
+      updated_at: '2026-07-07T00:00:02+00:00',
+    });
+
+  const submit202 = () =>
+    vi.fn().mockResolvedValue({
+      status: 202,
+      body: { job_id: 'aijob_1', job_type: 'generate', status: 'queued' },
+    });
+
+  it('単発のネットワーク失敗では諦めず、次のポーリングで completed を返す', async () => {
+    const { apiClient } = await import('@/services/api');
+    const resultBody = { generated_cards: [] };
+    mockFetch
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce(completedResponse(resultBody));
+
+    const promise = apiClient.submitAndPollAiJob(submit202(), { timeoutMs: 45_000 });
+    const assertion = expect(promise).resolves.toEqual(resultBody);
+    await vi.advanceTimersByTimeAsync(1_500); // 1回目 GET → 失敗（再試行へ）
+    await vi.advanceTimersByTimeAsync(1_500); // 2回目 GET → completed
+    await assertion;
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('404（ジョブ不在）は再試行せず即座に失敗する', async () => {
+    const { apiClient } = await import('@/services/api');
+    mockFetch.mockResolvedValue(jsonResponse({ error: 'Job not found' }, 404));
+
+    const promise = apiClient.submitAndPollAiJob(submit202(), { timeoutMs: 45_000 });
+    const assertion = expect(promise).rejects.toMatchObject({ status: 404 });
+    await vi.advanceTimersByTimeAsync(1_500);
+    await assertion;
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('連続 MAX_CONSECUTIVE_POLL_FAILURES 回失敗した場合は諦めてエラーを伝播する', async () => {
+    const { apiClient, MAX_CONSECUTIVE_POLL_FAILURES } = await import('@/services/api');
+    mockFetch.mockRejectedValue(new TypeError('Failed to fetch'));
+
+    const promise = apiClient.submitAndPollAiJob(submit202(), { timeoutMs: 60_000 });
+    const assertion = expect(promise).rejects.toBeTruthy();
+    for (let i = 0; i < MAX_CONSECUTIVE_POLL_FAILURES; i += 1) {
+      await vi.advanceTimersByTimeAsync(1_500);
+    }
+    await assertion;
+
+    expect(mockFetch).toHaveBeenCalledTimes(MAX_CONSECUTIVE_POLL_FAILURES);
+  });
+
+  it('失敗を挟んでも成功でカウンタがリセットされ、その後の単発失敗も許容される', async () => {
+    const { apiClient } = await import('@/services/api');
+    const resultBody = { ok: true };
+    const processing = () =>
+      jsonResponse({
+        job_id: 'aijob_1',
+        job_type: 'generate',
+        status: 'processing',
+        created_at: '2026-07-07T00:00:00+00:00',
+        updated_at: '2026-07-07T00:00:01+00:00',
+      });
+    mockFetch
+      .mockRejectedValueOnce(new TypeError('Failed to fetch')) // 失敗1
+      .mockResolvedValueOnce(processing()) // 成功（カウンタリセット）
+      .mockRejectedValueOnce(new TypeError('Failed to fetch')) // 失敗2（連続ではない）
+      .mockResolvedValueOnce(completedResponse(resultBody));
+
+    const promise = apiClient.submitAndPollAiJob(submit202(), { timeoutMs: 60_000 });
+    const assertion = expect(promise).resolves.toEqual(resultBody);
+    for (let i = 0; i < 4; i += 1) {
+      await vi.advanceTimersByTimeAsync(1_500);
+    }
+    await assertion;
+
+    expect(mockFetch).toHaveBeenCalledTimes(4);
+  });
+});

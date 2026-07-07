@@ -89,14 +89,24 @@ def create_session():
             body=json.dumps({"error": "チューターセッションの開始に失敗しました。"}),
         )
 
-    job = submit_ai_job(
-        user_id=user_id,
-        job_type="tutor_start",
-        payload={
-            "deck_id": request.deck_id,
-            "mode": request.mode,
-        },
-    )
+    try:
+        job = submit_ai_job(
+            user_id=user_id,
+            job_type="tutor_start",
+            payload={
+                "deck_id": request.deck_id,
+                "mode": request.mode,
+            },
+        )
+    except Exception as e:
+        # submit（DynamoDB/SQS）の一時障害を Lambda 未処理例外として漏らさない
+        # （実装レビュー #1）。
+        logger.error("Failed to submit tutor_start job", extra={"error": str(e)})
+        return Response(
+            status_code=500,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": "チューターセッションの開始に失敗しました。"}),
+        )
     return make_job_accepted_response(job)
 
 
@@ -146,14 +156,25 @@ def send_message(session_id: str):
             body=json.dumps({"error": "メッセージの送信に失敗しました。"}),
         )
 
-    job = submit_ai_job(
-        user_id=user_id,
-        job_type="tutor_message",
-        payload={
-            "session_id": session_id,
-            "content": request.content,
-        },
-    )
+    try:
+        job = submit_ai_job(
+            user_id=user_id,
+            job_type="tutor_message",
+            payload={
+                "session_id": session_id,
+                "content": request.content,
+            },
+        )
+    except Exception as e:
+        logger.error(
+            "Failed to submit tutor_message job",
+            extra={"error": str(e), "session_id": session_id},
+        )
+        return Response(
+            status_code=500,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": "メッセージの送信に失敗しました。"}),
+        )
     return make_job_accepted_response(job)
 
 

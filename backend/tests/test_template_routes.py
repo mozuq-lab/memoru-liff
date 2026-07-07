@@ -486,6 +486,40 @@ def test_ai_job_queues_defined(sam_template):
         )
 
 
+def test_ai_job_queue_settings_match_design(sam_template):
+    """ai-async-jobs - 設計レビュー H-1/H-5 を担保するキュー/ESM 設定値の回帰テスト。
+
+    - VisibilityTimeout 270 = ワーカー Timeout 180 × 1.5
+    - interactive: maxReceiveCount 3 / MaximumConcurrency 5
+    - heavy: maxReceiveCount 1（3×課金経路の遮断）/ MaximumConcurrency 2
+    - 両 ESM とも BatchSize 1（バッチ内タイムアウトの巻き込み防止）
+    """
+    resources = sam_template["Resources"]
+
+    interactive = resources["AiJobQueue"]["Properties"]
+    assert interactive["VisibilityTimeout"] == 270
+    assert interactive["RedrivePolicy"]["maxReceiveCount"] == 3
+
+    heavy = resources["AiJobHeavyQueue"]["Properties"]
+    assert heavy["VisibilityTimeout"] == 270
+    assert heavy["RedrivePolicy"]["maxReceiveCount"] == 1
+
+    worker = resources["AiJobWorkerFunction"]["Properties"]
+    assert worker["Timeout"] == 180
+
+    sqs_events = {
+        name: event["Properties"]
+        for name, event in worker["Events"].items()
+        if event.get("Type") == "SQS"
+    }
+    concurrencies = set()
+    for props in sqs_events.values():
+        assert props["BatchSize"] == 1
+        assert props["FunctionResponseTypes"] == ["ReportBatchItemFailures"]
+        concurrencies.add(props["ScalingConfig"]["MaximumConcurrency"])
+    assert concurrencies == {5, 2}
+
+
 def test_ai_jobs_table_defined(sam_template):
     """ai-async-jobs - AiJobsTable（job_id キー + TTL）が定義されていること"""
     resources = sam_template["Resources"]

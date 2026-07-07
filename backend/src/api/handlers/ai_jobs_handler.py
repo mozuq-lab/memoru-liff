@@ -43,7 +43,18 @@ def get_ai_job(job_id: str):
     """ジョブの状態・結果を返す（ポーリング用）。"""
     user_id = get_user_id_from_context(router)
 
-    job = ai_job_store.get_job(job_id)
+    try:
+        job = ai_job_store.get_job(job_id)
+    except Exception as e:
+        # ポーリングは高頻度なため、DynamoDB の一時障害を Lambda 未処理例外として
+        # 漏らさず統一形式の 500 で返す（フロントは次のポーリングで再試行する）。
+        logger.error("Failed to get AI job", extra={"job_id": job_id, "error": str(e)})
+        return Response(
+            status_code=500,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": "Internal Server Error"}),
+        )
+
     if job is None or job.get("user_id") != user_id:
         return _not_found_response()
 

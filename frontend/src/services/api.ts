@@ -95,6 +95,14 @@ export const AI_JOB_POLL_INTERVAL_MS = 1_500;
  */
 export const AI_JOB_POLL_REQUEST_TIMEOUT_MS = 10_000;
 
+/**
+ * ポーリング GET の連続失敗の許容回数。
+ * モバイル網（Wi-Fi⇔LTE 切替・バックグラウンド復帰直後等）の単発の
+ * ネットワーク失敗で全体を落とさず、全体デッドライン内なら次の間隔で
+ * 再試行する。この回数連続で失敗した場合のみ諦めてエラーを伝播する。
+ */
+export const MAX_CONSECUTIVE_POLL_FAILURES = 3;
+
 /** submit レスポンス（2xx）のボディから job_id を取り出す。無ければ null（旧同期形式）。 */
 const getAiJobId = (body: unknown): string | null => {
   if (typeof body !== "object" || body === null) return null;
@@ -245,7 +253,7 @@ class ApiClient {
    * AI 非同期ジョブの submit のように「202 + job_id か旧同期形式か」を
    * 呼び出し側がボディで判定する必要がある場合に使う（レビュー H-3）。
    */
-  async requestWithStatus(
+  private async requestWithStatus(
     endpoint: string,
     options: RequestInit & { timeoutMs?: number } = {},
     _isRetry = false,
@@ -374,12 +382,28 @@ class ApiClient {
         return body as T;
       }
 
+      let consecutivePollFailures = 0;
       for (;;) {
         await sleepUnlessAborted(pollIntervalMs, deadline);
-        const job = await this.request<AiJobResponse>(
-          `/ai-jobs/${encodeURIComponent(jobId)}`,
-          { signal: deadline, timeoutMs: AI_JOB_POLL_REQUEST_TIMEOUT_MS },
-        );
+        let job: AiJobResponse;
+        try {
+          job = await this.request<AiJobResponse>(
+            `/ai-jobs/${encodeURIComponent(jobId)}`,
+            { signal: deadline, timeoutMs: AI_JOB_POLL_REQUEST_TIMEOUT_MS },
+          );
+        } catch (err) {
+          // 全体デッドライン切れ・外部中断はそのまま伝播する
+          if (deadline.aborted) throw err;
+          // ジョブ不在（404: TTL 失効・他ユーザー）は再試行しても回復しない
+          if (err instanceof ApiError && err.status === 404) throw err;
+          // ネットワーク瞬断・個別 GET タイムアウト・5xx は、ジョブ自体は
+          // サーバー側で進行しているため全体デッドライン内なら次の間隔で
+          // 再試行する（単発失敗で全体を落とさない。実装レビュー FH-1）
+          consecutivePollFailures += 1;
+          if (consecutivePollFailures >= MAX_CONSECUTIVE_POLL_FAILURES) throw err;
+          continue;
+        }
+        consecutivePollFailures = 0;
         if (job.status === "completed") {
           return job.result as T;
         }

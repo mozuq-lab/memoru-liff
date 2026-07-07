@@ -169,6 +169,10 @@ class TutorService:
 
         updated_at = datetime.fromisoformat(item["updated_at"])
         if datetime.now(timezone.utc) - updated_at > timedelta(minutes=self.TIMEOUT_MINUTES):
+            # send_message と同じ副作用を持たせる: timed_out へのマーキングと TTL 設定を
+            # 行わないと、この 409 以降クライアントが一覧/詳細を取得しない場合に
+            # status=active のまま TTL 未設定でレコードが無期限に残る（実装レビュー #2）。
+            self._mark_timed_out(user_id, session_id)
             raise SessionEndedError(f"Session {session_id} has timed out")
 
         if int(item.get("message_count", 0)) >= self.MAX_ROUNDS:

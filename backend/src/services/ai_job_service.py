@@ -118,7 +118,10 @@ def run_job_inline(store: AiJobStore, job_id: str) -> None:
         result = execute_job(job)
     except Exception as exc:
         job_error = classify_ai_job_error(exc)
-        logger.warning(
+        # 想定内の AI/ドメインエラーは warning、分類不能な internal（実装バグの
+        # 可能性が高い）は error で記録し、ERROR ベースの監視で検知可能にする。
+        log_method = logger.error if job_error.code == "internal" else logger.warning
+        log_method(
             "AI job failed",
             extra={
                 "job_id": job_id,

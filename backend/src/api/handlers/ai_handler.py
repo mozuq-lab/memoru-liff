@@ -28,6 +28,28 @@ tracer = Tracer()
 router = Router()
 
 
+def _submit_job_response(user_id: str, job_type: str, payload: dict) -> Response:
+    """ジョブを submit して 202 Response を返す（インフラ例外は統一 500 に変換）。
+
+    submit（DynamoDB PutItem + SQS SendMessage / inline 実行）の一時的な障害を
+    Lambda 未処理例外として漏らさず、スタンドアロンハンドラー（grade_ai/advice）と
+    同じ ``{"error": ...}`` 形式の 500 を返す（実装レビュー #1）。
+    """
+    try:
+        job = submit_ai_job(user_id=user_id, job_type=job_type, payload=payload)
+    except Exception as e:
+        logger.error(
+            "Failed to submit AI job",
+            extra={"user_id": user_id, "job_type": job_type, "error": str(e)},
+        )
+        return Response(
+            status_code=500,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": "Internal Server Error"}),
+        )
+    return make_job_accepted_response(job)
+
+
 @router.post("/cards/generate")
 @tracer.capture_method
 def generate_cards():
@@ -44,17 +66,16 @@ def generate_cards():
         return parsed
     request = parsed
 
-    job = submit_ai_job(
-        user_id=user_id,
-        job_type="generate",
-        payload={
+    return _submit_job_response(
+        user_id,
+        "generate",
+        {
             "input_text": request.input_text,
             "card_count": request.card_count,
             "difficulty": request.difficulty,
             "language": request.language,
         },
     )
-    return make_job_accepted_response(job)
 
 
 @router.post("/cards/generate-from-url")
@@ -106,10 +127,10 @@ def generate_from_url():
             body=json.dumps({"error": f"無効なURLです: {e}"}, ensure_ascii=False),
         )
 
-    job = submit_ai_job(
-        user_id=user_id,
-        job_type="generate_from_url",
-        payload={
+    return _submit_job_response(
+        user_id,
+        "generate_from_url",
+        {
             "url": normalized_url,
             "card_type": request.card_type,
             "target_count": request.target_count,
@@ -117,7 +138,6 @@ def generate_from_url():
             "language": request.language,
         },
     )
-    return make_job_accepted_response(job)
 
 
 @router.post("/cards/refine")
@@ -136,13 +156,12 @@ def refine_card():
         return parsed
     request = parsed
 
-    job = submit_ai_job(
-        user_id=user_id,
-        job_type="refine",
-        payload={
+    return _submit_job_response(
+        user_id,
+        "refine",
+        {
             "front": request.front,
             "back": request.back,
             "language": request.language,
         },
     )
-    return make_job_accepted_response(job)

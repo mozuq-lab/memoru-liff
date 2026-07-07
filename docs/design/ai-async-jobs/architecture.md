@@ -104,6 +104,10 @@ LINE Webhook の URL カード生成フロー（N-5: `UrlGenerateQueue` + LINE p
 | DLQ | AiJobDLQ | AiJobHeavyDLQ |
 
 - メッセージは `{"job_id": "..."}` のみ（ペイロードはテーブルが正）。
+- **heavy キューの maxReceiveCount=1 の意図的トレードオフ**: Phase A（claim 前）の
+  一時的な DynamoDB エラーに対しても再試行猶予がゼロになり、executor 未実行のまま
+  即 DLQ 行きになる。発生確率は極めて低く（PAY_PER_REQUEST のスロットリングは稀）、
+  Phase B 後の 3× 課金防止を優先する（実装レビュー #4 で明文化）。
 - **DLQ 滞留の CloudWatch Alarm を本件スコープに含める**（レビュー M-4 で格上げ。
   ApproximateNumberOfMessagesVisible > 0。通知先 SNS の配線は follow-up とし、
   アラーム状態はコンソール/ダッシュボードで可視化する）。既存 2 DLQ 分も同時に追加する。
