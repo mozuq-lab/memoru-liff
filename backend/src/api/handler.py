@@ -97,11 +97,6 @@ def grade_ai_handler(event: dict, context: Any) -> dict:
         if not card_id:
             return _make_lambda_response(400, {"error": "card_id is required"})
 
-        logger.info(
-            "Grade AI job submit",
-            extra={"card_id": card_id, "user_id": user_id, "user_answer_length": len(event.get("body") or "")},
-        )
-
         body_str = event.get("body") or ""
         try:
             body_dict = json.loads(body_str)
@@ -110,6 +105,11 @@ def grade_ai_handler(event: dict, context: Any) -> dict:
             return _make_lambda_response(400, {"error": "Invalid request body"})
         except ValidationError as e:
             return _make_lambda_response(400, {"error": "Invalid request", "details": json.loads(e.json())})
+
+        logger.info(
+            "Grade AI job submit",
+            extra={"card_id": card_id, "user_id": user_id, "user_answer_length": len(request.user_answer)},
+        )
 
         language = (event.get("queryStringParameters") or {}).get("language", "ja")
         if language not in ALLOWED_LANGUAGES:
