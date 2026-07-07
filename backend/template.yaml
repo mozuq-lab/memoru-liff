@@ -33,6 +33,13 @@ Globals:
         RATE_LIMITS_TABLE: !Ref RateLimitsTable
         AI_RATE_LIMIT_PER_WINDOW: "30"
         AI_RATE_LIMIT_WINDOW_SECONDS: "300"
+        # AI 非同期ジョブ基盤 (ai-async-jobs)。キュー URL が空 or
+        # AI_JOB_WORKER_MODE=inline なら submit ハンドラーが同期実行する
+        # (ローカル開発は env.json で inline 指定)。
+        AI_JOBS_TABLE: !Ref AiJobsTable
+        AI_JOB_QUEUE_URL: !Ref AiJobQueue
+        AI_JOB_HEAVY_QUEUE_URL: !Ref AiJobHeavyQueue
+        AI_JOB_WORKER_MODE: ""
 
 Parameters:
   Environment:
@@ -436,6 +443,32 @@ Resources:
         - Key: Application
           Value: memoru
 
+  # AI 非同期ジョブレコード (ai-async-jobs)。submit で queued 登録され、
+  # ワーカーが claim (queued→processing) して結果を記録、フロントがポーリングで参照。
+  # 24h TTL の使い捨てデータのため DeletionPolicy: Retain は付けない。
+  AiJobsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub memoru-ai-jobs-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: job_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: job_id
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: memoru
+
   # ユーザー単位レート制限カウンタ (AI 系エンドポイント)。
   # 固定ウィンドウのカウンタのみを保持する使い捨てデータのため、
   # 他テーブルと異なり DeletionPolicy: Retain は付けない。
@@ -548,6 +581,11 @@ Resources:
             TableName: !Ref TutorSessionsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref RateLimitsTable
+        # ai-async-jobs: ジョブ登録 (generate/refine/tutor_*) + interactive キュー送信
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AiJobsTable
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt AiJobQueue.QueueName
         - Version: "2012-10-17"
           Statement:
             - Effect: Allow
@@ -789,6 +827,13 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /tutor/sessions/{sessionId}
             Method: GET
+        # ai-async-jobs: ジョブポーリング
+        GetAiJob:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /ai-jobs/{jobId}
+            Method: GET
       Tags:
         Environment: !Ref Environment
         Application: memoru
@@ -963,6 +1008,11 @@ Resources:
             TableName: !Ref ReviewsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref RateLimitsTable
+        # ai-async-jobs: ジョブ登録 + interactive キュー送信
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AiJobsTable
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt AiJobQueue.QueueName
         - Version: "2012-10-17"
           Statement:
             - Effect: Allow
@@ -1009,6 +1059,11 @@ Resources:
             TableName: !Ref ReviewsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref RateLimitsTable
+        # ai-async-jobs: ジョブ登録 + interactive キュー送信
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AiJobsTable
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt AiJobQueue.QueueName
         - Version: "2012-10-17"
           Statement:
             - Effect: Allow
@@ -1030,7 +1085,9 @@ Resources:
           Properties:
             ApiId: !Ref HttpApi
             Path: /advice
-            Method: GET
+            # ai-async-jobs: ジョブ作成（非冪等）のため GET → POST に変更。
+            # フロント未使用エンドポイントのため互換対応は不要（設計 SH-7）。
+            Method: POST
       Tags:
         Environment: !Ref Environment
         Application: memoru
@@ -1055,6 +1112,11 @@ Resources:
             TableName: !Ref DecksTable
         - DynamoDBCrudPolicy:
             TableName: !Ref RateLimitsTable
+        # ai-async-jobs: ジョブ登録 (generate_from_url) + heavy キュー送信
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AiJobsTable
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt AiJobHeavyQueue.QueueName
         # NOTE: AgentCore Browser 統合は未実装のため、関連 IAM (bedrock-agentcore:*)
         # と BrowserProfilesTable Read 権限、AGENTCORE_BROWSER_REGION /
         # BROWSER_PROFILES_TABLE 環境変数は意図的に外している。
@@ -1194,6 +1256,245 @@ Resources:
         Application: memoru
 
   #============================================================
+  # ai-async-jobs: AI 非同期ジョブ基盤 (SQS + ワーカー)
+  #============================================================
+
+  # interactive キューの DLQ（generate/refine/grade_ai/advice/tutor_*）。
+  AiJobDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub memoru-ai-job-dlq-${Environment}
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: false
+      KmsMasterKeyId: alias/aws/sqs
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: memoru
+
+  # heavy キューの DLQ（generate_from_url）。
+  AiJobHeavyDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub memoru-ai-job-heavy-dlq-${Environment}
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: false
+      KmsMasterKeyId: alias/aws/sqs
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: memoru
+
+  # interactive キュー: 〜60 秒級の AI ジョブ
+  # (generate / refine / grade_ai / advice / tutor_start / tutor_message)。
+  AiJobQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub memoru-ai-job-${Environment}
+      # VisibilityTimeout はワーカー Timeout (180s) の 1.5 倍
+      # (UrlGenerateQueue の既存比率を踏襲)。
+      VisibilityTimeout: 270
+      SqsManagedSseEnabled: false
+      KmsMasterKeyId: alias/aws/sqs
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt AiJobDLQ.Arn
+        maxReceiveCount: 3
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: memoru
+
+  # heavy キュー: 〜120 秒級の重量ジョブ (generate_from_url)。
+  # maxReceiveCount 1: Lambda ハードタイムアウト経由の再配信で AI を丸ごと
+  # やり直す 3× 課金経路を遮断する (設計レビュー H-5)。失敗は即 DLQ で可視化。
+  AiJobHeavyQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub memoru-ai-job-heavy-${Environment}
+      VisibilityTimeout: 270
+      SqsManagedSseEnabled: false
+      KmsMasterKeyId: alias/aws/sqs
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt AiJobHeavyDLQ.Arn
+        maxReceiveCount: 1
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: memoru
+
+  # AI ジョブワーカー (interactive / heavy 両キューを消費)。
+  AiJobWorkerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub memoru-ai-job-worker-${Environment}
+      CodeUri: src/
+      Handler: jobs.ai_job_worker_handler.handler
+      Description: SQS worker for asynchronous AI jobs (ai-async-jobs)
+      Timeout: 180
+      MemorySize: 512
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AiJobsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UsersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CardsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ReviewsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DecksTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TutorSessionsTable
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              # inference profile + 配下の foundation-model ("global." 除去で導出)
+              Resource:
+                - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
+                - !Sub
+                  - arn:aws:bedrock:*::foundation-model/${FoundationModelId}
+                  - FoundationModelId: !Select [1, !Split ["global.", !Ref BedrockModelId]]
+        - !If
+          - HasTutorModelId
+          - Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource:
+                  - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${TutorModelId}
+                  - !Sub
+                    - arn:aws:bedrock:*::foundation-model/${FoundationModelId}
+                    - FoundationModelId: !Select [1, !Split ["global.", !Ref TutorModelId]]
+          - !Ref AWS::NoValue
+        - !If
+          - UseAgentCore
+          - Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock-agentcore:InvokeMemory
+                  - bedrock-agentcore:RetrieveMemory
+                  - bedrock-agentcore:CreateEvent
+                  - bedrock-agentcore:GetEvent
+                  - bedrock-agentcore:ListEvents
+                  - bedrock-agentcore:RetrieveMemoryRecords
+                Resource:
+                  - !Sub arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:memory/${AgentCoreMemoryId}
+                  - !Sub arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:memory/${AgentCoreMemoryId}/*
+          - !Ref AWS::NoValue
+      Environment:
+        Variables:
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+          TUTOR_MODEL_ID: !Ref TutorModelId
+      Events:
+        AiJobSqs:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt AiJobQueue.Arn
+            # バッチ途中のタイムアウトによる未処理メッセージの巻き込み
+            # (receive count 増加 → 不当な DLQ 送り) を防ぐため BatchSize 1
+            # (UrlGenerateWorker の設計判断を踏襲)。
+            BatchSize: 1
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+            ScalingConfig:
+              MaximumConcurrency: 5
+        AiJobHeavySqs:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt AiJobHeavyQueue.Arn
+            BatchSize: 1
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+            # 重量ジョブ (fetch + 複数 chunk × Bedrock) の同時実行を抑制
+            # (UrlGenerateWorker と同値)。
+            ScalingConfig:
+              MaximumConcurrency: 2
+      Tags:
+        Environment: !Ref Environment
+        Application: memoru
+
+  #============================================================
+  # DLQ 滞留アラーム (設計レビュー SM-4: 通知先 SNS の配線は follow-up。
+  # アラーム状態はコンソール / ダッシュボードで可視化される)
+  #============================================================
+
+  AiJobDLQAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub memoru-ai-job-dlq-messages-${Environment}
+      AlarmDescription: AI job messages landed in the DLQ (failed after retries)
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt AiJobDLQ.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
+  AiJobHeavyDLQAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub memoru-ai-job-heavy-dlq-messages-${Environment}
+      AlarmDescription: Heavy AI job messages landed in the DLQ (no retry by design)
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt AiJobHeavyDLQ.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
+  DuePushJobDLQAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub memoru-due-push-dlq-messages-${Environment}
+      AlarmDescription: Due-push job messages landed in the DLQ
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt DuePushJobDLQ.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
+  UrlGenerateWorkerDLQAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub memoru-url-generate-dlq-messages-${Environment}
+      AlarmDescription: URL card generation messages landed in the DLQ
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt UrlGenerateWorkerDLQ.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
+  #============================================================
   # CloudWatch Logs - LogGroups with Retention
   #============================================================
 
@@ -1237,6 +1538,13 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub "/aws/lambda/${UrlGenerateWorkerFunction}"
+      RetentionInDays: !If [IsProd, 90, 14]
+
+  # AI Job Worker Function LogGroup (ai-async-jobs)
+  AiJobWorkerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AiJobWorkerFunction}"
       RetentionInDays: !If [IsProd, 90, 14]
 
   #============================================================
