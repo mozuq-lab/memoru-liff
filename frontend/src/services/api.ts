@@ -476,37 +476,53 @@ class ApiClient {
     });
   }
 
+  // AI 生成系 API は非同期ジョブ基盤（202 + job_id → GET /ai-jobs/{id} ポーリング）
+  // 経由で実行する。呼び出し元から渡ってくる signal / timeoutMs はそのまま
+  // submitAndPollAiJob に接続され、全体デッドラインとして内部合成される。
+  // 旧同期形式レスポンス（job_id なしの 2xx）もそのまま返す（移行互換）。
   async generateCards(
     data: GenerateCardsRequest,
     options?: { signal?: AbortSignal; timeoutMs?: number },
   ): Promise<GenerateCardsResponse> {
-    return this.request<GenerateCardsResponse>("/cards/generate", {
-      method: "POST",
-      body: JSON.stringify(data),
-      signal: options?.signal,
-      timeoutMs: options?.timeoutMs,
-    });
+    return this.submitAndPollAiJob<GenerateCardsResponse>(
+      (signal, timeoutMs) =>
+        this.requestWithStatus("/cards/generate", {
+          method: "POST",
+          body: JSON.stringify(data),
+          signal,
+          timeoutMs,
+        }),
+      { signal: options?.signal, timeoutMs: options?.timeoutMs },
+    );
   }
 
   async generateFromUrl(data: GenerateFromUrlRequest, options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<GenerateFromUrlResponse> {
-    return this.request<GenerateFromUrlResponse>('/cards/generate-from-url', {
-      method: 'POST',
-      body: JSON.stringify(data),
-      signal: options?.signal,
-      timeoutMs: options?.timeoutMs,
-    });
+    return this.submitAndPollAiJob<GenerateFromUrlResponse>(
+      (signal, timeoutMs) =>
+        this.requestWithStatus('/cards/generate-from-url', {
+          method: 'POST',
+          body: JSON.stringify(data),
+          signal,
+          timeoutMs,
+        }),
+      { signal: options?.signal, timeoutMs: options?.timeoutMs },
+    );
   }
 
   async refineCard(
     data: RefineCardRequest,
     options?: { signal?: AbortSignal; timeoutMs?: number },
   ): Promise<RefineCardResponse> {
-    return this.request<RefineCardResponse>("/cards/refine", {
-      method: "POST",
-      body: JSON.stringify(data),
-      signal: options?.signal,
-      timeoutMs: options?.timeoutMs,
-    });
+    return this.submitAndPollAiJob<RefineCardResponse>(
+      (signal, timeoutMs) =>
+        this.requestWithStatus("/cards/refine", {
+          method: "POST",
+          body: JSON.stringify(data),
+          signal,
+          timeoutMs,
+        }),
+      { signal: options?.signal, timeoutMs: options?.timeoutMs },
+    );
   }
 
   async getDueCards(
@@ -613,25 +629,37 @@ class ApiClient {
   // start / sendMessage は AI 生成（あいさつ・応答）を伴い遅いため、request() の既定
   // 30 秒ではなく TUTOR_AI_TIMEOUT_MS を使う。ローカル LLM で生成が 30 秒を超えると
   // フロントが先に abort し「セッションの開始に失敗しました」になる問題への対処。
+  // 非同期ジョブ基盤経由（tutor 系は signal を渡さず timeoutMs のみだが、
+  // submitAndPollAiJob が内部でデッドラインを合成するため打ち切りが効く）。
   async startTutorSession(data: StartSessionRequest): Promise<TutorSession> {
-    return this.request<TutorSession>("/tutor/sessions", {
-      method: "POST",
-      body: JSON.stringify(data),
-      timeoutMs: TUTOR_AI_TIMEOUT_MS,
-    });
+    return this.submitAndPollAiJob<TutorSession>(
+      (signal, timeoutMs) =>
+        this.requestWithStatus("/tutor/sessions", {
+          method: "POST",
+          body: JSON.stringify(data),
+          signal,
+          timeoutMs,
+        }),
+      { timeoutMs: TUTOR_AI_TIMEOUT_MS },
+    );
   }
 
   async sendTutorMessage(
     sessionId: string,
     data: SendMessageRequest,
   ): Promise<SendMessageResponse> {
-    return this.request<SendMessageResponse>(
-      `/tutor/sessions/${encodeURIComponent(sessionId)}/messages`,
-      {
-        method: "POST",
-        body: JSON.stringify(data),
-        timeoutMs: TUTOR_AI_TIMEOUT_MS,
-      },
+    return this.submitAndPollAiJob<SendMessageResponse>(
+      (signal, timeoutMs) =>
+        this.requestWithStatus(
+          `/tutor/sessions/${encodeURIComponent(sessionId)}/messages`,
+          {
+            method: "POST",
+            body: JSON.stringify(data),
+            signal,
+            timeoutMs,
+          },
+        ),
+      { timeoutMs: TUTOR_AI_TIMEOUT_MS },
     );
   }
 
