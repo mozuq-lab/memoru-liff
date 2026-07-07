@@ -173,7 +173,12 @@ export const useCardGeneration = () => {
         card_count: textCardCount,
         language: 'ja',
       };
-      const response = await cardsApi.generateCards(request, { signal: controller.signal });
+      // request() が既定 30 秒タイムアウトを常に合成するようになったため、
+      // 生成系の上限（env で延長可能）を timeoutMs で API 層にも伝える。
+      const response = await cardsApi.generateCards(request, {
+        signal: controller.signal,
+        timeoutMs: MAX_GENERATION_TIME,
+      });
       clearTimeout(timeoutId);
       // M-30: アンマウント済みなら state 更新を行わない
       if (!isMountedRef.current) return;
@@ -233,7 +238,12 @@ export const useCardGeneration = () => {
         language: 'ja',
         ...(selectedProfileId ? { profile_id: selectedProfileId } : {}),
       };
-      const response = await cardsApi.generateFromUrl(request, { signal: controller.signal });
+      // request() の既定 30 秒タイムアウトで URL 生成（最大 90 秒）が切られないよう
+      // timeoutMs で API 層にも上限を伝える。
+      const response = await cardsApi.generateFromUrl(request, {
+        signal: controller.signal,
+        timeoutMs: MAX_URL_GENERATION_TIME,
+      });
       clearTimeout(timeoutId);
       clearTimeout(timer1);
       clearTimeout(timer2);

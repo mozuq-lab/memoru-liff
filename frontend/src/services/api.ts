@@ -79,6 +79,66 @@ export class ApiError extends Error {
 export const GENERIC_ERROR_MESSAGE =
   "エラーが発生しました。時間をおいて再度お試しください。";
 
+/** request() の 1 リクエストあたり既定タイムアウト（ミリ秒）。 */
+export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+
+/**
+ * 外部の中断用 signal とタイムアウトを常に合成した AbortSignal を生成する。
+ *
+ * 従来は `options.signal ?? AbortSignal.timeout(...)` としていたため、呼び出し側が
+ * 中断専用の signal（タイマーなし）を渡すと既定タイムアウトが完全に無効化されていた。
+ * 本ヘルパーは外部 signal の有無に関わらずタイムアウトを必ず適用する。
+ *
+ * LIFF は LINE アプリ内 WebView（iOS WKWebView）で動作し、iOS 17.4 未満では
+ * AbortSignal.any が未実装のため、その場合は AbortController + 'abort' リスナー +
+ * setTimeout による手動合成にフォールバックする。手動合成ではリスナーとタイマーが
+ * リークしないよう、リクエスト完了後に必ず cleanup() を呼ぶこと。
+ *
+ * abort reason はタイムアウト起因では TimeoutError（AbortSignal.timeout と同一）、
+ * 外部起因では外部 signal の reason（既定 AbortError）を維持し、呼び出し側の
+ * エラー分類（AbortError / TimeoutError の判別）を変えない。
+ */
+export function createRequestSignal(
+  timeoutMs: number,
+  externalSignal?: AbortSignal | null,
+): { signal: AbortSignal; cleanup: () => void } {
+  const noop = () => {};
+
+  if (typeof AbortSignal.any === "function") {
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    return {
+      signal: externalSignal
+        ? AbortSignal.any([externalSignal, timeoutSignal])
+        : timeoutSignal,
+      cleanup: noop,
+    };
+  }
+
+  // 【フォールバック】: AbortSignal.any 未実装環境（iOS 17.4 未満の WKWebView 等）向けの手動合成
+  const controller = new AbortController();
+
+  if (externalSignal?.aborted) {
+    controller.abort(externalSignal.reason);
+    return { signal: controller.signal, cleanup: noop };
+  }
+
+  const onExternalAbort = () => controller.abort(externalSignal?.reason);
+  externalSignal?.addEventListener("abort", onExternalAbort);
+  const timerId = setTimeout(() => {
+    controller.abort(
+      new DOMException("The operation timed out.", "TimeoutError"),
+    );
+  }, timeoutMs);
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      clearTimeout(timerId);
+      externalSignal?.removeEventListener("abort", onExternalAbort);
+    },
+  };
+}
+
 /**
  * L-30: セッション切れでログイン画面へリダイレクトしようとして失敗した際に
  * 発火するグローバルイベント名。
@@ -132,12 +192,14 @@ class ApiClient {
 
   private async request<T>(
     endpoint: string,
-    options: RequestInit = {},
+    options: RequestInit & { timeoutMs?: number } = {},
     _isRetry = false,
   ): Promise<T> {
+    const { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, ...init } = options;
+
     const headers: HeadersInit = {
       "Content-Type": "application/json",
-      ...options.headers,
+      ...init.headers,
     };
 
     if (this.accessToken) {
@@ -145,56 +207,63 @@ class ApiClient {
         `Bearer ${this.accessToken}`;
     }
 
-    const signal = options.signal ?? AbortSignal.timeout(30_000);
+    // 外部 signal（中断用）とタイムアウトを常に合成する。
+    // 外部 signal を渡してもタイムアウトが無効化されない（H-1 修正）。
+    const { signal, cleanup } = createRequestSignal(timeoutMs, init.signal);
 
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-      ...options,
-      headers,
-      signal,
-    });
+    try {
+      const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+        ...init,
+        headers,
+        signal,
+      });
 
-    // 401 Unauthorized - トークンリフレッシュ処理（リトライは1回のみ）
-    if (response.status === 401) {
-      if (_isRetry) {
-        // リトライ後も 401 - ログイン画面にリダイレクト
-        this.redirectToLogin();
-        throw new Error("Session expired");
-      }
+      // 401 Unauthorized - トークンリフレッシュ処理（リトライは1回のみ）
+      if (response.status === 401) {
+        if (_isRetry) {
+          // リトライ後も 401 - ログイン画面にリダイレクト
+          this.redirectToLogin();
+          throw new Error("Session expired");
+        }
 
-      if (!this.isRefreshing) {
-        this.isRefreshing = true;
-        this.refreshPromise = this.refreshToken().finally(() => {
-          this.isRefreshing = false;
-          this.refreshPromise = null;
-        });
-      }
-      try {
-        await this.refreshPromise;
+        if (!this.isRefreshing) {
+          this.isRefreshing = true;
+          this.refreshPromise = this.refreshToken().finally(() => {
+            this.isRefreshing = false;
+            this.refreshPromise = null;
+          });
+        }
+        try {
+          await this.refreshPromise;
+        } catch {
+          // リフレッシュ失敗 - ログイン画面にリダイレクト
+          this.redirectToLogin();
+          throw new Error("Session expired");
+        }
         // リフレッシュ成功後に元のリクエストを再実行（_isRetry=true で再帰を1回に制限）
-        return this.request<T>(endpoint, options, true);
-      } catch {
-        // リフレッシュ失敗 - ログイン画面にリダイレクト
-        this.redirectToLogin();
-        throw new Error("Session expired");
+        return await this.request<T>(endpoint, options, true);
       }
-    }
 
-    if (!response.ok) {
-      const error = await response
-        .json()
-        .catch(() => ({ message: "Unknown error" }));
-      // E-3: status/code を保持した ApiError を throw（message は従来互換）
-      throw new ApiError(
-        error.error || error.message || `HTTP ${response.status}`,
-        response.status,
-        typeof error.code === "string" ? error.code : undefined,
-      );
-    }
+      if (!response.ok) {
+        const error = await response
+          .json()
+          .catch(() => ({ message: "Unknown error" }));
+        // E-3: status/code を保持した ApiError を throw（message は従来互換）
+        throw new ApiError(
+          error.error || error.message || `HTTP ${response.status}`,
+          response.status,
+          typeof error.code === "string" ? error.code : undefined,
+        );
+      }
 
-    if (response.status === 204) {
-      return undefined as T;
+      if (response.status === 204) {
+        return undefined as T;
+      }
+      return await response.json();
+    } finally {
+      // フォールバック合成時のリスナー・タイマーをリークさせない
+      cleanup();
     }
-    return response.json();
   }
 
   private async refreshToken(): Promise<void> {
@@ -221,28 +290,32 @@ class ApiClient {
 
     // M-37: request() はページごとに新しい 30 秒タイムアウトを張るため、
     // ループ全体に対するタイムアウト上限を 1 本だけ用意し、全ページに渡す。
-    // 外部 signal が渡された場合は AbortSignal.any で合成し、どちらか早い方で中断する。
-    const loopTimeout = AbortSignal.timeout(GET_CARDS_LOOP_TIMEOUT_MS);
-    const loopSignal = options?.signal
-      ? AbortSignal.any([options.signal, loopTimeout])
-      : loopTimeout;
+    // 外部 signal は createRequestSignal で合成する（AbortSignal.any 未実装環境でも動作）。
+    const { signal: loopSignal, cleanup } = createRequestSignal(
+      GET_CARDS_LOOP_TIMEOUT_MS,
+      options?.signal,
+    );
 
-    do {
-      const qs = buildQueryString({ limit: 100, deck_id: deckId, cursor });
+    try {
+      do {
+        const qs = buildQueryString({ limit: 100, deck_id: deckId, cursor });
 
-      // The cards screen performs client-side search and sorting, so it needs
-      // every page rather than silently limiting the visible collection.
-      const response = await this.request<{
-        cards: Card[];
-        next_cursor?: string | null;
-      }>(`/cards${qs}`, {
-        signal: loopSignal,
-      });
-      cards.push(...response.cards);
-      cursor = response.next_cursor ?? undefined;
-    } while (cursor);
+        // The cards screen performs client-side search and sorting, so it needs
+        // every page rather than silently limiting the visible collection.
+        const response = await this.request<{
+          cards: Card[];
+          next_cursor?: string | null;
+        }>(`/cards${qs}`, {
+          signal: loopSignal,
+        });
+        cards.push(...response.cards);
+        cursor = response.next_cursor ?? undefined;
+      } while (cursor);
 
-    return cards;
+      return cards;
+    } finally {
+      cleanup();
+    }
   }
 
   async getCard(id: string): Promise<Card> {
@@ -271,31 +344,34 @@ class ApiClient {
 
   async generateCards(
     data: GenerateCardsRequest,
-    options?: { signal?: AbortSignal },
+    options?: { signal?: AbortSignal; timeoutMs?: number },
   ): Promise<GenerateCardsResponse> {
     return this.request<GenerateCardsResponse>("/cards/generate", {
       method: "POST",
       body: JSON.stringify(data),
       signal: options?.signal,
+      timeoutMs: options?.timeoutMs,
     });
   }
 
-  async generateFromUrl(data: GenerateFromUrlRequest, options?: { signal?: AbortSignal }): Promise<GenerateFromUrlResponse> {
+  async generateFromUrl(data: GenerateFromUrlRequest, options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<GenerateFromUrlResponse> {
     return this.request<GenerateFromUrlResponse>('/cards/generate-from-url', {
       method: 'POST',
       body: JSON.stringify(data),
       signal: options?.signal,
+      timeoutMs: options?.timeoutMs,
     });
   }
 
   async refineCard(
     data: RefineCardRequest,
-    options?: { signal?: AbortSignal },
+    options?: { signal?: AbortSignal; timeoutMs?: number },
   ): Promise<RefineCardResponse> {
     return this.request<RefineCardResponse>("/cards/refine", {
       method: "POST",
       body: JSON.stringify(data),
       signal: options?.signal,
+      timeoutMs: options?.timeoutMs,
     });
   }
 
@@ -407,7 +483,7 @@ class ApiClient {
     return this.request<TutorSession>("/tutor/sessions", {
       method: "POST",
       body: JSON.stringify(data),
-      signal: AbortSignal.timeout(TUTOR_AI_TIMEOUT_MS),
+      timeoutMs: TUTOR_AI_TIMEOUT_MS,
     });
   }
 
@@ -420,7 +496,7 @@ class ApiClient {
       {
         method: "POST",
         body: JSON.stringify(data),
-        signal: AbortSignal.timeout(TUTOR_AI_TIMEOUT_MS),
+        timeoutMs: TUTOR_AI_TIMEOUT_MS,
       },
     );
   }
@@ -480,9 +556,9 @@ export const cardsApi = {
   updateCard: (id: string, data: UpdateCardRequest) =>
     apiClient.updateCard(id, data),
   deleteCard: (id: string) => apiClient.deleteCard(id),
-  generateCards: (data: GenerateCardsRequest, options?: { signal?: AbortSignal }) => apiClient.generateCards(data, options),
-  generateFromUrl: (data: GenerateFromUrlRequest, options?: { signal?: AbortSignal }) => apiClient.generateFromUrl(data, options),
-  refineCard: (data: RefineCardRequest, options?: { signal?: AbortSignal }) => apiClient.refineCard(data, options),
+  generateCards: (data: GenerateCardsRequest, options?: { signal?: AbortSignal; timeoutMs?: number }) => apiClient.generateCards(data, options),
+  generateFromUrl: (data: GenerateFromUrlRequest, options?: { signal?: AbortSignal; timeoutMs?: number }) => apiClient.generateFromUrl(data, options),
+  refineCard: (data: RefineCardRequest, options?: { signal?: AbortSignal; timeoutMs?: number }) => apiClient.refineCard(data, options),
   getDueCards: (limit?: number, deckId?: string, options?: { signal?: AbortSignal }) =>
     apiClient.getDueCards(limit, deckId, options),
   getDueCount: () => apiClient.getDueCount(),
