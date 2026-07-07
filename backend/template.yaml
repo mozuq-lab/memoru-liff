@@ -552,7 +552,12 @@ Resources:
                   - bedrock-agentcore:GetEvent
                   - bedrock-agentcore:ListEvents
                   - bedrock-agentcore:RetrieveMemoryRecords
-                Resource: "*"
+                # 対象 Memory とその配下リソース（イベント / メモリレコード等、
+                # memory/<id>/... 形式の ARN を持つ API）に限定する。
+                # 従来は "*" で全 AgentCore リソースにアクセス可能だった。
+                Resource:
+                  - !Sub arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:memory/${AgentCoreMemoryId}
+                  - !Sub arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:memory/${AgentCoreMemoryId}/*
           - !Ref AWS::NoValue
       Environment:
         Variables:
