@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from typing import List, Optional, overload
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from aws_lambda_powertools import Logger
@@ -136,6 +136,16 @@ def calculate_next_review_boundary(
         tzinfo=user_tz,
     )
     return boundary.astimezone(timezone.utc).replace(microsecond=0)
+
+
+@overload
+def to_user_local_date(value: datetime, user_timezone: str = ...) -> str: ...
+
+
+@overload
+def to_user_local_date(
+    value: "str | None", user_timezone: str = ...
+) -> Optional[str]: ...
 
 
 def to_user_local_date(
