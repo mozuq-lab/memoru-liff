@@ -1537,3 +1537,62 @@ class TestCloseQuietly:
                     )
 
         assert any("close" in r.message.lower() for r in caplog.records)
+
+
+class TestCompleteSendEndedSessionRace:
+    """AI 応答待ち中に終了したセッションへの書き込み防止（レビュー指摘 #9）。
+
+    send_message の AI 呼び出し中に別経路（新規セッション開始時の auto-end や
+    明示的な end_session）でセッションが ended になった場合、complete_send は
+    終了済みセッションへ message_count++ や状態上書きを行わないこと。
+    """
+
+    def test_send_completing_after_end_does_not_mutate_ended_session(
+        self, tutor_service, dynamodb_tables, mock_ai_service
+    ):
+        _seed_deck(dynamodb_tables)
+        session = tutor_service.start_session(
+            user_id="test-user", deck_id="deck_001", mode="free_talk"
+        )
+        mock_ai_service.generate_response.reset_mock()
+
+        def end_during_ai(*args, **kwargs):
+            # AI 呼び出し中に auto-end 相当の終了処理が走る状況を再現
+            tutor_service.end_session("test-user", session.session_id)
+            return ("late response", [])
+
+        mock_ai_service.generate_response.side_effect = end_during_ai
+
+        # 応答自体は正常に返る（ユーザーには AI 応答が届く）
+        response = tutor_service.send_message(
+            "test-user", session.session_id, "q1"
+        )
+        assert response.message.content == "late response"
+
+        # ended セッションの永続状態は書き換えられていない
+        table = dynamodb_tables.Table("memoru-tutor-sessions-test")
+        item = table.get_item(
+            Key={"user_id": "test-user", "session_id": session.session_id}
+        )["Item"]
+        assert item["status"] == "ended"
+        assert int(item.get("message_count", 0)) == 0
+
+    def test_normal_send_still_increments_count(
+        self, tutor_service, dynamodb_tables, mock_ai_service
+    ):
+        """競合がない通常送信では従来どおり count++ される（回帰確認）。"""
+        _seed_deck(dynamodb_tables)
+        session = tutor_service.start_session(
+            user_id="test-user", deck_id="deck_001", mode="free_talk"
+        )
+        mock_ai_service.generate_response.return_value = ("ok", [])
+
+        tutor_service.send_message("test-user", session.session_id, "q1")
+
+        table = dynamodb_tables.Table("memoru-tutor-sessions-test")
+        item = table.get_item(
+            Key={"user_id": "test-user", "session_id": session.session_id}
+        )["Item"]
+        assert item["status"] == "active"
+        assert int(item["message_count"]) == 1
+        assert "processing_started_at" not in item
