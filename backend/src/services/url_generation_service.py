@@ -31,6 +31,7 @@ from botocore.exceptions import ClientError
 
 from services.line_service import LineService
 from services.flex_messages import (
+    MAX_PREVIEW_CARDS,
     create_error_message,
     create_card_preview_carousel,
     create_url_generation_error_message,
@@ -238,14 +239,18 @@ def generate_url_cards_core(
             user_message="カードを生成できませんでした。",
         )
 
-    # カルーセル用のカードデータを構築
+    # カルーセル用のカードデータを構築。
+    # カルーセルに表示できるのは MAX_PREVIEW_CARDS 件のみのため、保存対象も
+    # ここで同じ枚数に切り詰める（「保存できるのはプレビューされたカードのみ」
+    # の不変条件。切り詰めずに store すると、ユーザーが一度も確認していない
+    # カードが保存時に紛れ込む）。
     cards_data = [
         {
             "front": card.front,
             "back": card.back,
             "suggested_tags": card.suggested_tags,
         }
-        for card in result.cards
+        for card in result.cards[:MAX_PREVIEW_CARDS]
     ]
 
     # --- 永続化 ---
@@ -277,7 +282,8 @@ def generate_url_cards_core(
     _get_line_service().push_message(line_user_id, [carousel])
 
     logger.info(
-        f"URL card generation complete: {len(result.cards)} cards, url={url}"
+        f"URL card generation complete: {len(cards_data)} cards "
+        f"(generated={len(result.cards)}), url={url}"
     )
 
 

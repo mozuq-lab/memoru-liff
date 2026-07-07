@@ -2,6 +2,12 @@
 
 from typing import Any, Dict, List, Optional
 
+# URL カード生成プレビューで表示できる最大カード枚数。
+# LINE カルーセルはバブル最大 10 件で、うち 1 件をサマリーバブルに使う。
+# 「保存できるのはプレビューされたカードのみ」という不変条件を守るため、
+# 生成側 (url_generation_service) は保存前にこの枚数へ切り詰めること。
+MAX_PREVIEW_CARDS = 9
+
 
 def create_question_message(card_id: str, front: str) -> Dict[str, Any]:
     """Create question display Flex Message.
@@ -433,8 +439,7 @@ def create_card_preview_carousel(
         }
 
     # LINE carousel max is 10 bubbles; reserve 1 for summary
-    max_card_bubbles = 9
-    display_cards = cards[:max_card_bubbles]
+    display_cards = cards[:MAX_PREVIEW_CARDS]
 
     bubbles: List[Dict[str, Any]] = []
 
