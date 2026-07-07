@@ -244,8 +244,8 @@ export const useCardGeneration = () => {
         language: 'ja',
         ...(selectedProfileId ? { profile_id: selectedProfileId } : {}),
       };
-      // request() の既定 30 秒タイムアウトで URL 生成（最大 90 秒）が切られないよう
-      // timeoutMs で API 層にも上限を伝える。
+      // request() の既定 30 秒タイムアウトで URL 生成（最大 MAX_URL_GENERATION_TIME =
+      // 既定 150 秒）が切られないよう timeoutMs で API 層にも上限を伝える。
       const response = await cardsApi.generateFromUrl(request, {
         signal: controller.signal,
         timeoutMs: MAX_URL_GENERATION_TIME,
