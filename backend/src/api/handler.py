@@ -13,7 +13,11 @@ from aws_lambda_powertools.event_handler import APIGatewayHttpResolver
 from aws_lambda_powertools.logging import correlation_paths
 from aws_lambda_powertools.utilities.typing import LambdaContext
 
-from api.shared import get_user_id_from_event, map_ai_error_to_http
+from api.shared import (
+    check_ai_rate_limit_event,
+    get_user_id_from_event,
+    map_ai_error_to_http,
+)
 from api.handlers.user_handler import router as user_router
 from api.handlers.cards_handler import router as cards_router
 from api.handlers.decks_handler import router as decks_router
@@ -81,6 +85,10 @@ def grade_ai_handler(event: dict, context: Any) -> dict:
         user_id = get_user_id_from_event(event)
         if not user_id:
             return _make_lambda_response(401, {"error": "Unauthorized"})
+
+        rate_limited = check_ai_rate_limit_event(user_id)
+        if rate_limited:
+            return rate_limited
 
         path_params = event.get("pathParameters") or {}
         card_id = path_params.get("cardId")
@@ -160,6 +168,10 @@ def advice_handler(event: dict, context: Any) -> dict:
         user_id = get_user_id_from_event(event)
         if not user_id:
             return _make_lambda_response(401, {"error": "Unauthorized"})
+
+        rate_limited = check_ai_rate_limit_event(user_id)
+        if rate_limited:
+            return rate_limited
 
         logger.info("Advice request", extra={"user_id": user_id})
 

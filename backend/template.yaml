@@ -28,6 +28,11 @@ Globals:
         TUTOR_AI_AGENT_TIMEOUT_SECONDS: "60"
         TUTOR_SESSION_BACKEND: !Ref TutorSessionBackend
         AGENTCORE_MEMORY_ID: !Ref AgentCoreMemoryId
+        # AI 系エンドポイントのユーザー単位レート制限 (utils/rate_limiter.py)。
+        # RATE_LIMITS_TABLE が空なら無効 (ローカル開発既定)。
+        RATE_LIMITS_TABLE: !Ref RateLimitsTable
+        AI_RATE_LIMIT_PER_WINDOW: "30"
+        AI_RATE_LIMIT_WINDOW_SECONDS: "300"
 
 Parameters:
   Environment:
@@ -403,6 +408,32 @@ Resources:
         - Key: Application
           Value: memoru
 
+  # ユーザー単位レート制限カウンタ (AI 系エンドポイント)。
+  # 固定ウィンドウのカウンタのみを保持する使い捨てデータのため、
+  # 他テーブルと異なり DeletionPolicy: Retain は付けない。
+  RateLimitsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub memoru-rate-limits-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: memoru
+
   #============================================================
   # API Gateway (HTTP API)
   #============================================================
@@ -478,6 +509,8 @@ Resources:
             TableName: !Ref BrowserProfilesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref TutorSessionsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RateLimitsTable
         - Version: "2012-10-17"
           Statement:
             - Effect: Allow
@@ -886,6 +919,8 @@ Resources:
             TableName: !Ref CardsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref ReviewsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RateLimitsTable
         - Version: "2012-10-17"
           Statement:
             - Effect: Allow
@@ -930,6 +965,8 @@ Resources:
             TableName: !Ref CardsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref ReviewsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RateLimitsTable
         - Version: "2012-10-17"
           Statement:
             - Effect: Allow
@@ -974,6 +1011,8 @@ Resources:
             TableName: !Ref CardsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref DecksTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RateLimitsTable
         # NOTE: AgentCore Browser 統合は未実装のため、関連 IAM (bedrock-agentcore:*)
         # と BrowserProfilesTable Read 権限、AGENTCORE_BROWSER_REGION /
         # BROWSER_PROFILES_TABLE 環境変数は意図的に外している。
