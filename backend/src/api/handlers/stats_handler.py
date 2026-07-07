@@ -8,12 +8,23 @@ from aws_lambda_powertools.event_handler.api_gateway import Router
 
 from api.shared import get_user_id_from_context
 from services.stats_service import StatsService
+from services.user_service import UserService
 
 logger = Logger()
 tracer = Tracer()
 router = Router()
 
 stats_service = StatsService()
+user_service = UserService()
+
+
+def _get_user_timezone(user_id: str) -> str:
+    """ユーザー設定からタイムゾーンを取得する（streak・「今日」判定用）。
+
+    review_handler と同じパターン。設定が無い場合はアプリ既定の Asia/Tokyo。
+    """
+    user = user_service.get_or_create_user(user_id)
+    return user.settings.get("timezone", "Asia/Tokyo")
 
 
 @router.get("/stats")
@@ -24,7 +35,8 @@ def get_stats():
     logger.info("Getting stats", extra={"user_id": user_id})
 
     try:
-        response = stats_service.get_stats(user_id)
+        user_timezone = _get_user_timezone(user_id)
+        response = stats_service.get_stats(user_id, user_timezone=user_timezone)
         return response.model_dump(mode="json")
     except Exception as e:
         logger.error("Error getting stats", extra={"error": str(e)})
@@ -74,7 +86,10 @@ def get_forecast():
         )
 
     try:
-        response = stats_service.get_forecast(user_id, days=days)
+        user_timezone = _get_user_timezone(user_id)
+        response = stats_service.get_forecast(
+            user_id, days=days, user_timezone=user_timezone
+        )
         return response.model_dump(mode="json")
     except Exception as e:
         logger.error("Error getting forecast", extra={"error": str(e)})

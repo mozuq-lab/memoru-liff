@@ -99,6 +99,18 @@ def mock_review_service():
         yield mock
 
 
+@pytest.fixture(autouse=True)
+def mock_user_service():
+    """UserService のモック（user_timezone 取得用）。
+
+    advice_handler はユーザー設定から timezone を取得して
+    get_review_summary に渡すため、全テストで自動的にパッチする。
+    """
+    with patch("api.handler.user_service") as mock:
+        mock.get_or_create_user.return_value.settings = {"timezone": "Asia/Tokyo"}
+        yield mock
+
+
 @pytest.fixture
 def mock_ai_service():
     """create_ai_service のモック。LearningAdvice を返す。
@@ -160,7 +172,9 @@ class TestAdviceHandlerAuth:
 
         advice_handler(event, lambda_context)
 
-        mock_review_service.get_review_summary.assert_called_once_with("user-abc-123")
+        mock_review_service.get_review_summary.assert_called_once_with(
+            "user-abc-123", user_timezone="Asia/Tokyo"
+        )
 
 
 # =============================================================================
@@ -179,7 +193,9 @@ class TestAdviceHandlerFlow:
 
         advice_handler(event, lambda_context)
 
-        mock_review_service.get_review_summary.assert_called_once_with("test-user-id")
+        mock_review_service.get_review_summary.assert_called_once_with(
+            "test-user-id", user_timezone="Asia/Tokyo"
+        )
 
     def test_advice_calls_create_ai_service_factory(
         self, lambda_context, mock_review_service, mock_ai_service
@@ -375,7 +391,9 @@ class TestAdviceHandlerSuccess:
         assert body["advice_info"]["processing_time_ms"] == 600
 
         # コール引数を検証
-        mock_rs.get_review_summary.assert_called_once_with("e2e-user")
+        mock_rs.get_review_summary.assert_called_once_with(
+            "e2e-user", user_timezone="Asia/Tokyo"
+        )
         mock_factory.assert_called_once()
         call_kwargs = mock_service.get_learning_advice.call_args.kwargs
         assert call_kwargs["review_summary"]["total_reviews"] == 200
