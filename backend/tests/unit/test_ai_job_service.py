@@ -1,6 +1,5 @@
 """Unit tests for services/ai_job_service.py と jobs/ai_job_worker_handler.py."""
 
-import os
 from unittest.mock import MagicMock, patch
 
 import boto3

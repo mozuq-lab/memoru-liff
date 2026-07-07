@@ -1,27 +1,32 @@
-"""Unit tests for handler.py AIServiceFactory integration and template.yaml/env.json updates.
+"""Unit tests for AIServiceFactory integration and template.yaml/env.json updates.
 
-TASK-0056: handler.py AIServiceFactory 統合 + template.yaml 更新
-対象テストケース: TC-056-001 〜 TC-056-027 (カテゴリ A〜G 全27ケース)
+TASK-0056: AIServiceFactory 統合 + template.yaml 更新
+対象テストケース: TC-056-001 〜 TC-056-027 (カテゴリ A〜G)
 
 テストカテゴリ:
   A: AIServiceFactory 統合テスト (TC-056-001〜002)
   B: エラーマッピングテスト (TC-056-003〜009)
-  C: generate_cards エンドポイント互換性テスト (TC-056-010〜013)
+  C: generate 互換性テスト (TC-056-010〜013)
   D: スタブハンドラーテスト (TC-056-014〜015)
   E: template.yaml 設定検証テスト (TC-056-016〜023)
   F: env.json 設定検証テスト (TC-056-024〜025)
   G: Bedrock 例外階層経由マッピングテスト (TC-056-026〜027)
 
+ai-async-jobs: create_ai_service の呼び出し箇所が同期ハンドラーから
+services/ai_job_executors.py の executor に移ったため、カテゴリ A/C は
+executor 経由（services.ai_job_executors.create_ai_service パッチ）での
+検証に書き換えた。エラーは executor から素の例外として伝播し、
+classify_ai_job_error が旧ステータスへ分類する（test_ai_job_errors.py 参照）。
+
 注意事項:
   - 全メソッドは同期 (pytest.mark.asyncio 不要)
-  - 既存 conftest.py フィクスチャ (api_gateway_event, lambda_context) を使用
-  - テストファイルは新規作成 (既存テストは変更しない)
   - template.yaml/env.json テスト (カテゴリ E/F) はファイルを直接読み込む
 """
 
 import json
 import os
 
+import pytest
 import yaml
 from unittest.mock import patch, MagicMock
 
@@ -56,33 +61,34 @@ _CFnLoader.add_multi_constructor("!", _cfn_tag_constructor)
 
 
 class TestFactoryIntegration:
-    """カテゴリ A: generate_cards エンドポイントが create_ai_service() ファクトリを使用することを確認."""
+    """カテゴリ A: generate executor が create_ai_service() ファクトリを使用することを確認.
 
-    def test_generate_cards_uses_create_ai_service_factory(self, api_gateway_event, lambda_context):
-        """TC-056-001: generate_cards エンドポイントのファクトリ呼び出し確認.
+    ai-async-jobs: 呼び出し箇所が同期ハンドラーから executor に移ったため、
+    services.ai_job_executors.create_ai_service をパッチして executor 経由で検証する。
+    """
 
-        【テスト目的】: generate_cards が create_ai_service() ファクトリを使用することを確認
-        【テスト内容】: POST /cards/generate リクエストを送信し、ファクトリが呼ばれることを検証
-        【期待される動作】: create_ai_service() が 1 回呼ばれ、200 レスポンスが返る
-        🔵 信頼性レベル: 青信号 - 要件定義書 2.1 節「グローバル変数変更」「generate_cards エンドポイント改修」から確定
+    def test_execute_generate_uses_create_ai_service_factory(self):
+        """TC-056-001: generate executor のファクトリ呼び出し確認.
+
+        【テスト目的】: execute_generate が create_ai_service() ファクトリを使用することを確認
+        【テスト内容】: generate ジョブの payload で executor を実行し、ファクトリが呼ばれることを検証
+        【期待される動作】: create_ai_service() が 1 回呼ばれ、generated_cards を含む result が返る
+        🔵 信頼性レベル: 青信号 - ai_job_executors.execute_generate の実装から確定
         """
         # Given
-        # 【テストデータ準備】: 有効なカード生成リクエストを作成
-        event = api_gateway_event(
-            method="POST",
-            path="/cards/generate",
-            body={
-                "input_text": "テスト用の学習テキストです。十分な長さが必要です。",
-                "card_count": 3,
-                "difficulty": "medium",
-                "language": "ja",
-            },
-            user_id="test-user-123",
-        )
+        # 【テストデータ準備】: 有効なカード生成 payload を作成
+        from services.ai_job_executors import execute_generate
+
+        payload = {
+            "input_text": "テスト用の学習テキストです。十分な長さが必要です。",
+            "card_count": 3,
+            "difficulty": "medium",
+            "language": "ja",
+        }
 
         # When
-        # 【実際の処理実行】: handler を通じて generate_cards エンドポイントを呼び出す
-        with patch("api.handlers.ai_handler.create_ai_service") as mock_factory:
+        # 【実際の処理実行】: executor を直接呼び出す
+        with patch("services.ai_job_executors.create_ai_service") as mock_factory:
             mock_service = MagicMock()
             mock_service.generate_cards.return_value = MagicMock(
                 cards=[MagicMock(front="Q1", back="A1", suggested_tags=["tag1"])],
@@ -92,41 +98,35 @@ class TestFactoryIntegration:
             )
             mock_factory.return_value = mock_service
 
-            from api.handler import handler
-            response = handler(event, lambda_context)
+            result = execute_generate("test-user-123", payload)
 
         # Then
-        # 【結果検証】: ファクトリが呼ばれ、正常レスポンスが返ること
+        # 【結果検証】: ファクトリが呼ばれ、正常な result が返ること
         mock_factory.assert_called_once()  # 【検証項目】: create_ai_service() が 1 回呼ばれる 🔵
-        assert response["statusCode"] == 200  # 【検証項目】: 200 OK が返る 🔵
-        body = json.loads(response["body"])
-        assert "generated_cards" in body  # 【検証項目】: レスポンスに generated_cards が含まれる 🔵
+        assert "generated_cards" in result  # 【検証項目】: result に generated_cards が含まれる 🔵
 
-    def test_generate_cards_passes_correct_args_to_ai_service(self, api_gateway_event, lambda_context):
+    def test_execute_generate_passes_correct_args_to_ai_service(self):
         """TC-056-002: ファクトリ生成サービスへの引数伝播確認.
 
         【テスト目的】: ファクトリから返されたサービスに正しい引数が渡されることを確認
-        【テスト内容】: リクエストパラメータがサービスの generate_cards() に正しく伝播されることを検証
+        【テスト内容】: payload の各パラメータがサービスの generate_cards() に正しく伝播されることを検証
         【期待される動作】: input_text, card_count, difficulty, language が正しく伝播する
-        🔵 信頼性レベル: 青信号 - 要件定義書 2.1 節「generate_cards エンドポイント改修」から確定
+        🔵 信頼性レベル: 青信号 - ai_job_executors.execute_generate の実装から確定
         """
         # Given
-        # 【テストデータ準備】: 特定のパラメータ値でリクエストを作成（伝播を確認できる特定値）
-        event = api_gateway_event(
-            method="POST",
-            path="/cards/generate",
-            body={
-                "input_text": "量子力学の基礎について学びましょう。原子の構造と電子の振る舞い。",
-                "card_count": 5,
-                "difficulty": "hard",
-                "language": "en",
-            },
-            user_id="test-user-456",
-        )
+        # 【テストデータ準備】: 特定のパラメータ値で payload を作成（伝播を確認できる特定値）
+        from services.ai_job_executors import execute_generate
+
+        payload = {
+            "input_text": "量子力学の基礎について学びましょう。原子の構造と電子の振る舞い。",
+            "card_count": 5,
+            "difficulty": "hard",
+            "language": "en",
+        }
 
         # When
         # 【実際の処理実行】: create_ai_service をモックして引数伝播を検証
-        with patch("api.handlers.ai_handler.create_ai_service") as mock_factory:
+        with patch("services.ai_job_executors.create_ai_service") as mock_factory:
             mock_service = MagicMock()
             mock_service.generate_cards.return_value = MagicMock(
                 cards=[MagicMock(front="Q", back="A", suggested_tags=[])],
@@ -136,8 +136,7 @@ class TestFactoryIntegration:
             )
             mock_factory.return_value = mock_service
 
-            from api.handler import handler
-            handler(event, lambda_context)
+            execute_generate("test-user-456", payload)
 
         # Then
         # 【結果検証】: サービスの generate_cards() が正しい引数で呼ばれたこと
@@ -146,7 +145,7 @@ class TestFactoryIntegration:
             card_count=5,
             difficulty="hard",
             language="en",
-        )  # 【検証項目】: 各パラメータがリクエストボディの値と一致する 🔵
+        )  # 【検証項目】: 各パラメータが payload の値と一致する 🔵
 
 
 # ==============================================================================
@@ -331,31 +330,40 @@ class TestErrorMapping:
 
 
 class TestGenerateCardsCompatibility:
-    """カテゴリ C: ファクトリパターン移行後の generate_cards エンドポイント互換性テスト."""
+    """カテゴリ C: ファクトリパターン移行後の generate executor 互換性テスト.
 
-    def test_generate_cards_response_format_backward_compatible(self, api_gateway_event, lambda_context):
-        """TC-056-010: generate_cards レスポンス後方互換性.
+    ai-async-jobs: レスポンス形状は「result dict = 旧同期レスポンス」の互換で検証し、
+    AI エラーは executor から伝播した例外を classify_ai_job_error が旧ステータスへ
+    分類することで検証する。
+    """
 
-        【テスト目的】: ファクトリ移行後も generate_cards のレスポンス形式が変わらないことを確認
-        【テスト内容】: 成功時のレスポンスが generated_cards + generation_info の構造であることを検証
-        【期待される動作】: generated_cards 配列と generation_info オブジェクトを含む 200 レスポンス
-        🔵 信頼性レベル: 青信号 - 要件定義書 2.1 節「generate_cards エンドポイント改修」出力仕様、REQ-SM-402 から確定
+    GENERATE_PAYLOAD = {
+        "input_text": "テスト用テキストです。十分な長さを確保しています。",
+        "card_count": 3,
+        "difficulty": "medium",
+        "language": "ja",
+    }
+
+    def test_generate_result_format_backward_compatible(self):
+        """TC-056-010: generate result の後方互換性.
+
+        【テスト目的】: executor 移行後も result が旧 generate_cards レスポンスと同一形式であることを確認
+        【テスト内容】: 成功時の result が generated_cards + generation_info の構造であることを検証
+        【期待される動作】: generated_cards 配列と generation_info オブジェクトを含む result dict
+        🔵 信頼性レベル: 青信号 - 設計 api-endpoints.md「result スキーマ = 現行同期レスポンス」から確定
         """
         # Given
         # 【テストデータ準備】: 2 枚のカードを返すモックサービスを用意
-        event = api_gateway_event(
-            method="POST",
-            path="/cards/generate",
-            body={
-                "input_text": "The mitochondria is the powerhouse of the cell. ATP synthesis.",
-                "card_count": 2,
-                "difficulty": "easy",
-                "language": "en",
-            },
-            user_id="test-user-789",
-        )
+        from services.ai_job_executors import execute_generate
 
-        with patch("api.handlers.ai_handler.create_ai_service") as mock_factory:
+        payload = {
+            "input_text": "The mitochondria is the powerhouse of the cell. ATP synthesis.",
+            "card_count": 2,
+            "difficulty": "easy",
+            "language": "en",
+        }
+
+        with patch("services.ai_job_executors.create_ai_service") as mock_factory:
             mock_service = MagicMock()
             mock_service.generate_cards.return_value = MagicMock(
                 cards=[
@@ -369,125 +377,101 @@ class TestGenerateCardsCompatibility:
             mock_factory.return_value = mock_service
 
             # When
-            # 【実際の処理実行】: generate_cards エンドポイントを呼び出す
-            from api.handler import handler
-            response = handler(event, lambda_context)
+            # 【実際の処理実行】: generate executor を呼び出す
+            result = execute_generate("test-user-789", payload)
 
         # Then
-        # 【結果検証】: レスポンス構造の後方互換性
-        assert response["statusCode"] == 200  # 🔵
-        body = json.loads(response["body"])
-
+        # 【結果検証】: result 構造の後方互換性
         # 【検証項目】: generated_cards 配列の構造
-        assert "generated_cards" in body  # 🔵
-        assert len(body["generated_cards"]) == 2  # 🔵
-        card = body["generated_cards"][0]
+        assert "generated_cards" in result  # 🔵
+        assert len(result["generated_cards"]) == 2  # 🔵
+        card = result["generated_cards"][0]
         assert "front" in card  # 🔵
         assert "back" in card  # 🔵
         assert "suggested_tags" in card  # 🔵
 
         # 【検証項目】: generation_info オブジェクトの構造
-        assert "generation_info" in body  # 🔵
-        info = body["generation_info"]
+        assert "generation_info" in result  # 🔵
+        info = result["generation_info"]
         assert info["input_length"] == 64  # 🔵
         assert info["model_used"] == "global.anthropic.claude-haiku-4-5-20251001-v1:0"  # 🔵
         assert info["processing_time_ms"] == 1200  # 🔵
 
-    def test_generate_cards_handles_ai_timeout_error(self, api_gateway_event, lambda_context):
-        """TC-056-011: generate_cards での AITimeoutError ハンドリング.
+    def test_execute_generate_ai_timeout_classified_to_504(self):
+        """TC-056-011: generate executor での AITimeoutError ハンドリング.
 
-        【テスト目的】: generate_cards が AITimeoutError を HTTP 504 に変換することを確認
-        【テスト内容】: モックサービスが AITimeoutError を送出した場合の動作を検証
-        【期待される動作】: _map_ai_error_to_http() を通じて 504 レスポンスが返る
-        🔵 信頼性レベル: 青信号 - 要件定義書 4.2 節 EC-01 から確定
+        【テスト目的】: AITimeoutError が executor から伝播し failed(504) に分類されることを確認
+        【期待される動作】: classify_ai_job_error() で status=504 / code=ai_timeout
+        🔵 信頼性レベル: 青信号 - 要件定義書 4.2 節 EC-01 + 設計 api-endpoints.md エラーコード表から確定
         """
         # Given
-        event = api_gateway_event(
-            method="POST",
-            path="/cards/generate",
-            body={
-                "input_text": "テスト用テキストです。十分な長さを確保しています。",
-                "card_count": 3,
-                "difficulty": "medium",
-                "language": "ja",
-            },
-        )
+        from services.ai_job_errors import classify_ai_job_error
+        from services.ai_job_executors import execute_generate
+        from services.ai_service import AITimeoutError
 
-        with patch("api.handlers.ai_handler.create_ai_service") as mock_factory:
-            from services.ai_service import AITimeoutError
+        with patch("services.ai_job_executors.create_ai_service") as mock_factory:
             mock_service = MagicMock()
             mock_service.generate_cards.side_effect = AITimeoutError("timeout")
             mock_factory.return_value = mock_service
 
             # When
-            # 【実際の処理実行】: AITimeoutError が発生するシナリオでハンドラを呼び出す
-            from api.handler import handler
-            response = handler(event, lambda_context)
+            # 【実際の処理実行】: AITimeoutError が発生するシナリオで executor を呼び出す
+            with pytest.raises(AITimeoutError) as exc_info:
+                execute_generate("test-user", dict(self.GENERATE_PAYLOAD))
 
         # Then
-        assert response["statusCode"] == 504  # 【検証項目】: タイムアウトで 504 が返る 🔵
+        job_error = classify_ai_job_error(exc_info.value)
+        assert job_error.status == 504  # 【検証項目】: タイムアウトで旧 504 相当に分類される 🔵
+        assert job_error.code == "ai_timeout"  # 🔵
 
-    def test_generate_cards_handles_ai_rate_limit_error(self, api_gateway_event, lambda_context):
-        """TC-056-012: generate_cards での AIRateLimitError ハンドリング.
+    def test_execute_generate_ai_rate_limit_classified_to_429(self):
+        """TC-056-012: generate executor での AIRateLimitError ハンドリング.
 
-        【テスト目的】: generate_cards が AIRateLimitError を HTTP 429 に変換することを確認
-        🔵 信頼性レベル: 青信号 - 要件定義書 4.2 節 EC-02 から確定
+        【テスト目的】: AIRateLimitError が failed(429) に分類されることを確認
+        🔵 信頼性レベル: 青信号 - 要件定義書 4.2 節 EC-02 + 設計エラーコード表から確定
         """
         # Given
-        event = api_gateway_event(
-            method="POST",
-            path="/cards/generate",
-            body={
-                "input_text": "テスト用テキストです。十分な長さを確保しています。",
-                "card_count": 3,
-                "difficulty": "medium",
-                "language": "ja",
-            },
-        )
+        from services.ai_job_errors import classify_ai_job_error
+        from services.ai_job_executors import execute_generate
+        from services.ai_service import AIRateLimitError
 
-        with patch("api.handlers.ai_handler.create_ai_service") as mock_factory:
-            from services.ai_service import AIRateLimitError
+        with patch("services.ai_job_executors.create_ai_service") as mock_factory:
             mock_service = MagicMock()
             mock_service.generate_cards.side_effect = AIRateLimitError("rate limit")
             mock_factory.return_value = mock_service
 
             # When
-            from api.handler import handler
-            response = handler(event, lambda_context)
+            with pytest.raises(AIRateLimitError) as exc_info:
+                execute_generate("test-user", dict(self.GENERATE_PAYLOAD))
 
         # Then
-        assert response["statusCode"] == 429  # 【検証項目】: レート制限で 429 が返る 🔵
+        job_error = classify_ai_job_error(exc_info.value)
+        assert job_error.status == 429  # 【検証項目】: レート制限で旧 429 相当に分類される 🔵
+        assert job_error.code == "ai_rate_limit"  # 🔵
 
-    def test_generate_cards_handles_ai_provider_error(self, api_gateway_event, lambda_context):
-        """TC-056-013: generate_cards での AIProviderError ハンドリング.
+    def test_execute_generate_ai_provider_error_classified_to_503(self):
+        """TC-056-013: generate executor での AIProviderError ハンドリング.
 
-        【テスト目的】: generate_cards が AIProviderError を HTTP 503 に変換することを確認
-        【テスト内容】: create_ai_service() の初期化失敗シナリオを含む
-        🔵 信頼性レベル: 青信号 - 要件定義書 4.2 節 EC-03、4.3 節 EDGE-02 から確定
+        【テスト目的】: create_ai_service() の初期化失敗が failed(503) に分類されることを確認
+        🔵 信頼性レベル: 青信号 - 要件定義書 4.2 節 EC-03、4.3 節 EDGE-02 + 設計エラーコード表から確定
         """
         # Given
-        event = api_gateway_event(
-            method="POST",
-            path="/cards/generate",
-            body={
-                "input_text": "テスト用テキストです。十分な長さを確保しています。",
-                "card_count": 3,
-                "difficulty": "medium",
-                "language": "ja",
-            },
-        )
+        from services.ai_job_errors import classify_ai_job_error
+        from services.ai_job_executors import execute_generate
+        from services.ai_service import AIProviderError
 
-        with patch("api.handlers.ai_handler.create_ai_service") as mock_factory:
-            from services.ai_service import AIProviderError
+        with patch("services.ai_job_executors.create_ai_service") as mock_factory:
             # 【テストデータ準備】: ファクトリ自体が初期化失敗する AIProviderError を送出
             mock_factory.side_effect = AIProviderError("Failed to initialize AI service")
 
             # When
-            from api.handler import handler
-            response = handler(event, lambda_context)
+            with pytest.raises(AIProviderError) as exc_info:
+                execute_generate("test-user", dict(self.GENERATE_PAYLOAD))
 
         # Then
-        assert response["statusCode"] == 503  # 【検証項目】: プロバイダーエラーで 503 が返る 🔵
+        job_error = classify_ai_job_error(exc_info.value)
+        assert job_error.status == 503  # 【検証項目】: プロバイダーエラーで旧 503 相当に分類される 🔵
+        assert job_error.code == "ai_unavailable"  # 🔵
 
 
 # ==============================================================================
@@ -678,8 +662,9 @@ class TestTemplateYamlConfig:
 
         【テスト目的】: 新 Lambda 関数の API ルートが正しいことを確認
         【テスト内容】: grade-ai と advice の Path, Method, Type を検証
-        【期待される動作】: grade-ai は POST /reviews/{cardId}/grade-ai, advice は GET /advice
-        🔵 信頼性レベル: 青信号 - 要件定義書 2.2 節「ReviewsGradeAiFunction」「AdviceFunction」仕様表から確定
+        【期待される動作】: grade-ai は POST /reviews/{cardId}/grade-ai, advice は POST /advice
+        🔵 信頼性レベル: 青信号 - 要件定義書 2.2 節仕様表 + ai-async-jobs 設計
+        （advice はジョブ作成が非冪等のため GET → POST に変更。設計 SH-7）から確定
         """
         # Given
         template = self._load_template()
@@ -700,7 +685,7 @@ class TestTemplateYamlConfig:
         advice_event = advice_events[advice_event_key]
         assert advice_event["Type"] == "HttpApi"  # 🔵
         assert advice_event["Properties"]["Path"] == "/advice"  # 🔵
-        assert advice_event["Properties"]["Method"].upper() == "GET"  # 🔵
+        assert advice_event["Properties"]["Method"].upper() == "POST"  # 🔵
 
     def test_template_yaml_new_log_groups(self):
         """TC-056-022: 新 Lambda 関数の LogGroup が定義されていること.
