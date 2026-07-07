@@ -1,74 +1,83 @@
-"""TASK-0063: Phase 3 統合テスト.
+"""AI 非同期ジョブ基盤の統合テスト（ai-async-jobs 版）.
 
-全 3 AI エンドポイント (POST /cards/generate, POST /reviews/{cardId}/grade-ai, GET /advice) の
-横断的な統合テスト。
+全 7 AI エンドポイントを新アーキテクチャの E2E で検証する:
+
+    submit（202 + job_id）→ inline 実行（キュー URL 未設定）
+    → GET /ai-jobs/{job_id}（ポーリング API）→ completed
+    → result が旧同期レスポンスと同一形状
+
+- AiJobsTable は moto でモック（テーブル名は conftest の
+  AI_JOBS_TABLE=memoru-ai-jobs-test）
+- キュー URL 未設定のため submit_ai_job は inline モードで即時実行する
+  （フロントは 1 回目のポーリングで completed を受け取る想定と同一）
+- AI 呼び出しは services.ai_job_executors 名前空間でモックする
 
 テストカテゴリ:
-- TestFeatureFlagConsistency: フィーチャーフラグ x 全エンドポイント一貫性 (TC-INT-FLAG-001 ~ 003)
-- TestEndpointE2EFlow: 全エンドポイント E2E 統合フロー (TC-INT-E2E-001 ~ 003)
-- TestCrossEndpointErrorConsistency: 横断的エラーハンドリング一貫性 (TC-INT-ERR-001 ~ 006)
-- TestExistingTestProtection: 既存テスト保護 (TC-INT-PROTECT-001 ~ 003)
-
-注意事項:
-- 全テストはモックベース（実際の AI サービスは呼び出さない）
-- handler(event, context): POST /cards/generate は APIGatewayHttpResolver 経由
-- grade_ai_handler(event, context): POST /reviews/{cardId}/grade-ai は独立 Lambda
-- advice_handler(event, context): GET /advice は独立 Lambda
+- TestSubmitPollE2E: 全 7 エンドポイントの submit → poll → completed フロー
+- TestFailedJobE2E: ワーカー実行時エラーが failed ジョブ（旧ステータス互換の
+  error）として記録されるフロー
+- TestJobAccessControl: ポーリング API の所有者チェック（IDOR 404）
 """
 
 import json
-import os
 from unittest.mock import MagicMock, patch
 
+import boto3
 import pytest
+from moto import mock_aws
 
-
-from api.handler import handler, grade_ai_handler, advice_handler
+from services.ai_job_store import AiJobStore
 from services.ai_service import (
     AITimeoutError,
-    AIRateLimitError,
-    AIProviderError,
-    AIParseError,
-    AIInternalError,
+    GeneratedCard,
+    GenerationResult,
     GradingResult,
     LearningAdvice,
+    RefineResult,
     ReviewSummary,
 )
+from services.card_service import CardNotFoundError
+from models.tutor import SendMessageResponse, TutorMessage, TutorSessionResponse
+
+TABLE_NAME = "memoru-ai-jobs-test"
+
+
+# =============================================================================
+# フィクスチャ
+# =============================================================================
 
 
 @pytest.fixture(autouse=True)
-def _mock_advice_user_service():
-    """advice_handler の user_timezone 取得用に api.handler.user_service を自動モック。
+def _inline_mode(monkeypatch):
+    """キュー URL 未設定 = inline モードを保証する（submit が即時実行する）。"""
+    for name in ("AI_JOB_QUEUE_URL", "AI_JOB_HEAVY_QUEUE_URL", "AI_JOB_WORKER_MODE"):
+        monkeypatch.delenv(name, raising=False)
 
-    advice_handler はユーザー設定から timezone を取得して get_review_summary に
-    渡すため、実 UserService（DynamoDB アクセス）に到達しないようパッチする。
-    """
-    with patch("api.handler.user_service") as mock:
-        mock.get_or_create_user.return_value.settings = {"timezone": "Asia/Tokyo"}
-        yield mock
+
+@pytest.fixture
+def ai_jobs_store():
+    """moto の AiJobsTable を作成し、submit / ポーリングの両経路に配線する。"""
+    with mock_aws():
+        dynamodb = boto3.resource("dynamodb", region_name="ap-northeast-1")
+        dynamodb.create_table(
+            TableName=TABLE_NAME,
+            KeySchema=[{"AttributeName": "job_id", "KeyType": "HASH"}],
+            AttributeDefinitions=[{"AttributeName": "job_id", "AttributeType": "S"}],
+            BillingMode="PAY_PER_REQUEST",
+        )
+        store = AiJobStore(table_name=TABLE_NAME, dynamodb_resource=dynamodb)
+
+        # submit_ai_job（store 引数なし呼び出し）とポーリングハンドラーの
+        # モジュールレベル store の両方を moto 配線の store に差し替える。
+        with patch("services.ai_job_service.AiJobStore", return_value=store), patch(
+            "api.handlers.ai_jobs_handler.ai_job_store", store
+        ):
+            yield store
 
 
 # =============================================================================
-# 共通ヘルパー関数
+# 共通ヘルパー
 # =============================================================================
-
-
-def _make_generate_event(api_gateway_event):
-    """POST /cards/generate 用のイベントを生成する。
-
-    conftest の api_gateway_event fixture をラップし、デフォルト値を設定する。
-    """
-    return api_gateway_event(
-        method="POST",
-        path="/cards/generate",
-        body={
-            "input_text": "テスト用の学習テキストです。十分な長さが必要です。",
-            "card_count": 3,
-            "difficulty": "medium",
-            "language": "ja",
-        },
-        user_id="test-user-id",
-    )
 
 
 def _make_grade_ai_event(
@@ -76,10 +85,7 @@ def _make_grade_ai_event(
     body: dict | None = None,
     user_id: str = "test-user-id",
 ) -> dict:
-    """POST /reviews/{cardId}/grade-ai 用のイベントを生成する。
-
-    test_handler_grade_ai.py と同パターンの API Gateway HTTP API v2 形式。
-    """
+    """POST /reviews/{cardId}/grade-ai 用のイベント（独立 Lambda 形式）。"""
     if body is None:
         body = {"user_answer": "東京"}
     return {
@@ -109,13 +115,10 @@ def _make_grade_ai_event(
 
 
 def _make_advice_event(user_id: str = "test-user-id") -> dict:
-    """GET /advice 用のイベントを生成する。
-
-    test_handler_advice.py と同パターンの API Gateway HTTP API v2 形式。
-    """
+    """POST /advice 用のイベント（独立 Lambda 形式。GET → POST 化済み）。"""
     return {
         "version": "2.0",
-        "routeKey": "GET /advice",
+        "routeKey": "POST /advice",
         "rawPath": "/advice",
         "rawQueryString": "",
         "pathParameters": None,
@@ -128,9 +131,9 @@ def _make_advice_event(user_id: str = "test-user-id") -> dict:
                     "scopes": ["openid", "profile"],
                 }
             },
-            "http": {"method": "GET"},
+            "http": {"method": "POST"},
             "requestId": "test-request-id",
-            "routeKey": "GET /advice",
+            "routeKey": "POST /advice",
             "stage": "$default",
         },
         "headers": {"content-type": "application/json"},
@@ -138,15 +141,11 @@ def _make_advice_event(user_id: str = "test-user-id") -> dict:
     }
 
 
-def _setup_ai_mocks():
-    """全 3 AI メソッドの戻り値を一括設定する。
-
-    Returns:
-        mock_service: 全 AI メソッドがモックされたサービスオブジェクト
-    """
+def _setup_ai_mocks() -> MagicMock:
+    """全 AI メソッドの戻り値を一括設定したモックサービスを返す。"""
     mock_service = MagicMock()
-    mock_service.generate_cards.return_value = MagicMock(
-        cards=[MagicMock(front="Q1", back="A1", suggested_tags=["tag1"])],
+    mock_service.generate_cards.return_value = GenerationResult(
+        cards=[GeneratedCard(front="Q1", back="A1", suggested_tags=["tag1"])],
         input_length=30,
         model_used="test-model",
         processing_time_ms=500,
@@ -164,192 +163,65 @@ def _setup_ai_mocks():
         model_used="test-model",
         processing_time_ms=800,
     )
+    mock_service.refine_card.return_value = RefineResult(
+        refined_front="クロージャとは何か？",
+        refined_back="外部スコープの変数を参照し続ける関数。",
+        model_used="test-model",
+        processing_time_ms=1200,
+    )
     return mock_service
 
 
-# =============================================================================
-# カテゴリ 1: フィーチャーフラグ x 全エンドポイント一貫性テスト
-# =============================================================================
+def _accepted_job(response) -> dict:
+    """202 レスポンスを検証してボディ（job 情報）を返す。"""
+    assert response["statusCode"] == 202, (
+        f"expected 202, got {response['statusCode']}: {response.get('body')}"
+    )
+    body = json.loads(response["body"])
+    assert set(body.keys()) == {"job_id", "job_type", "status"}
+    assert body["status"] == "queued"  # 202 は作成時点の queued レコードを返す
+    assert body["job_id"].startswith("aijob_")
+    return body
 
 
-class TestFeatureFlagConsistency:
-    """フィーチャーフラグ x 全エンドポイント一貫性テスト (TC-INT-FLAG-001 ~ 003).
+def _poll_job(api_gateway_event, lambda_context, job_id: str, user_id: str = "test-user-id"):
+    """GET /ai-jobs/{job_id} をメインハンドラー（Router）経由で実行する。"""
+    from api.handler import handler
 
-    USE_STRANDS 環境変数の各状態 (true/false/unset) で全 3 エンドポイントが
-    一貫して動作することを横断的に検証する。
-    """
+    event = api_gateway_event(
+        method="GET", path=f"/ai-jobs/{job_id}", user_id=user_id
+    )
+    return handler(event, lambda_context)
 
-    def test_all_endpoints_work_with_use_strands_true(self, api_gateway_event, lambda_context):
-        """TC-INT-FLAG-001: USE_STRANDS=true で全 3 エンドポイントが一貫して動作する.
 
-        USE_STRANDS=true 環境変数設定下で全 3 エンドポイントが HTTP 200 を返し、
-        create_ai_service() が合計 3 回呼ばれることを検証する。
-        """
-        generate_event = _make_generate_event(api_gateway_event)
-        grade_event = _make_grade_ai_event()
-        advice_event = _make_advice_event()
-
-        with patch.dict(os.environ, {"USE_STRANDS": "true"}), \
-             patch("api.handlers.ai_handler.create_ai_service") as mock_generate_factory, \
-             patch("api.handler.create_ai_service") as mock_standalone_factory, \
-             patch("api.handler.card_service") as mock_cs, \
-             patch("api.handler.review_service") as mock_rs:
-
-            mock_service = _setup_ai_mocks()
-            mock_generate_factory.return_value = mock_service
-            mock_standalone_factory.return_value = mock_service
-
-            # card_service モック設定 (grade_ai_handler 用)
-            mock_card = MagicMock()
-            mock_card.front = "日本の首都は？"
-            mock_card.back = "東京"
-            mock_cs.get_card.return_value = mock_card
-
-            # review_service モック設定 (advice_handler 用)
-            mock_rs.get_review_summary.return_value = ReviewSummary(
-                total_reviews=100,
-                average_grade=3.5,
-                total_cards=50,
-                cards_due_today=10,
-                streak_days=5,
-            )
-
-            generate_response = handler(generate_event, lambda_context)
-            grade_response = grade_ai_handler(grade_event, lambda_context)
-            advice_response = advice_handler(advice_event, lambda_context)
-
-        # create_ai_service() が合計 3 回呼ばれること (generate: 1, grade_ai: 1, advice: 1)
-        assert mock_generate_factory.call_count + mock_standalone_factory.call_count == 3, (
-            f"create_ai_service() は 3 回呼ばれるべきだが "
-            f"{mock_generate_factory.call_count + mock_standalone_factory.call_count} 回だった"
-        )
-
-        # 全 3 エンドポイントが HTTP 200 を返すこと
-        assert generate_response["statusCode"] == 200, (
-            f"generate: expected 200, got {generate_response['statusCode']}"
-        )
-        assert grade_response["statusCode"] == 200, (
-            f"grade_ai: expected 200, got {grade_response['statusCode']}"
-        )
-        assert advice_response["statusCode"] == 200, (
-            f"advice: expected 200, got {advice_response['statusCode']}"
-        )
-
-    def test_all_endpoints_work_with_use_strands_false(self, api_gateway_event, lambda_context):
-        """TC-INT-FLAG-002: USE_STRANDS=false で全 3 エンドポイントが一貫して動作する.
-
-        USE_STRANDS=false 環境変数設定下で全 3 エンドポイントが HTTP 200 を返し、
-        create_ai_service() が合計 3 回呼ばれることを検証する。
-        """
-        generate_event = _make_generate_event(api_gateway_event)
-        grade_event = _make_grade_ai_event()
-        advice_event = _make_advice_event()
-
-        with patch.dict(os.environ, {"USE_STRANDS": "false"}), \
-             patch("api.handlers.ai_handler.create_ai_service") as mock_generate_factory, \
-             patch("api.handler.create_ai_service") as mock_standalone_factory, \
-             patch("api.handler.card_service") as mock_cs, \
-             patch("api.handler.review_service") as mock_rs:
-
-            mock_service = _setup_ai_mocks()
-            mock_generate_factory.return_value = mock_service
-            mock_standalone_factory.return_value = mock_service
-
-            mock_card = MagicMock()
-            mock_card.front = "日本の首都は？"
-            mock_card.back = "東京"
-            mock_cs.get_card.return_value = mock_card
-
-            mock_rs.get_review_summary.return_value = ReviewSummary(
-                total_reviews=100,
-                average_grade=3.5,
-                total_cards=50,
-                cards_due_today=10,
-                streak_days=5,
-            )
-
-            generate_response = handler(generate_event, lambda_context)
-            grade_response = grade_ai_handler(grade_event, lambda_context)
-            advice_response = advice_handler(advice_event, lambda_context)
-
-        # create_ai_service() が合計 3 回呼ばれること (generate: 1, grade_ai: 1, advice: 1)
-        assert mock_generate_factory.call_count + mock_standalone_factory.call_count == 3, (
-            f"create_ai_service() は 3 回呼ばれるべきだが "
-            f"{mock_generate_factory.call_count + mock_standalone_factory.call_count} 回だった"
-        )
-
-        # 全 3 エンドポイントが HTTP 200 を返すこと
-        assert generate_response["statusCode"] == 200
-        assert grade_response["statusCode"] == 200
-        assert advice_response["statusCode"] == 200
-
-    def test_all_endpoints_work_with_use_strands_unset(self, api_gateway_event, lambda_context):
-        """TC-INT-FLAG-003: USE_STRANDS 未設定で全 3 エンドポイントがデフォルト動作する.
-
-        USE_STRANDS 環境変数を除去した状態で全 3 エンドポイントが HTTP 200 を返し、
-        create_ai_service() が合計 3 回呼ばれることを検証する。
-        """
-        generate_event = _make_generate_event(api_gateway_event)
-        grade_event = _make_grade_ai_event()
-        advice_event = _make_advice_event()
-
-        env_without = {k: v for k, v in os.environ.items() if k != "USE_STRANDS"}
-
-        with patch.dict(os.environ, env_without, clear=True), \
-             patch("api.handlers.ai_handler.create_ai_service") as mock_generate_factory, \
-             patch("api.handler.create_ai_service") as mock_standalone_factory, \
-             patch("api.handler.card_service") as mock_cs, \
-             patch("api.handler.review_service") as mock_rs:
-
-            mock_service = _setup_ai_mocks()
-            mock_generate_factory.return_value = mock_service
-            mock_standalone_factory.return_value = mock_service
-
-            mock_card = MagicMock()
-            mock_card.front = "日本の首都は？"
-            mock_card.back = "東京"
-            mock_cs.get_card.return_value = mock_card
-
-            mock_rs.get_review_summary.return_value = ReviewSummary(
-                total_reviews=100,
-                average_grade=3.5,
-                total_cards=50,
-                cards_due_today=10,
-                streak_days=5,
-            )
-
-            generate_response = handler(generate_event, lambda_context)
-            grade_response = grade_ai_handler(grade_event, lambda_context)
-            advice_response = advice_handler(advice_event, lambda_context)
-
-        # create_ai_service() が合計 3 回呼ばれること (generate: 1, grade_ai: 1, advice: 1)
-        assert mock_generate_factory.call_count + mock_standalone_factory.call_count == 3, (
-            f"create_ai_service() は 3 回呼ばれるべきだが "
-            f"{mock_generate_factory.call_count + mock_standalone_factory.call_count} 回だった"
-        )
-
-        # 全 3 エンドポイントが HTTP 200 を返すこと
-        assert generate_response["statusCode"] == 200
-        assert grade_response["statusCode"] == 200
-        assert advice_response["statusCode"] == 200
+def _poll_completed(api_gateway_event, lambda_context, job_body: dict) -> dict:
+    """ポーリングして completed ジョブのボディを返す（inline なので 1 回で完了）。"""
+    response = _poll_job(api_gateway_event, lambda_context, job_body["job_id"])
+    assert response["statusCode"] == 200
+    polled = json.loads(response["body"])
+    assert polled["job_id"] == job_body["job_id"]
+    assert polled["job_type"] == job_body["job_type"]
+    assert polled["status"] == "completed", f"job not completed: {polled}"
+    assert "created_at" in polled and "updated_at" in polled
+    # payload（リクエスト原文）や user_id は漏れない
+    assert "payload" not in polled
+    assert "user_id" not in polled
+    return polled
 
 
 # =============================================================================
-# カテゴリ 2: 全エンドポイント E2E 統合フローテスト
+# カテゴリ 1: submit → poll → completed の E2E（全 7 エンドポイント）
 # =============================================================================
 
 
-class TestEndpointE2EFlow:
-    """全エンドポイント E2E 統合フローテスト (TC-INT-E2E-001 ~ 003).
+class TestSubmitPollE2E:
+    """submit（202）→ inline 実行 → ポーリングで旧同期レスポンスと同一形状の
+    result を取得できることを全エンドポイントで検証する。"""
 
-    各エンドポイントの auth -> service call -> AI call -> response の完全フローを統合的に検証する。
-    """
+    def test_generate_e2e(self, ai_jobs_store, api_gateway_event, lambda_context):
+        """POST /cards/generate → 202 → completed + GenerateCardsResponse 形状。"""
+        from api.handler import handler
 
-    def test_generate_cards_e2e_flow(self, api_gateway_event, lambda_context):
-        """TC-INT-E2E-001: POST /cards/generate の統合 E2E フロー.
-
-        認証 -> ファクトリ -> AI 呼び出し -> レスポンス変換の完全フローを検証する。
-        """
         event = api_gateway_event(
             method="POST",
             path="/cards/generate",
@@ -359,479 +231,413 @@ class TestEndpointE2EFlow:
                 "difficulty": "medium",
                 "language": "ja",
             },
-            user_id="test-user-id",
         )
 
-        with patch("api.handlers.ai_handler.create_ai_service") as mock_factory:
-            mock_service = MagicMock()
-            mock_service.generate_cards.return_value = MagicMock(
-                cards=[MagicMock(front="Q1", back="A1", suggested_tags=["tag1"])],
-                input_length=30,
-                model_used="test-model",
-                processing_time_ms=500,
+        with patch("services.ai_job_executors.create_ai_service") as mock_factory:
+            mock_factory.return_value = _setup_ai_mocks()
+            response = handler(event, lambda_context)
+            job_body = _accepted_job(response)
+            assert job_body["job_type"] == "generate"
+
+            polled = _poll_completed(api_gateway_event, lambda_context, job_body)
+
+        # 旧同期レスポンス（GenerateCardsResponse）と同一形状
+        assert polled["result"] == {
+            "generated_cards": [
+                {"front": "Q1", "back": "A1", "suggested_tags": ["tag1"]}
+            ],
+            "generation_info": {
+                "input_length": 30,
+                "model_used": "test-model",
+                "processing_time_ms": 500,
+            },
+        }
+
+    def test_generate_from_url_e2e(
+        self, ai_jobs_store, api_gateway_event, lambda_context
+    ):
+        """POST /cards/generate-from-url → 202 → completed + GenerateFromUrlResponse 形状。"""
+        from api.handler import handler
+
+        event = api_gateway_event(
+            method="POST",
+            path="/cards/generate-from-url",
+            body={"url": "https://example.com/page"},
+        )
+
+        page = MagicMock()
+        page.url = "https://example.com/page"
+        page.title = "Example Page"
+        page.text_content = "x" * 200
+        page.fetch_method = "http"
+        page.fetched_at = "2026-07-07T00:00:00+00:00"
+
+        with patch("services.ai_job_executors.CardService") as mock_card_cls, patch(
+            "services.ai_job_executors.fetch_and_generate_cards"
+        ) as mock_fetch, patch("services.ai_job_executors.UrlContentService"), patch(
+            "services.ai_job_executors.BrowserService"
+        ):
+            mock_card_cls.return_value.find_cards_by_reference_url.return_value = []
+            mock_fetch.return_value = (
+                page,
+                ["x" * 200],
+                GenerationResult(
+                    cards=[GeneratedCard(front="f", back="b", suggested_tags=[])],
+                    input_length=200,
+                    model_used="test-model",
+                    processing_time_ms=10,
+                ),
             )
-            mock_factory.return_value = mock_service
 
             response = handler(event, lambda_context)
+            job_body = _accepted_job(response)
+            assert job_body["job_type"] == "generate_from_url"
 
-        assert response["statusCode"] == 200
-        body = json.loads(response["body"])
+            polled = _poll_completed(api_gateway_event, lambda_context, job_body)
 
-        # レスポンスに generated_cards 配列が含まれること
-        assert "generated_cards" in body, "generated_cards がレスポンスに含まれない"
-        # レスポンスに generation_info オブジェクトが含まれること
-        assert "generation_info" in body, "generation_info がレスポンスに含まれない"
-        assert "input_length" in body["generation_info"]
-        assert "model_used" in body["generation_info"]
-        assert "processing_time_ms" in body["generation_info"]
+        # 旧同期レスポンス（GenerateFromUrlResponse）と同一形状（warning なし）
+        assert polled["result"] == {
+            "generated_cards": [{"front": "f", "back": "b", "suggested_tags": []}],
+            "generation_info": {
+                "model_used": "test-model",
+                "processing_time_ms": 10,
+                "fetch_method": "http",
+                "chunk_count": 1,
+                "content_length": 200,
+            },
+            "page_info": {
+                "url": "https://example.com/page",
+                "title": "Example Page",
+                "fetched_at": "2026-07-07T00:00:00+00:00",
+            },
+        }
 
-        # create_ai_service が 1 回呼ばれること
-        mock_factory.assert_called_once()
-        # generate_cards が正しい引数で呼ばれること
-        mock_service.generate_cards.assert_called_once_with(
-            input_text="テスト用の学習テキストです。十分な長さが必要です。",
-            card_count=3,
-            difficulty="medium",
-            language="ja",
+    def test_refine_e2e(self, ai_jobs_store, api_gateway_event, lambda_context):
+        """POST /cards/refine → 202 → completed + RefineCardResponse 形状。"""
+        from api.handler import handler
+
+        event = api_gateway_event(
+            method="POST",
+            path="/cards/refine",
+            body={"front": "クロージャとは？", "back": "変数を覚えてる関数"},
         )
 
-    def test_grade_ai_e2e_flow(self, lambda_context):
-        """TC-INT-E2E-002: POST /reviews/{cardId}/grade-ai の統合 E2E フロー.
+        with patch("services.ai_job_executors.create_ai_service") as mock_factory:
+            mock_factory.return_value = _setup_ai_mocks()
+            response = handler(event, lambda_context)
+            job_body = _accepted_job(response)
+            assert job_body["job_type"] == "refine"
 
-        認証 -> カード取得 -> AI 採点 -> レスポンス変換の完全フローを検証する。
-        """
-        event = _make_grade_ai_event(
-            user_id="test-user-id",
-            card_id="card-123",
-            body={"user_answer": "東京"},
-        )
+            polled = _poll_completed(api_gateway_event, lambda_context, job_body)
 
-        with patch("api.handler.create_ai_service") as mock_factory, \
-             patch("api.handler.card_service") as mock_cs:
+        assert polled["result"] == {
+            "refined_front": "クロージャとは何か？",
+            "refined_back": "外部スコープの変数を参照し続ける関数。",
+            "model_used": "test-model",
+            "processing_time_ms": 1200,
+        }
 
-            mock_card = MagicMock()
-            mock_card.front = "日本の首都は？"
-            mock_card.back = "東京"
-            mock_cs.get_card.return_value = mock_card
+    def test_grade_ai_e2e(self, ai_jobs_store, api_gateway_event, lambda_context):
+        """POST /reviews/{cardId}/grade-ai → 202 → completed + GradeAnswerResponse 形状。"""
+        from api.handler import grade_ai_handler
 
-            mock_service = MagicMock()
-            mock_service.grade_answer.return_value = GradingResult(
-                grade=4,
-                reasoning="Correct answer",
-                model_used="test-model",
-                processing_time_ms=500,
-            )
-            mock_factory.return_value = mock_service
-
-            response = grade_ai_handler(event, lambda_context)
-
-        assert response["statusCode"] == 200
-        body = json.loads(response["body"])
-
-        # レスポンスに必要なフィールドが含まれること
-        assert "grade" in body
-        assert "reasoning" in body
-        assert "card_front" in body
-        assert "card_back" in body
-        assert "grading_info" in body
-
-        assert body["grade"] == 4
-        assert body["grading_info"]["model_used"] == "test-model"
-
-        # create_ai_service が 1 回呼ばれること
-        mock_factory.assert_called_once()
-        # card_service.get_card が正しい引数で呼ばれること
-        mock_cs.get_card.assert_called_once_with("test-user-id", "card-123")
-        # grade_answer が正しい引数で呼ばれること
-        mock_service.grade_answer.assert_called_once_with(
-            card_front="日本の首都は？",
-            card_back="東京",
-            user_answer="東京",
-            language="ja",
-        )
-
-    def test_advice_e2e_flow(self, lambda_context):
-        """TC-INT-E2E-003: GET /advice の統合 E2E フロー.
-
-        認証 -> ReviewSummary 取得 -> AI アドバイス -> レスポンス変換の完全フローを検証する。
-        """
-        event = _make_advice_event(user_id="test-user-id")
-
-        with patch("api.handler.create_ai_service") as mock_factory, \
-             patch("api.handler.review_service") as mock_rs:
-
-            mock_rs.get_review_summary.return_value = ReviewSummary(
-                total_reviews=100,
-                average_grade=3.5,
-                total_cards=50,
-                cards_due_today=10,
-                streak_days=5,
-            )
-
-            mock_service = MagicMock()
-            mock_service.get_learning_advice.return_value = LearningAdvice(
-                advice_text="学習頻度を上げましょう。",
-                weak_areas=["数学"],
-                recommendations=["毎日復習する"],
-                model_used="test-model",
-                processing_time_ms=800,
-            )
-            mock_factory.return_value = mock_service
-
-            response = advice_handler(event, lambda_context)
-
-        assert response["statusCode"] == 200
-        body = json.loads(response["body"])
-
-        # レスポンスに必要なフィールドが含まれること
-        assert "advice_text" in body
-        assert "weak_areas" in body
-        assert "recommendations" in body
-        assert "study_stats" in body
-        assert "advice_info" in body
-
-        assert body["advice_info"]["model_used"] == "test-model"
-
-        # create_ai_service が 1 回呼ばれること
-        mock_factory.assert_called_once()
-        # review_service.get_review_summary が正しい引数で呼ばれること
-        mock_rs.get_review_summary.assert_called_once_with(
-            "test-user-id", user_timezone="Asia/Tokyo"
-        )
-        # get_learning_advice が review_summary (dict) と language で呼ばれること
-        mock_service.get_learning_advice.assert_called_once()
-        call_kwargs = mock_service.get_learning_advice.call_args.kwargs
-        assert isinstance(call_kwargs["review_summary"], dict), (
-            "review_summary は dict であるべき"
-        )
-        assert call_kwargs["language"] == "ja"
-
-
-# =============================================================================
-# カテゴリ 3: 横断的エラーハンドリング一貫性テスト
-# =============================================================================
-
-
-class TestCrossEndpointErrorConsistency:
-    """横断的エラーハンドリング一貫性テスト (TC-INT-ERR-001 ~ 006).
-
-    各 AI エラータイプが全 3 エンドポイントで同一の HTTP ステータスコードを
-    返すことを横断的に検証する。
-    """
-
-    def _setup_mocks_for_error_tests(self, mock_cs, mock_rs):
-        """エラーテスト用の card_service / review_service モックをセットアップする。"""
         mock_card = MagicMock()
         mock_card.front = "日本の首都は？"
         mock_card.back = "東京"
-        mock_cs.get_card.return_value = mock_card
 
-        mock_rs.get_review_summary.return_value = ReviewSummary(
-            total_reviews=100,
-            average_grade=3.5,
-            total_cards=50,
-            cards_due_today=10,
-            streak_days=5,
+        with patch("api.handler.card_service") as mock_handler_cs, patch(
+            "services.ai_job_executors.CardService"
+        ) as mock_worker_cs, patch(
+            "services.ai_job_executors.create_ai_service"
+        ) as mock_factory:
+            # submit 時の fail-fast とワーカー時の再取得の両方を成功させる
+            mock_handler_cs.get_card.return_value = mock_card
+            mock_worker_cs.return_value.get_card.return_value = mock_card
+            mock_factory.return_value = _setup_ai_mocks()
+
+            response = grade_ai_handler(_make_grade_ai_event(), lambda_context)
+            job_body = _accepted_job(response)
+            assert job_body["job_type"] == "grade_ai"
+
+            polled = _poll_completed(api_gateway_event, lambda_context, job_body)
+
+        assert polled["result"] == {
+            "grade": 4,
+            "reasoning": "Correct answer",
+            "card_front": "日本の首都は？",
+            "card_back": "東京",
+            "grading_info": {
+                "model_used": "test-model",
+                "processing_time_ms": 500,
+            },
+        }
+
+    def test_advice_e2e(self, ai_jobs_store, api_gateway_event, lambda_context):
+        """POST /advice → 202 → completed + LearningAdviceResponse 形状。
+
+        study_stats.average_grade の float は store で Decimal 変換 →
+        読み出しで float に戻る（設計レビュー C-1 の実挙動確認）。
+        """
+        from api.handler import advice_handler
+
+        with patch("services.ai_job_executors.UserService") as mock_user_cls, patch(
+            "services.ai_job_executors.ReviewService"
+        ) as mock_review_cls, patch(
+            "services.ai_job_executors.create_ai_service"
+        ) as mock_factory:
+            mock_user_cls.return_value.get_or_create_user.return_value.settings = {
+                "timezone": "Asia/Tokyo"
+            }
+            mock_review_cls.return_value.get_review_summary.return_value = (
+                ReviewSummary(
+                    total_reviews=100,
+                    average_grade=3.5,
+                    total_cards=50,
+                    cards_due_today=10,
+                    streak_days=5,
+                )
+            )
+            mock_factory.return_value = _setup_ai_mocks()
+
+            response = advice_handler(_make_advice_event(), lambda_context)
+            job_body = _accepted_job(response)
+            assert job_body["job_type"] == "advice"
+
+            polled = _poll_completed(api_gateway_event, lambda_context, job_body)
+
+            # 集計は submit 時ではなくワーカー実行時に行われる
+            mock_review_cls.return_value.get_review_summary.assert_called_once_with(
+                "test-user-id", user_timezone="Asia/Tokyo"
+            )
+
+        assert polled["result"] == {
+            "advice_text": "学習頻度を上げましょう。",
+            "weak_areas": ["数学"],
+            "recommendations": ["毎日復習する"],
+            "study_stats": {
+                "total_reviews": 100,
+                "average_grade": 3.5,  # Decimal 変換往復後も float で返る
+                "total_cards": 50,
+                "cards_due_today": 10,
+                "streak_days": 5,
+            },
+            "advice_info": {
+                "model_used": "test-model",
+                "processing_time_ms": 800,
+            },
+        }
+
+    def test_tutor_start_e2e(
+        self, ai_jobs_store, api_gateway_event, lambda_context, monkeypatch
+    ):
+        """POST /tutor/sessions → 202 → completed + TutorSessionResponse 形状。"""
+        from api.handler import handler
+
+        session = TutorSessionResponse(
+            session_id="tutor_e2e-session",
+            deck_id="deck_001",
+            mode="free_talk",
+            status="active",
+            messages=[
+                TutorMessage(
+                    role="assistant",
+                    content="こんにちは！",
+                    related_cards=[],
+                    timestamp="2026-07-07T10:00:00Z",
+                )
+            ],
+            message_count=0,
+            created_at="2026-07-07T10:00:00Z",
+            updated_at="2026-07-07T10:00:00Z",
+            ended_at=None,
+        )
+        mock_tutor = MagicMock()
+        mock_tutor.start_session.return_value = session
+        monkeypatch.setattr("services.ai_job_executors._tutor_service", mock_tutor)
+
+        event = api_gateway_event(
+            method="POST",
+            path="/tutor/sessions",
+            body={"deck_id": "deck_001", "mode": "free_talk"},
         )
 
-    def test_ai_timeout_error_returns_504_all_endpoints(self, api_gateway_event, lambda_context):
-        """TC-INT-ERR-001: AITimeoutError -> HTTP 504 が全 3 エンドポイントで一貫する.
+        with patch("api.handlers.tutor_handler.tutor_service") as mock_validate_svc:
+            response = handler(event, lambda_context)
+            job_body = _accepted_job(response)
+            assert job_body["job_type"] == "tutor_start"
 
-        AITimeoutError が全 3 エンドポイントで一貫して HTTP 504 にマッピングされることを
-        横断的に検証する。
-        """
-        generate_event = _make_generate_event(api_gateway_event)
-        grade_event = _make_grade_ai_event()
-        advice_event = _make_advice_event()
+            polled = _poll_completed(api_gateway_event, lambda_context, job_body)
 
-        with patch("api.handlers.ai_handler.create_ai_service") as mock_generate_factory, \
-             patch("api.handler.create_ai_service") as mock_standalone_factory, \
-             patch("api.handler.card_service") as mock_cs, \
-             patch("api.handler.review_service") as mock_rs:
+        # 事前検証（fail-fast）は submit 時に同期実行される
+        mock_validate_svc.validate_start_session.assert_called_once_with(
+            user_id="test-user-id", deck_id="deck_001", mode="free_talk"
+        )
+        # AI 実行はワーカー側（executor）で行われる
+        mock_tutor.start_session.assert_called_once_with(
+            user_id="test-user-id", deck_id="deck_001", mode="free_talk"
+        )
+        assert polled["result"] == session.model_dump(mode="json")
 
-            self._setup_mocks_for_error_tests(mock_cs, mock_rs)
+    def test_tutor_message_e2e(
+        self, ai_jobs_store, api_gateway_event, lambda_context, monkeypatch
+    ):
+        """POST /tutor/sessions/{id}/messages → 202 → completed + SendMessageResponse 形状。"""
+        from api.handler import handler
 
+        send_response = SendMessageResponse(
+            message=TutorMessage(
+                role="assistant",
+                content="AI の応答です。",
+                related_cards=[],
+                timestamp="2026-07-07T10:00:25Z",
+            ),
+            session_id="tutor_e2e-session",
+            message_count=1,
+            is_limit_reached=False,
+        )
+        mock_tutor = MagicMock()
+        mock_tutor.send_message.return_value = send_response
+        monkeypatch.setattr("services.ai_job_executors._tutor_service", mock_tutor)
+
+        event = api_gateway_event(
+            method="POST",
+            path="/tutor/sessions/tutor_e2e-session/messages",
+            body={"content": "appleについて教えて"},
+            path_parameters={"sessionId": "tutor_e2e-session"},
+        )
+
+        with patch("api.handlers.tutor_handler.tutor_service") as mock_validate_svc:
+            response = handler(event, lambda_context)
+            job_body = _accepted_job(response)
+            assert job_body["job_type"] == "tutor_message"
+
+            polled = _poll_completed(api_gateway_event, lambda_context, job_body)
+
+        mock_validate_svc.validate_send_message.assert_called_once_with(
+            user_id="test-user-id", session_id="tutor_e2e-session"
+        )
+        mock_tutor.send_message.assert_called_once_with(
+            user_id="test-user-id",
+            session_id="tutor_e2e-session",
+            content="appleについて教えて",
+        )
+        assert polled["result"] == send_response.model_dump(mode="json")
+
+
+# =============================================================================
+# カテゴリ 2: ワーカー実行時エラー → failed ジョブ E2E
+# =============================================================================
+
+
+class TestFailedJobE2E:
+    """AI エラーが failed ジョブ（旧同期ステータス互換の error）として記録され、
+    ポーリングで取得できることを検証する。"""
+
+    def test_ai_timeout_records_failed_job_with_old_status(
+        self, ai_jobs_store, api_gateway_event, lambda_context
+    ):
+        """AITimeoutError → failed + error {status: 504, code: ai_timeout, 旧文言}。"""
+        from api.handler import handler
+
+        event = api_gateway_event(
+            method="POST",
+            path="/cards/generate",
+            body={"input_text": "テスト用の学習テキストです。十分な長さが必要です。"},
+        )
+
+        with patch("services.ai_job_executors.create_ai_service") as mock_factory:
             mock_service = MagicMock()
             mock_service.generate_cards.side_effect = AITimeoutError("timeout")
-            mock_service.grade_answer.side_effect = AITimeoutError("timeout")
-            mock_service.get_learning_advice.side_effect = AITimeoutError("timeout")
-            mock_generate_factory.return_value = mock_service
-            mock_standalone_factory.return_value = mock_service
+            mock_factory.return_value = mock_service
 
-            generate_response = handler(generate_event, lambda_context)
-            grade_response = grade_ai_handler(grade_event, lambda_context)
-            advice_response = advice_handler(advice_event, lambda_context)
+            response = handler(event, lambda_context)
+            job_body = _accepted_job(response)  # submit 自体は 202 で成功する
 
-        assert generate_response["statusCode"] == 504, (
-            f"generate: expected 504, got {generate_response['statusCode']}"
-        )
-        assert grade_response["statusCode"] == 504, (
-            f"grade_ai: expected 504, got {grade_response['statusCode']}"
-        )
-        assert advice_response["statusCode"] == 504, (
-            f"advice: expected 504, got {advice_response['statusCode']}"
-        )
+            poll_response = _poll_job(
+                api_gateway_event, lambda_context, job_body["job_id"]
+            )
 
-        assert json.loads(generate_response["body"])["error"] == "AI service timeout"
-        assert json.loads(grade_response["body"])["error"] == "AI service timeout"
-        assert json.loads(advice_response["body"])["error"] == "AI service timeout"
+        assert poll_response["statusCode"] == 200
+        polled = json.loads(poll_response["body"])
+        assert polled["status"] == "failed"
+        assert polled["error"] == {
+            "status": 504,
+            "code": "ai_timeout",
+            "message": "AI service timeout",
+        }
+        assert "result" not in polled
 
-    def test_ai_rate_limit_error_returns_429_all_endpoints(self, api_gateway_event, lambda_context):
-        """TC-INT-ERR-002: AIRateLimitError -> HTTP 429 が全 3 エンドポイントで一貫する.
+    def test_card_deleted_after_submit_records_failed_404(
+        self, ai_jobs_store, api_gateway_event, lambda_context
+    ):
+        """submit 後にカードが削除された場合、ワーカー時の再検証で failed(404) になる。"""
+        from api.handler import grade_ai_handler
 
-        AIRateLimitError が全 3 エンドポイントで一貫して HTTP 429 にマッピングされることを
-        横断的に検証する。
-        """
-        generate_event = _make_generate_event(api_gateway_event)
-        grade_event = _make_grade_ai_event()
-        advice_event = _make_advice_event()
+        mock_card = MagicMock()
+        mock_card.front = "Q"
+        mock_card.back = "A"
 
-        with patch("api.handlers.ai_handler.create_ai_service") as mock_generate_factory, \
-             patch("api.handler.create_ai_service") as mock_standalone_factory, \
-             patch("api.handler.card_service") as mock_cs, \
-             patch("api.handler.review_service") as mock_rs:
+        with patch("api.handler.card_service") as mock_handler_cs, patch(
+            "services.ai_job_executors.CardService"
+        ) as mock_worker_cs, patch("services.ai_job_executors.create_ai_service"):
+            # submit 時の fail-fast は通過し、ワーカー時に消えているシナリオ
+            mock_handler_cs.get_card.return_value = mock_card
+            mock_worker_cs.return_value.get_card.side_effect = CardNotFoundError(
+                "Card not found"
+            )
 
-            self._setup_mocks_for_error_tests(mock_cs, mock_rs)
+            response = grade_ai_handler(_make_grade_ai_event(), lambda_context)
+            job_body = _accepted_job(response)
 
-            mock_service = MagicMock()
-            mock_service.generate_cards.side_effect = AIRateLimitError("rate limit")
-            mock_service.grade_answer.side_effect = AIRateLimitError("rate limit")
-            mock_service.get_learning_advice.side_effect = AIRateLimitError("rate limit")
-            mock_generate_factory.return_value = mock_service
-            mock_standalone_factory.return_value = mock_service
+            poll_response = _poll_job(
+                api_gateway_event, lambda_context, job_body["job_id"]
+            )
 
-            generate_response = handler(generate_event, lambda_context)
-            grade_response = grade_ai_handler(grade_event, lambda_context)
-            advice_response = advice_handler(advice_event, lambda_context)
-
-        assert generate_response["statusCode"] == 429
-        assert grade_response["statusCode"] == 429
-        assert advice_response["statusCode"] == 429
-
-        assert json.loads(generate_response["body"])["error"] == "AI service rate limit exceeded"
-        assert json.loads(grade_response["body"])["error"] == "AI service rate limit exceeded"
-        assert json.loads(advice_response["body"])["error"] == "AI service rate limit exceeded"
-
-    def test_ai_provider_error_returns_503_all_endpoints(self, api_gateway_event, lambda_context):
-        """TC-INT-ERR-003: AIProviderError -> HTTP 503 が全 3 エンドポイントで一貫する.
-
-        AIProviderError が全 3 エンドポイントで一貫して HTTP 503 にマッピングされることを
-        横断的に検証する。
-        """
-        generate_event = _make_generate_event(api_gateway_event)
-        grade_event = _make_grade_ai_event()
-        advice_event = _make_advice_event()
-
-        with patch("api.handlers.ai_handler.create_ai_service") as mock_generate_factory, \
-             patch("api.handler.create_ai_service") as mock_standalone_factory, \
-             patch("api.handler.card_service") as mock_cs, \
-             patch("api.handler.review_service") as mock_rs:
-
-            self._setup_mocks_for_error_tests(mock_cs, mock_rs)
-
-            mock_service = MagicMock()
-            mock_service.generate_cards.side_effect = AIProviderError("provider down")
-            mock_service.grade_answer.side_effect = AIProviderError("provider down")
-            mock_service.get_learning_advice.side_effect = AIProviderError("provider down")
-            mock_generate_factory.return_value = mock_service
-            mock_standalone_factory.return_value = mock_service
-
-            generate_response = handler(generate_event, lambda_context)
-            grade_response = grade_ai_handler(grade_event, lambda_context)
-            advice_response = advice_handler(advice_event, lambda_context)
-
-        assert generate_response["statusCode"] == 503
-        assert grade_response["statusCode"] == 503
-        assert advice_response["statusCode"] == 503
-
-        assert json.loads(generate_response["body"])["error"] == "AI service unavailable"
-        assert json.loads(grade_response["body"])["error"] == "AI service unavailable"
-        assert json.loads(advice_response["body"])["error"] == "AI service unavailable"
-
-    def test_ai_parse_error_returns_500_all_endpoints(self, api_gateway_event, lambda_context):
-        """TC-INT-ERR-004: AIParseError -> HTTP 500 が全 3 エンドポイントで一貫する.
-
-        AIParseError が全 3 エンドポイントで一貫して HTTP 500 にマッピングされることを
-        横断的に検証する。
-        """
-        generate_event = _make_generate_event(api_gateway_event)
-        grade_event = _make_grade_ai_event()
-        advice_event = _make_advice_event()
-
-        with patch("api.handlers.ai_handler.create_ai_service") as mock_generate_factory, \
-             patch("api.handler.create_ai_service") as mock_standalone_factory, \
-             patch("api.handler.card_service") as mock_cs, \
-             patch("api.handler.review_service") as mock_rs:
-
-            self._setup_mocks_for_error_tests(mock_cs, mock_rs)
-
-            mock_service = MagicMock()
-            mock_service.generate_cards.side_effect = AIParseError("invalid json")
-            mock_service.grade_answer.side_effect = AIParseError("invalid json")
-            mock_service.get_learning_advice.side_effect = AIParseError("invalid json")
-            mock_generate_factory.return_value = mock_service
-            mock_standalone_factory.return_value = mock_service
-
-            generate_response = handler(generate_event, lambda_context)
-            grade_response = grade_ai_handler(grade_event, lambda_context)
-            advice_response = advice_handler(advice_event, lambda_context)
-
-        assert generate_response["statusCode"] == 500
-        assert grade_response["statusCode"] == 500
-        assert advice_response["statusCode"] == 500
-
-        assert json.loads(generate_response["body"])["error"] == "AI service response parse error"
-        assert json.loads(grade_response["body"])["error"] == "AI service response parse error"
-        assert json.loads(advice_response["body"])["error"] == "AI service response parse error"
-
-    def test_ai_internal_error_returns_500_all_endpoints(self, api_gateway_event, lambda_context):
-        """TC-INT-ERR-005: AIInternalError -> HTTP 500 が全 3 エンドポイントで一貫する.
-
-        AIInternalError が全 3 エンドポイントで一貫して HTTP 500 にマッピングされることを
-        横断的に検証する。
-        """
-        generate_event = _make_generate_event(api_gateway_event)
-        grade_event = _make_grade_ai_event()
-        advice_event = _make_advice_event()
-
-        with patch("api.handlers.ai_handler.create_ai_service") as mock_generate_factory, \
-             patch("api.handler.create_ai_service") as mock_standalone_factory, \
-             patch("api.handler.card_service") as mock_cs, \
-             patch("api.handler.review_service") as mock_rs:
-
-            self._setup_mocks_for_error_tests(mock_cs, mock_rs)
-
-            mock_service = MagicMock()
-            mock_service.generate_cards.side_effect = AIInternalError("internal failure")
-            mock_service.grade_answer.side_effect = AIInternalError("internal failure")
-            mock_service.get_learning_advice.side_effect = AIInternalError("internal failure")
-            mock_generate_factory.return_value = mock_service
-            mock_standalone_factory.return_value = mock_service
-
-            generate_response = handler(generate_event, lambda_context)
-            grade_response = grade_ai_handler(grade_event, lambda_context)
-            advice_response = advice_handler(advice_event, lambda_context)
-
-        assert generate_response["statusCode"] == 500
-        assert grade_response["statusCode"] == 500
-        assert advice_response["statusCode"] == 500
-
-        assert json.loads(generate_response["body"])["error"] == "AI service error"
-        assert json.loads(grade_response["body"])["error"] == "AI service error"
-        assert json.loads(advice_response["body"])["error"] == "AI service error"
-
-    def test_factory_init_failure_returns_503_all_endpoints(self, api_gateway_event, lambda_context):
-        """TC-INT-ERR-006: create_ai_service() 初期化失敗が全 3 エンドポイントで一貫する.
-
-        create_ai_service() 自体が AIProviderError を raise した場合に全 3 エンドポイントが
-        一貫して HTTP 503 を返すことを検証する。
-        """
-        generate_event = _make_generate_event(api_gateway_event)
-        grade_event = _make_grade_ai_event()
-        advice_event = _make_advice_event()
-
-        with patch("api.handlers.ai_handler.create_ai_service") as mock_generate_factory, \
-             patch("api.handler.create_ai_service") as mock_standalone_factory, \
-             patch("api.handler.card_service") as mock_cs, \
-             patch("api.handler.review_service") as mock_rs:
-
-            self._setup_mocks_for_error_tests(mock_cs, mock_rs)
-
-            # ファクトリ自体が AIProviderError を raise する
-            mock_generate_factory.side_effect = AIProviderError("Failed to initialize AI service")
-            mock_standalone_factory.side_effect = AIProviderError("Failed to initialize AI service")
-
-            generate_response = handler(generate_event, lambda_context)
-            grade_response = grade_ai_handler(grade_event, lambda_context)
-            advice_response = advice_handler(advice_event, lambda_context)
-
-        assert generate_response["statusCode"] == 503
-        assert grade_response["statusCode"] == 503
-        assert advice_response["statusCode"] == 503
-
-        assert json.loads(generate_response["body"])["error"] == "AI service unavailable"
-        assert json.loads(grade_response["body"])["error"] == "AI service unavailable"
-        assert json.loads(advice_response["body"])["error"] == "AI service unavailable"
+        polled = json.loads(poll_response["body"])
+        assert polled["status"] == "failed"
+        assert polled["error"] == {
+            "status": 404,
+            "code": "not_found",
+            "message": "Not Found",
+        }
 
 
 # =============================================================================
-# カテゴリ 4: 既存テスト保護テスト
+# カテゴリ 3: ポーリング API のアクセス制御
 # =============================================================================
 
 
-class TestExistingTestProtection:
-    """既存テスト保護テスト (TC-INT-PROTECT-001 ~ 003).
+class TestJobAccessControl:
+    """GET /ai-jobs/{jobId} の所有者チェック（IDOR: 列挙防止の同一 404）。"""
 
-    統合テスト追加によって既存の AI 関連テストに回帰が発生しないことを保証する。
-    """
+    def test_other_users_job_returns_404(
+        self, ai_jobs_store, api_gateway_event, lambda_context
+    ):
+        """他ユーザーのジョブは存在しないジョブと同一の 404 を返す。"""
+        from api.handler import handler
 
-    def test_existing_test_suite_passes(self):
-        """TC-INT-PROTECT-001: 既存テストスイート全件 PASS 確認.
-
-        統合テスト追加によって既存の AI 関連テストに回帰が発生しないことを保証する。
-        pytest.main() で主要テストファイルを実行し、全件 PASS を確認する。
-        """
-        tests_dir = os.path.join(os.path.dirname(__file__), "..", "unit")
-        test_files = [
-            os.path.join(tests_dir, "test_ai_service.py"),
-            os.path.join(tests_dir, "test_strands_service.py"),
-            os.path.join(tests_dir, "test_bedrock.py"),
-            os.path.join(tests_dir, "test_handler_ai_service_factory.py"),
-            os.path.join(tests_dir, "test_migration_compat.py"),
-            os.path.join(tests_dir, "test_handler_grade_ai.py"),
-            os.path.join(tests_dir, "test_handler_advice.py"),
-        ]
-
-        # 各テストファイルが存在すること
-        for test_file in test_files:
-            assert os.path.exists(test_file), f"テストファイルが見つかりません: {test_file}"
-
-        result = pytest.main([
-            "-x",
-            "--tb=short",
-            "-q",
-            *test_files,
-        ])
-        assert result == pytest.ExitCode.OK, (
-            "既存テストスイートにリグレッションが検出されました"
+        event = api_gateway_event(
+            method="POST",
+            path="/cards/generate",
+            body={"input_text": "テスト用の学習テキストです。十分な長さが必要です。"},
         )
 
-    def test_total_test_count_maintained(self):
-        """TC-INT-PROTECT-002: 統合テスト追加後のテスト総数が 636+ 以上であること.
+        with patch("services.ai_job_executors.create_ai_service") as mock_factory:
+            mock_factory.return_value = _setup_ai_mocks()
+            response = handler(event, lambda_context)
+            job_body = _accepted_job(response)
 
-        統合テスト追加後のテスト総数が 636 以上であることを確認する。
-        主要テストファイルの存在確認をプレースホルダーとして実装。
-        """
-        tests_unit_dir = os.path.join(os.path.dirname(__file__), "..", "unit")
-        tests_integration_dir = os.path.dirname(__file__)
-
-        # 主要テストファイルが存在すること
-        main_test_files = [
-            os.path.join(tests_unit_dir, "test_ai_service.py"),
-            os.path.join(tests_unit_dir, "test_strands_service.py"),
-            os.path.join(tests_unit_dir, "test_bedrock.py"),
-            os.path.join(tests_unit_dir, "test_handler_ai_service_factory.py"),
-            os.path.join(tests_unit_dir, "test_migration_compat.py"),
-            os.path.join(tests_unit_dir, "test_handler_grade_ai.py"),
-            os.path.join(tests_unit_dir, "test_handler_advice.py"),
-        ]
-        for test_file in main_test_files:
-            assert os.path.exists(test_file), f"テストファイルが見つかりません: {test_file}"
-
-        # 統合テストファイル自身が存在すること
-        integration_test_file = os.path.join(tests_integration_dir, "test_integration.py")
-        assert os.path.exists(integration_test_file), (
-            f"統合テストファイルが見つかりません: {integration_test_file}"
+        # 別ユーザーとしてポーリング → 404（存在しない場合と同一ボディ）
+        other_response = _poll_job(
+            api_gateway_event, lambda_context, job_body["job_id"], user_id="other-user"
         )
+        assert other_response["statusCode"] == 404
+        assert json.loads(other_response["body"]) == {"error": "Job not found"}
 
-    def test_coverage_target_maintained(self):
-        """TC-INT-PROTECT-003: テストカバレッジ 80% 以上維持確認.
-
-        AI 関連ソースファイルのテストカバレッジが 80% 以上であることの確認プレースホルダー。
-        CI/CD パイプラインで pytest --cov=src --cov-report=term-missing を実行して確認する。
-
-        実行コマンド例:
-            pytest --cov=src/services --cov-report=term-missing --cov-fail-under=80
-        """
-        # CI/CD パイプラインでカバレッジを検証するためのプレースホルダー
-        pass
+        missing_response = _poll_job(
+            api_gateway_event, lambda_context, "aijob_missing"
+        )
+        assert missing_response["statusCode"] == 404
+        assert json.loads(missing_response["body"]) == json.loads(
+            other_response["body"]
+        )
