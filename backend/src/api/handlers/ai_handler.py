@@ -6,7 +6,12 @@ from aws_lambda_powertools import Logger, Tracer
 from aws_lambda_powertools.event_handler import Response, content_types
 from aws_lambda_powertools.event_handler.api_gateway import Router
 
-from api.shared import get_user_id_from_context, map_ai_error_to_http, parse_json_body
+from api.shared import (
+    check_ai_rate_limit,
+    get_user_id_from_context,
+    map_ai_error_to_http,
+    parse_json_body,
+)
 from services.card_service import CardService
 from models.generate import (
     GenerateCardsRequest,
@@ -44,6 +49,10 @@ def generate_cards():
     """Generate flashcards from input text using AI."""
     user_id = get_user_id_from_context(router)
     logger.info("Generating cards", extra={"user_id": user_id})
+
+    rate_limited = check_ai_rate_limit(user_id)
+    if rate_limited:
+        return rate_limited
 
     parsed = parse_json_body(router, GenerateCardsRequest)
     if isinstance(parsed, Response):
@@ -94,6 +103,10 @@ def generate_from_url():
     """Generate flashcards from a URL using AI."""
     user_id = get_user_id_from_context(router)
     logger.info("Generating cards from URL", extra={"user_id": user_id})
+
+    rate_limited = check_ai_rate_limit(user_id)
+    if rate_limited:
+        return rate_limited
 
     parsed = parse_json_body(router, GenerateFromUrlRequest)
     if isinstance(parsed, Response):
@@ -227,6 +240,10 @@ def refine_card():
     """Refine/improve user-input flashcard using AI."""
     user_id = get_user_id_from_context(router)
     logger.info("Refining card", extra={"user_id": user_id})
+
+    rate_limited = check_ai_rate_limit(user_id)
+    if rate_limited:
+        return rate_limited
 
     parsed = parse_json_body(router, RefineCardRequest)
     if isinstance(parsed, Response):

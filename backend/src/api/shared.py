@@ -18,10 +18,57 @@ from services.ai_service import (
     AIProviderError,
     AIParseError,
 )
+from utils.rate_limiter import RateLimitExceededError, enforce_rate_limit
 
 logger = Logger()
 
 _RequestModel = TypeVar("_RequestModel", bound=BaseModel)
+
+# ユーザー単位レート制限超過時のエラーメッセージ（AI 系エンドポイント共通）
+RATE_LIMITED_ERROR_BODY = {
+    "error": "リクエストが集中しています。しばらくしてからお試しください。",
+    "code": "rate_limited",
+}
+
+
+def check_ai_rate_limit(user_id: str) -> Response | None:
+    """AI 系エンドポイントのユーザー単位レート制限を確認する。
+
+    超過時は 429 の Response（Retry-After ヘッダー付き）を返す。
+    未超過（またはレート制限が無効・チェック失敗時の fail-open）は None を返す。
+
+    Router ベースのハンドラー用。スタンドアロン Lambda ハンドラーは
+    check_ai_rate_limit_event() を使うこと。
+    """
+    try:
+        enforce_rate_limit(user_id, category="ai")
+    except RateLimitExceededError as e:
+        return Response(
+            status_code=429,
+            content_type=content_types.APPLICATION_JSON,
+            headers={"Retry-After": str(e.retry_after_seconds)},
+            body=json.dumps(RATE_LIMITED_ERROR_BODY, ensure_ascii=False),
+        )
+    return None
+
+
+def check_ai_rate_limit_event(user_id: str) -> dict | None:
+    """check_ai_rate_limit の Lambda プロキシレスポンス (dict) 版。
+
+    grade_ai_handler / advice_handler のようなスタンドアロンハンドラー用。
+    """
+    try:
+        enforce_rate_limit(user_id, category="ai")
+    except RateLimitExceededError as e:
+        return {
+            "statusCode": 429,
+            "headers": {
+                "Content-Type": "application/json",
+                "Retry-After": str(e.retry_after_seconds),
+            },
+            "body": json.dumps(RATE_LIMITED_ERROR_BODY, ensure_ascii=False),
+        }
+    return None
 
 
 def parse_json_body(

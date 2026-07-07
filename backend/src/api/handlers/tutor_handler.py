@@ -6,7 +6,7 @@ from aws_lambda_powertools import Logger, Tracer
 from aws_lambda_powertools.event_handler import Response, content_types
 from aws_lambda_powertools.event_handler.api_gateway import Router
 
-from api.shared import get_user_id_from_context, parse_json_body
+from api.shared import check_ai_rate_limit, get_user_id_from_context, parse_json_body
 from models.tutor import (
     SendMessageRequest,
     SessionListResponse,
@@ -40,6 +40,10 @@ VALID_SESSION_STATUSES = frozenset({"active", "ended", "timed_out"})
 def create_session():
     """Start a new tutor session."""
     user_id = get_user_id_from_context(router)
+
+    rate_limited = check_ai_rate_limit(user_id)
+    if rate_limited:
+        return rate_limited
 
     parsed = parse_json_body(router, StartSessionRequest)
     if isinstance(parsed, Response):
@@ -111,6 +115,10 @@ def create_session():
 def send_message(session_id: str):
     """Send message to tutor and get response."""
     user_id = get_user_id_from_context(router)
+
+    rate_limited = check_ai_rate_limit(user_id)
+    if rate_limited:
+        return rate_limited
 
     parsed = parse_json_body(router, SendMessageRequest)
     if isinstance(parsed, Response):
