@@ -96,6 +96,20 @@ export const useReviewSession = (
       if (!isMountedRef.current || requestId !== fetchRequestIdRef.current)
         return;
       setCards(response.due_cards);
+      // deckId 切替（/review?deck_id=A → ?deck_id=B）で cards だけ差し替えると、
+      // 前のデッキのセッション進行状態（完了フラグ・採点結果・再確認キュー等）が
+      // 残り、完了済み A → B の遷移で isComplete === true のまま復習画面に
+      // 戻れなくなる。最新リクエストの成功時にセッション状態を初期化する
+      // （fetchCards はマウント時・deckId 変更時・エラーリトライ時のみ呼ばれるため、
+      // セッション進行中に走ることはない）。
+      setCurrentIndex(0);
+      setIsFlipped(false);
+      setReviewedCount(0);
+      setIsComplete(false);
+      setReviewResults([]);
+      setRegradeCardIndex(null);
+      setReconfirmQueue([]);
+      setIsReconfirmMode(false);
     } catch {
       // 中断（アンマウント・デッキ切替）起因のエラーは requestId / mount ガードで除外される
       if (!isMountedRef.current || requestId !== fetchRequestIdRef.current)

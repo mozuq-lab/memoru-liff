@@ -20,9 +20,10 @@ vi.mock("@/services/api", () => ({
   },
 }));
 
-import { cardsApi } from "@/services/api";
+import { cardsApi, reviewsApi } from "@/services/api";
 
 const mockGetDueCards = cardsApi.getDueCards as ReturnType<typeof vi.fn>;
+const mockSubmitReview = reviewsApi.submitReview as ReturnType<typeof vi.fn>;
 
 const makeCard = (id: string, front: string): DueCard => ({
   card_id: id,
@@ -178,6 +179,88 @@ describe("useReviewSession", () => {
       expect(result.current.error).toBe("復習カードの取得に失敗しました");
     });
     expect(result.current.isLoading).toBe(false);
+  });
+
+  it("完了済みデッキから別デッキへ切り替えるとセッション進行状態が初期化される", async () => {
+    // 【テスト内容】: デッキ A を完了（isComplete === true）した後に deck_id だけが
+    //                変わる遷移をすると、cards は B に差し替わるがセッション進行状態が
+    //                残り、完了画面から戻れなくなる問題（PR #77 レビュー指摘）の回帰テスト
+    mockGetDueCards.mockResolvedValueOnce(
+      makeResponse([makeCard("card-a", "デッキA")]),
+    );
+    mockSubmitReview.mockResolvedValue({
+      updated: { due_date: "2026-07-08" },
+    });
+
+    const { result, rerender } = renderHook(
+      ({ deckId }: { deckId: string }) => useReviewSession(deckId, cancel),
+      { initialProps: { deckId: "deck-a" } },
+    );
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    // デッキ A（1枚）を grade 5 で採点してセッション完了
+    await act(async () => {
+      await result.current.handleGrade(5);
+    });
+    expect(result.current.isComplete).toBe(true);
+    expect(result.current.reviewedCount).toBe(1);
+    expect(result.current.reviewResults).toHaveLength(1);
+
+    // デッキ B へ切り替え
+    mockGetDueCards.mockResolvedValueOnce(
+      makeResponse([makeCard("card-b", "デッキB")]),
+    );
+    rerender({ deckId: "deck-b" });
+
+    await waitFor(() => {
+      expect(result.current.cards.map((c) => c.card_id)).toEqual(["card-b"]);
+    });
+    // セッション進行状態が初期化され、B の復習を最初から開始できる
+    expect(result.current.isComplete).toBe(false);
+    expect(result.current.currentIndex).toBe(0);
+    expect(result.current.reviewedCount).toBe(0);
+    expect(result.current.reviewResults).toEqual([]);
+    expect(result.current.reconfirmQueue).toEqual([]);
+    expect(result.current.isReconfirmMode).toBe(false);
+    expect(result.current.regradeCardIndex).toBeNull();
+  });
+
+  it("再確認キューが残った状態でのデッキ切り替えでもキューが初期化される", async () => {
+    // grade 0-2 で reconfirmQueue に入った状態からデッキを切り替えるケース
+    mockGetDueCards.mockResolvedValueOnce(
+      makeResponse([makeCard("card-a", "デッキA")]),
+    );
+    mockSubmitReview.mockResolvedValue({
+      updated: { due_date: "2026-07-08" },
+    });
+
+    const { result, rerender } = renderHook(
+      ({ deckId }: { deckId: string }) => useReviewSession(deckId, cancel),
+      { initialProps: { deckId: "deck-a" } },
+    );
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    // grade 1（< 3）で採点 → 再確認モードへ
+    await act(async () => {
+      await result.current.handleGrade(1);
+    });
+    expect(result.current.isReconfirmMode).toBe(true);
+    expect(result.current.reconfirmQueue).toHaveLength(1);
+
+    mockGetDueCards.mockResolvedValueOnce(
+      makeResponse([makeCard("card-b", "デッキB")]),
+    );
+    rerender({ deckId: "deck-b" });
+
+    await waitFor(() => {
+      expect(result.current.cards.map((c) => c.card_id)).toEqual(["card-b"]);
+    });
+    expect(result.current.isReconfirmMode).toBe(false);
+    expect(result.current.reconfirmQueue).toEqual([]);
   });
 
   it("アンマウント時にフライト中のリクエストが中断される", async () => {
