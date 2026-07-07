@@ -78,6 +78,11 @@ if (!stage || stage === 'dev') {
     new LiffHostingStack(app, 'MemoruLiffHostingDev', {
       environment: 'dev',
       // domainName: optional for dev (uses CloudFront domain)
+      // CSP connect-src に許可する API オリジン（例:
+      // https://xxxx.execute-api.ap-northeast-1.amazonaws.com）。実環境固有値の
+      // ため環境変数で外部注入する。dev は未設定でも synth 可能（その場合 API への
+      // fetch が CSP でブロックされるため、実際に動かすなら設定すること）。
+      apiEndpoint: process.env.MEMORU_DEV_API_ENDPOINT,
     }),
   ];
   devStacks.forEach((s) => cdk.Tags.of(s).add('Environment', 'dev'));
@@ -123,6 +128,10 @@ if (stage === 'prod') {
       hostedZoneName: prod.hostedZoneName,
       certificateArn: prod.liffCertArn,
       hostedZoneId: prod.hostedZoneId,
+      // CSP connect-src に許可する API オリジン。resolveProdConfig() が
+      // MEMORU_PROD_API_ENDPOINT の必須化とプレースホルダ検証を行う。
+      // 未配線だとブラウザが API fetch を CSP でブロックし全機能が停止する。
+      apiEndpoint: prod.apiEndpoint,
       // M-24: OIDC IdP のオリジンを CSP connect-src に許可する。Keycloak / Cognito の
       // どちらが authority になっても token/userinfo 取得がブロックされないよう両方を渡す。
       // （Cognito Hosted UI / cognito-idp の両ホストを許可）

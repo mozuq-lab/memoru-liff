@@ -17,6 +17,8 @@ function validEnv(): NodeJS.ProcessEnv {
     MEMORU_PROD_LOGOUT_URLS: 'https://liff.memoru.app/',
     LINE_LOGIN_CHANNEL_ID: '2001234567',
     LINE_LOGIN_CHANNEL_SECRET_NAME: 'memoru-prod-line-channel-secret',
+    MEMORU_PROD_API_ENDPOINT:
+      'https://abcd1234.execute-api.ap-northeast-1.amazonaws.com',
   };
 }
 
@@ -32,6 +34,25 @@ describe('resolveProdConfig', () => {
       expect(cfg.lineLoginChannelId).toBe('2001234567');
       expect(cfg.lineLoginChannelSecretName).toBe(
         'memoru-prod-line-channel-secret',
+      );
+      expect(cfg.apiEndpoint).toBe(
+        'https://abcd1234.execute-api.ap-northeast-1.amazonaws.com',
+      );
+    });
+
+    test('API エンドポイントが未設定なら不足として列挙される', () => {
+      // CSP connect-src への配線漏れ（M-24 系）を synth 時に検出するためのガード。
+      // 未配線のままだとブラウザが API fetch を CSP でブロックし全機能が停止する。
+      const env = validEnv();
+      delete env.MEMORU_PROD_API_ENDPOINT;
+      expect(() => resolveProdConfig(env)).toThrow(/MEMORU_PROD_API_ENDPOINT/);
+    });
+
+    test('API エンドポイントのプレースホルダは拒否される', () => {
+      const env = validEnv();
+      env.MEMORU_PROD_API_ENDPOINT = 'https://api.example.com';
+      expect(() => resolveProdConfig(env)).toThrow(
+        /プレースホルダ[\s\S]*MEMORU_PROD_API_ENDPOINT/,
       );
     });
 
@@ -101,6 +122,7 @@ describe('resolveProdConfig', () => {
       expect(message).toContain('MEMORU_PROD_COGNITO_DOMAIN_PREFIX');
       expect(message).toContain('MEMORU_PROD_CALLBACK_URLS');
       expect(message).toContain('MEMORU_PROD_LOGOUT_URLS');
+      expect(message).toContain('MEMORU_PROD_API_ENDPOINT');
     });
 
     test('空文字列は未設定として扱う', () => {

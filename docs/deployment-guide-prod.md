@@ -36,6 +36,7 @@ prod スタック（`MemoruCognitoProd` / `MemoruKeycloakProd` / `MemoruLiffHost
 | `MEMORU_PROD_LOGOUT_URLS` | Cognito ログアウト URL（カンマ区切り） | LIFF ドメイン由来（例: `https://liff.memoru.app/`） | 識別子 |
 | `LINE_LOGIN_CHANNEL_ID` | LINE Login チャネル ID（Cognito LINE IdP 用） | LINE Developers Console → LINE Login チャネル → Basic settings | 識別子 |
 | `LINE_LOGIN_CHANNEL_SECRET_NAME` | LINE Login Channel Secret を格納した Secrets Manager の名前 | Secrets Manager（事前登録） | 秘密参照 |
+| `MEMORU_PROD_API_ENDPOINT` | バックエンド API のオリジン（例: `https://xxxx.execute-api.ap-northeast-1.amazonaws.com`。パスは含めない）。CloudFront の CSP `connect-src` に許可される | SAM Stack Output（`ApiEndpoint` のオリジン部分） | 識別子 |
 
 > **ガードの挙動**:
 > - 必須変数が **未設定 / 空文字** → 不足変数名を列挙してエラー。
@@ -90,7 +91,10 @@ export MEMORU_PROD_CALLBACK_URLS="https://liff.memoru.app/callback"
 export MEMORU_PROD_LOGOUT_URLS="https://liff.memoru.app/"
 export LINE_LOGIN_CHANNEL_ID="1234567890"
 export LINE_LOGIN_CHANNEL_SECRET_NAME="memoru-prod-line-channel-secret"
+export MEMORU_PROD_API_ENDPOINT="https://xxxx.execute-api.ap-northeast-1.amazonaws.com"
 ```
+
+> `MEMORU_PROD_API_ENDPOINT` は CloudFront の CSP `connect-src` に配線される。未設定・プレースホルダはガードで拒否される。SAM バックエンドを先にデプロイして `ApiEndpoint` Output のオリジン部分を控えておくこと（バックエンドが未デプロイの段階では、後で正しい値を設定して `MemoruLiffHostingProd` を再デプロイする）。
 
 > これらの `export` を `.envrc`（direnv）や 1Password CLI 等で管理し、シェル履歴やファイルに残さない運用を推奨。
 
