@@ -22,6 +22,13 @@ export interface ProdConfig {
   logoutUrls: string[];
   lineLoginChannelId: string;
   lineLoginChannelSecretName: string;
+  /**
+   * バックエンド API のオリジン（例: https://xxxx.execute-api.ap-northeast-1.amazonaws.com）。
+   * LiffHostingStack の CSP connect-src に配線する。未設定だとブラウザが API への
+   * fetch を CSP でブロックし、アプリ全体が動作しなくなるため prod では必須。
+   * オリジン（scheme + host[:port]）のみを指定し、ステージパス等は含めない。
+   */
+  apiEndpoint: string;
 }
 
 /** 値が「未設定 or プレースホルダ」かを判定するためのパターン。 */
@@ -70,6 +77,9 @@ const REQUIRED_VARS: VarSpec[] = [
   // 気づかずにデプロイできてしまう。
   { env: 'LINE_LOGIN_CHANNEL_ID', key: 'lineLoginChannelId' },
   { env: 'LINE_LOGIN_CHANNEL_SECRET_NAME', key: 'lineLoginChannelSecretName' },
+  // CSP connect-src 用の API オリジン。未配線だとブラウザが API fetch を CSP で
+  // ブロックするため、prod では必須とする（example.com 等のプレースホルダも拒否）。
+  { env: 'MEMORU_PROD_API_ENDPOINT', key: 'apiEndpoint' },
 ];
 
 function isPlaceholder(value: string): boolean {
@@ -164,5 +174,6 @@ export function resolveProdConfig(
     logoutUrls: resolved.logoutUrls as string[],
     lineLoginChannelId: resolved.lineLoginChannelId as string,
     lineLoginChannelSecretName: resolved.lineLoginChannelSecretName as string,
+    apiEndpoint: resolved.apiEndpoint as string,
   };
 }

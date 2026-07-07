@@ -139,6 +139,10 @@ jobs:
           ENVIRONMENT: ${{ github.event.inputs.environment || 'dev' }}
           OIDC_ISSUER: ${{ vars.OIDC_ISSUER }}
           OIDC_AUDIENCE: ${{ vars.OIDC_AUDIENCE }}
+          # LIFF フロントの Origin (例: https://liff.<your-domain>)。CORS AllowOrigins に
+          # 注入する。prod では必須（未設定なら下記スクリプトで fail-fast。template.yaml
+          # の Rules でも二重にガード）。
+          LIFF_ORIGIN: ${{ vars.LIFF_ORIGIN }}
           LINE_CHANNEL_ID: ${{ vars.LINE_CHANNEL_ID }}
           USE_STRANDS: ${{ vars.USE_STRANDS }}
           TUTOR_SESSION_BACKEND: ${{ vars.TUTOR_SESSION_BACKEND }}
@@ -152,10 +156,17 @@ jobs:
             echo "::error::設定方法は docs/deployment-guide-prod.md を参照してください。"
             exit 1
           fi
+          if [ "$ENVIRONMENT" = "prod" ] && [ -z "$LIFF_ORIGIN" ]; then
+            echo "::error::LIFF_ORIGIN が未設定です（prod では必須）。"
+            echo "::error::CORS AllowOrigins に本番 LIFF フロントの Origin（例: https://liff.<your-domain>）を注入するために必要です。"
+            echo "::error::GitHub Environment Variables に LIFF_ORIGIN を登録してください。詳細は docs/deployment-guide-prod.md を参照。"
+            exit 1
+          fi
           if [ -z "$LINE_CHANNEL_ID" ]; then
             echo "::warning::LINE_CHANNEL_ID が未設定です。template.yaml の既定値(空)を使用します。"
           fi
           OVERRIDES="Environment=$ENVIRONMENT OidcIssuer=$OIDC_ISSUER OidcAudience=$OIDC_AUDIENCE"
+          [ -n "$LIFF_ORIGIN" ]           && OVERRIDES="$OVERRIDES LiffOrigin=$LIFF_ORIGIN"
           [ -n "$LINE_CHANNEL_ID" ]       && OVERRIDES="$OVERRIDES LineChannelId=$LINE_CHANNEL_ID"
           [ -n "$USE_STRANDS" ]           && OVERRIDES="$OVERRIDES UseStrands=$USE_STRANDS"
           [ -n "$TUTOR_SESSION_BACKEND" ] && OVERRIDES="$OVERRIDES TutorSessionBackend=$TUTOR_SESSION_BACKEND"

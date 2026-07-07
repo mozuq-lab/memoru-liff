@@ -23,6 +23,10 @@ validate: ## Validate SAM template
 # 必須（未設定なら fail-fast）:
 #   OIDC_ISSUER    OIDC Issuer URL (Cognito/Keycloak)
 #   OIDC_AUDIENCE  OIDC Audience (Cognito の場合は UserPool Client ID)
+#   LIFF_ORIGIN    LIFF フロントの Origin (例: https://liff.<your-domain>)。
+#                  CORS AllowOrigins に注入する。prod は必須（未設定なら fail-fast。
+#                  template.yaml の Rules でも二重にガード）。dev/staging は任意
+#                  （未設定なら localhost 系のみ許可）。
 # 任意（未設定なら template.yaml の既定値を使用。空文字は渡さない）:
 #   LINE_CHANNEL_ID, USE_STRANDS, TUTOR_SESSION_BACKEND,
 #   AGENTCORE_MEMORY_ID, BEDROCK_MODEL_ID
@@ -39,10 +43,18 @@ define build_param_overrides
 		echo "詳細: docs/deployment-guide-prod.md" >&2; \
 		exit 1; \
 	fi; \
+	if [ "$(1)" = "prod" ] && [ -z "$$LIFF_ORIGIN" ]; then \
+		echo "ERROR: LIFF_ORIGIN が未設定です（prod では必須）。" >&2; \
+		echo "  CORS AllowOrigins に本番 LIFF フロントの Origin を注入するために必要です。" >&2; \
+		echo "  例: export LIFF_ORIGIN=https://liff.<your-domain>" >&2; \
+		echo "詳細: docs/deployment-guide-prod.md" >&2; \
+		exit 1; \
+	fi; \
 	if [ -z "$$LINE_CHANNEL_ID" ]; then \
 		echo "WARNING: LINE_CHANNEL_ID が未設定です。template.yaml の既定値(空)を使用します（LINE ID トークン検証は無効）。" >&2; \
 	fi; \
 	OVERRIDES="Environment=$(1) OidcIssuer=$$OIDC_ISSUER OidcAudience=$$OIDC_AUDIENCE"; \
+	[ -n "$$LIFF_ORIGIN" ]           && OVERRIDES="$$OVERRIDES LiffOrigin=$$LIFF_ORIGIN"; \
 	[ -n "$$LINE_CHANNEL_ID" ]       && OVERRIDES="$$OVERRIDES LineChannelId=$$LINE_CHANNEL_ID"; \
 	[ -n "$$USE_STRANDS" ]           && OVERRIDES="$$OVERRIDES UseStrands=$$USE_STRANDS"; \
 	[ -n "$$TUTOR_SESSION_BACKEND" ] && OVERRIDES="$$OVERRIDES TutorSessionBackend=$$TUTOR_SESSION_BACKEND"; \
@@ -58,7 +70,7 @@ deploy-staging: build ## Deploy to staging environment (requires OIDC_ISSUER, OI
 	@$(call build_param_overrides,staging); \
 	sam deploy --config-env staging --parameter-overrides "$$OVERRIDES"
 
-deploy-prod: build ## Deploy to production environment (requires OIDC_ISSUER, OIDC_AUDIENCE)
+deploy-prod: build ## Deploy to production environment (requires OIDC_ISSUER, OIDC_AUDIENCE, LIFF_ORIGIN)
 	@$(call build_param_overrides,prod); \
 	sam deploy --config-env prod --parameter-overrides "$$OVERRIDES"
 

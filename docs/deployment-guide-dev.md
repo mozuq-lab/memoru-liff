@@ -287,6 +287,8 @@ cd infrastructure/cdk
 npx cdk deploy MemoruLiffHostingDev
 ```
 
+> **CSP connect-src への API オリジン注入（推奨）**: バックエンド（Step 6）デプロイ後に API Gateway のオリジンが決まったら、`export MEMORU_DEV_API_ENDPOINT="https://<ApiId>.execute-api.ap-northeast-1.amazonaws.com"` を設定して本スタックを再デプロイする。未設定のままだと CloudFront の CSP `connect-src` に API オリジンが含まれず、ブラウザが API への fetch をブロックする。
+
 ### 4.2 出力値の記録
 
 | Output Key | 説明 | 例 |
