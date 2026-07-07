@@ -164,7 +164,7 @@ def test_link_line_event_exists_with_correct_path(api_events):
 
 
 def test_total_http_api_event_count(api_events):
-    """TC-042-04: 整合性 - ApiFunction の HttpApi イベント総数が 30 個
+    """TC-042-04: 整合性 - ApiFunction の HttpApi イベント総数が 31 個
 
     期待イベント:
     1. GetUser          - GET /users/me
@@ -197,9 +197,10 @@ def test_total_http_api_event_count(api_events):
     28. EndTutorSession     - DELETE /tutor/sessions/{sessionId}
     29. ListTutorSessions   - GET /tutor/sessions
     30. GetTutorSession     - GET /tutor/sessions/{sessionId}
+    31. GetAiJob            - GET /ai-jobs/{jobId} (ai-async-jobs: ジョブポーリング)
     """
-    assert len(api_events) == 30, (
-        f"期待: 30 イベント、実際: {len(api_events)} イベント\n"
+    assert len(api_events) == 31, (
+        f"期待: 31 イベント、実際: {len(api_events)} イベント\n"
         f"現在のイベント: {list(api_events.keys())}"
     )
 
@@ -315,7 +316,7 @@ def test_event_path_and_method(api_events, event_name, expected_path, expected_m
 def test_no_duplicate_event_names(sam_template):
     """TC-042-09: 品質 - イベント名の重複がないこと
 
-    YAML で重複キーは後勝ちになるため、イベント数が期待通りの 30 個かで検証する。
+    YAML で重複キーは後勝ちになるため、イベント数が期待通りの 31 個かで検証する。
     """
     events = sam_template["Resources"]["ApiFunction"]["Properties"]["Events"]
     http_api_events = {
@@ -323,8 +324,8 @@ def test_no_duplicate_event_names(sam_template):
         if ev.get("Type") == "HttpApi"
     }
     # YAML で重複キーは後勝ちになるため、パース後にイベント数が期待通りかで検証
-    assert len(http_api_events) == 30, (
-        f"期待: 30 イベント, 実際: {len(http_api_events)} イベント\n"
+    assert len(http_api_events) == 31, (
+        f"期待: 31 イベント, 実際: {len(http_api_events)} イベント\n"
         f"イベント: {list(http_api_events.keys())}"
     )
 
@@ -408,3 +409,97 @@ def test_path_parameters_use_camel_case(api_events):
             assert param[0].islower(), (
                 f"イベント '{name}' のパスパラメータ '{{{param}}}' が大文字で始まっています。"
             )
+
+
+# ---------------------------------------------------------------------------
+# ai-async-jobs: ジョブポーリングルートと非同期基盤リソースの検証
+# ---------------------------------------------------------------------------
+
+
+def test_get_ai_job_route_exists(api_events):
+    """ai-async-jobs - GET /ai-jobs/{jobId}（ジョブポーリング）ルートが存在すること"""
+    assert "GetAiJob" in api_events, (
+        "GetAiJob イベントが SAM テンプレートに存在すること。"
+        " フロントのポーリング（submitAndPollAiJob）が 403 になるため必須。"
+    )
+    event = api_events["GetAiJob"]
+    assert event["Properties"]["Path"] == "/ai-jobs/{jobId}", (
+        f"GetAiJob のパスが '/ai-jobs/{{jobId}}' であること。"
+        f" 実際: '{event['Properties']['Path']}'"
+    )
+    assert event["Properties"]["Method"].upper() == "GET", (
+        f"GetAiJob のメソッドが 'GET' であること。"
+        f" 実際: '{event['Properties']['Method']}'"
+    )
+
+
+def test_advice_route_is_post(sam_template):
+    """ai-async-jobs - AdviceFunction の /advice ルートが POST であること
+
+    ジョブ作成は非冪等のため GET → POST に変更された（設計 SH-7）。
+    """
+    advice_events = sam_template["Resources"]["AdviceFunction"]["Properties"]["Events"]
+    advice_routes = [
+        event["Properties"]
+        for event in advice_events.values()
+        if event.get("Type") == "HttpApi"
+        and event.get("Properties", {}).get("Path") == "/advice"
+    ]
+
+    assert advice_routes, "/advice ルートが AdviceFunction に存在しない"
+    assert advice_routes[0]["Method"].upper() == "POST", (
+        f"/advice のメソッドが 'POST' であること。実際: '{advice_routes[0]['Method']}'"
+    )
+
+
+def test_ai_job_worker_function_defined(sam_template):
+    """ai-async-jobs - AiJobWorkerFunction が定義され両キューを消費すること"""
+    resources = sam_template["Resources"]
+
+    assert "AiJobWorkerFunction" in resources, (
+        "AiJobWorkerFunction が SAM テンプレートに存在すること"
+    )
+    worker = resources["AiJobWorkerFunction"]
+    assert worker["Type"] == "AWS::Serverless::Function"
+    assert worker["Properties"]["Handler"] == "jobs.ai_job_worker_handler.handler"
+
+    # interactive / heavy 両キューの SQS イベントソースが張られていること
+    sqs_events = [
+        event
+        for event in worker["Properties"]["Events"].values()
+        if event.get("Type") == "SQS"
+    ]
+    assert len(sqs_events) == 2, (
+        f"AiJobWorkerFunction の SQS イベントは 2 個（interactive/heavy）であること。"
+        f" 実際: {len(sqs_events)} 個"
+    )
+
+
+def test_ai_job_queues_defined(sam_template):
+    """ai-async-jobs - AiJobQueue / AiJobHeavyQueue（+ DLQ）が定義されていること"""
+    resources = sam_template["Resources"]
+
+    for queue_name in ("AiJobQueue", "AiJobHeavyQueue", "AiJobDLQ", "AiJobHeavyDLQ"):
+        assert queue_name in resources, f"{queue_name} が SAM テンプレートに存在すること"
+        assert resources[queue_name]["Type"] == "AWS::SQS::Queue", (
+            f"{queue_name} の Type が 'AWS::SQS::Queue' であること"
+        )
+
+
+def test_ai_jobs_table_defined(sam_template):
+    """ai-async-jobs - AiJobsTable（job_id キー + TTL）が定義されていること"""
+    resources = sam_template["Resources"]
+
+    assert "AiJobsTable" in resources, "AiJobsTable が SAM テンプレートに存在すること"
+    table = resources["AiJobsTable"]
+    assert table["Type"] == "AWS::DynamoDB::Table"
+
+    props = table["Properties"]
+    key_schema = props["KeySchema"]
+    assert key_schema[0]["AttributeName"] == "job_id"
+    assert key_schema[0]["KeyType"] == "HASH"
+
+    # 24h TTL で使い捨てるレコードのため TTL が有効であること
+    ttl = props["TimeToLiveSpecification"]
+    assert ttl["AttributeName"] == "ttl"
+    assert ttl["Enabled"] is True
