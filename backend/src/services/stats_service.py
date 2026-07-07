@@ -312,9 +312,17 @@ class StatsService:
                 continue
 
             try:
-                review_date = datetime.fromisoformat(next_review_at).date()
+                review_dt = datetime.fromisoformat(next_review_at)
             except (ValueError, TypeError):
                 continue
+
+            # next_review_at は UTC で保存されている（day_start_hour 正規化により
+            # 例: JST 04:00 → 前日 19:00 UTC）。UTC のまま date() を取るとローカル
+            # 日付より 1 日早いバケットに計上されるため、ユーザーの timezone に
+            # 変換してから日付を取る。naive な旧データは UTC とみなす。
+            if review_dt.tzinfo is None:
+                review_dt = review_dt.replace(tzinfo=timezone.utc)
+            review_date = review_dt.astimezone(tz).date()
 
             # Past due dates count as today
             if review_date <= today:

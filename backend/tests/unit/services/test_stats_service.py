@@ -398,3 +398,36 @@ class TestGetForecast:
         today = datetime.now(timezone.utc).date()
         result = stats_service.get_forecast("user-1", days=7)
         assert result.forecast[0].date == today.isoformat()
+
+    def test_get_forecast_jst_boundary_card_counted_on_local_date(
+        self, stats_service, dynamodb_tables
+    ):
+        """day_start_hour 正規化された UTC 値が JST のローカル日付バケットに入る。
+
+        例: 19:00 UTC = 翌日 04:00 JST。UTC のまま date() を取ると 1 日早い
+        バケット（最悪「今日」）に誤計上される回帰（レビュー指摘 #4）の再発防止。
+        """
+        from zoneinfo import ZoneInfo
+
+        now_utc = datetime.now(timezone.utc)
+        # 2 日後の 19:00 UTC = JST では 3 日後の 04:00（日付が必ずまたがる時刻）
+        target = now_utc + timedelta(days=2)
+        review_dt = datetime(
+            target.year, target.month, target.day, 19, 0, 0, tzinfo=timezone.utc
+        )
+        _put_card(
+            dynamodb_tables, "user-1", "card-jst",
+            next_review_at=review_dt.isoformat(),
+        )
+
+        result = stats_service.get_forecast(
+            "user-1", days=7, user_timezone="Asia/Tokyo"
+        )
+        forecast_map = {day.date: day.due_count for day in result.forecast}
+
+        jst_date = review_dt.astimezone(ZoneInfo("Asia/Tokyo")).date().isoformat()
+        utc_date = review_dt.date().isoformat()
+
+        # JST ローカル日付のバケットに 1 件、UTC 日付のバケットには入らない
+        assert forecast_map[jst_date] == 1
+        assert forecast_map.get(utc_date, 0) == 0

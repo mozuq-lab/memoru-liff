@@ -48,11 +48,16 @@ def get_due_cards():
     deck_id = params.get("deck_id")
 
     try:
+        # due_date / next_due_date をユーザーローカル日付で返すため timezone を取得
+        user = user_service.get_or_create_user(user_id)
+        user_timezone = user.settings.get("timezone", "Asia/Tokyo")
+
         response = review_service.get_due_cards(
             user_id=user_id,
             limit=limit,
             include_future=include_future,
             deck_id=deck_id,
+            user_timezone=user_timezone,
         )
         return response.model_dump(mode="json")
     except Exception as e:
@@ -117,9 +122,14 @@ def undo_review(card_id: str):
     logger.info("Undoing review", extra={"card_id": card_id, "user_id": user_id})
 
     try:
+        # restored.due_date をユーザーローカル日付で返すため timezone を取得
+        user = user_service.get_or_create_user(user_id)
+        user_timezone = user.settings.get("timezone", "Asia/Tokyo")
+
         response = review_service.undo_review(
             user_id=user_id,
             card_id=card_id,
+            user_timezone=user_timezone,
         )
         return response.model_dump(mode="json")
     except CardNotFoundError:
