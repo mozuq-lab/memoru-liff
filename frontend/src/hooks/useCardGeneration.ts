@@ -31,11 +31,15 @@ export const resolveTimeoutMs = (raw: unknown, fallback: number): number => {
   return Number.isFinite(value) && value > 0 ? value : fallback;
 };
 
-// 既定: テキスト45秒 / URL90秒。VITE_MAX_GENERATION_TIME / VITE_MAX_URL_GENERATION_TIME(ms)で上書き可能。
+// 既定: テキスト45秒 / URL150秒。VITE_MAX_GENERATION_TIME / VITE_MAX_URL_GENERATION_TIME(ms)で上書き可能。
 // テキスト生成は非同期ジョブ基盤のポーリングオーバーヘッド分を見込み 30 秒 → 45 秒
 // （docs/design/ai-async-jobs/architecture.md §9）。
+// URL 生成はバックエンドが heavy ジョブ（処理想定上限 120 秒級・ワーカー Timeout 180 秒）
+// として実行するため、90 秒のままだと 90〜120 秒で正常完了するジョブをフロントが先に
+// 打ち切ってしまう。120 秒 + SQS 配信・コールドスタート・ポーリング粒度の余裕 30 秒 =
+// 150 秒（ワーカー Timeout 180 秒よりは内側）に設定する（PR #79 レビュー指摘）。
 const MAX_GENERATION_TIME = resolveTimeoutMs(import.meta.env.VITE_MAX_GENERATION_TIME, 45000);
-const MAX_URL_GENERATION_TIME = resolveTimeoutMs(import.meta.env.VITE_MAX_URL_GENERATION_TIME, 90000);
+const MAX_URL_GENERATION_TIME = resolveTimeoutMs(import.meta.env.VITE_MAX_URL_GENERATION_TIME, 150000);
 
 type GeneratedCardsPayload = {
   generated_cards: GeneratedCard[];

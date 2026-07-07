@@ -238,7 +238,7 @@ sync ハンドラーの分類（特に ai_handler の ContentFetchError → 408/
 |---|---|---|
 | generate (`MAX_GENERATION_TIME`) | 30s | **45s** |
 | refine (`REFINE_AI_TIMEOUT_MS`) | 35s | **45s** |
-| generate_from_url (`MAX_URL_GENERATION_TIME`) | 90s | 90s（据え置き） |
+| generate_from_url (`MAX_URL_GENERATION_TIME`) | 90s | **150s**（heavy ジョブの処理想定上限 120s + オーバーヘッド 30s。ワーカー Timeout 180s の内側。PR #79 レビュー） |
 | tutor (`TUTOR_AI_TIMEOUT_MS` 既定) | 90s | 90s（据え置き） |
 
 ## フロントエンド設計

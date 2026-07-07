@@ -117,9 +117,9 @@ ai_handler の ContentFetchError 分岐もここへ移す）:
 ## ポーリング仕様（フロント）
 
 - 間隔: 1.5 秒固定（inline モード・高速ジョブでは 1 回目で completed）
-- 全体タイムアウト: フロー別定数を使用。generate は 30s→**45s**、refine は 35s→**45s** に
-  引き上げ（キュー配信・コールドスタート・ポーリング粒度のオーバーヘッド分。
-  URL 生成 90s / Tutor 90s は据え置き）。
+- 全体タイムアウト: フロー別定数を使用。generate は 30s→**45s**、refine は 35s→**45s**、
+  URL 生成は 90s→**150s** に引き上げ（heavy ジョブの処理想定上限 120s +
+  キュー配信・コールドスタート・ポーリング粒度のオーバーヘッド。Tutor 90s は据え置き）。
   デッドラインは `submitAndPollAiJob` 内部で `createRequestSignal(timeoutMs, externalSignal)`
   により必ず合成する（外部 signal を渡さない tutor 系呼び出しでも打ち切りが効く）。
 - 移行互換: submit レスポンスが **2xx かつ body に `job_id` フィールドがない**場合は
