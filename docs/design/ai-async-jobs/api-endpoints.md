@@ -21,15 +21,16 @@ POST /tutor/sessions/{sessionId}/messages (既存ボディ: SendMessageRequest)
 }
 ```
 
-同期のまま返すエラー（従来どおり）:
+同期のまま返すエラー（**現行のステータス・メッセージ文言を完全維持**）:
 
 | ステータス | 条件 |
 |---|---|
-| 400 | Pydantic バリデーション / URL バリデーション（SSRF）/ 空デッキ |
+| 400 | Pydantic バリデーション / URL バリデーション（SSRF） |
 | 401 | 認証エラー |
 | 404 | grade_ai のカード不在 / tutor のセッション・デッキ不在 |
-| 409 | tutor セッション ended・メッセージ上限 |
-| 429 | ユーザー単位レート制限（#78、Retry-After 付き） |
+| 409 | tutor セッション ended / timed_out |
+| 422 | tutor_start の空デッキ・レビュー不足（現行文言維持。フロントは 422+文言で UI を出し分ける） |
+| 429 | ユーザー単位レート制限（#78、Retry-After 付き）/ tutor メッセージ上限（現行維持） |
 | 501 | generate-from-url の profile_id 指定 |
 
 ## GET /ai-jobs/{jobId}
@@ -62,10 +63,9 @@ POST /tutor/sessions/{sessionId}/messages (既存ボディ: SendMessageRequest)
   "job_type": "generate",
   "status": "failed",
   "error": {
-    "status": 504,                       // 現行 map_ai_error_to_http と同じ分類
-    "code": "ai_timeout",                // ai_timeout | ai_rate_limit | ai_unavailable |
-                                         // ai_error | not_found | conflict | internal
-    "message": "AI service timeout"
+    "status": 504,                       // 新設の classify_ai_job_error による分類
+    "code": "ai_timeout",                // 下記コード表参照
+    "message": "AI service timeout"      // 現行同期ハンドラーと同一文言
   },
   "created_at": "...",
   "updated_at": "..."
@@ -80,35 +80,51 @@ POST /tutor/sessions/{sessionId}/messages (既存ボディ: SendMessageRequest)
 | job_type | result の型（現行モデル） |
 |---|---|
 | `generate` | `GenerateCardsResponse` |
-| `generate_from_url` | `GenerateFromUrlResponse`（duplicate_warning 含む） |
+| `generate_from_url` | `GenerateFromUrlResponse`（重複警告は現行フィールド名 `warning`） |
 | `refine` | `RefineCardResponse` |
 | `grade_ai` | `GradeAnswerResponse` |
-| `advice` | `LearningAdviceResponse` |
+| `advice` | `LearningAdviceResponse`（`average_grade` 等の float は store で Decimal 変換） |
 | `tutor_start` | `TutorSessionResponse` |
 | `tutor_message` | `SendMessageResponse` |
 
 ## エラーコード → フロントの扱い
 
-フロントの `submitAndPollAiJob` は `failed` の `error.status` から `ApiError` を組み立てて
-throw する。既存のエラー分類（`ApiError.status` による 504/429/503/400 分岐、
-`getUserFacingMessage`）がそのまま機能する。
+フロントの `submitAndPollAiJob` は `failed` の `error.status` / `error.message` から
+`ApiError` を組み立てて throw する。既存のエラー分類（`ApiError.status` 分岐、
+`getUserFacingMessage`、TutorContext の 422+文言判定）がそのまま機能するよう、
+**status と message は現行同期ハンドラーの分類・文言と完全一致させる**。
+
+分類は新設の共有関数 `classify_ai_job_error(exc)` に一元化する
+（現行 `map_ai_error_to_http` は code を持たないため流用ではなく移設・拡張。
+ai_handler の ContentFetchError 分岐もここへ移す）:
 
 | error.code | error.status | 由来 |
 |---|---|---|
-| `ai_timeout` | 504 | AITimeoutError |
+| `ai_timeout` | 504 | AITimeoutError / TutorAITimeoutError |
 | `ai_rate_limit` | 429 | AIRateLimitError |
-| `ai_unavailable` | 503 | AIProviderError / Tutor unavailable |
+| `ai_unavailable` | 503 | AIProviderError / Tutor unavailable (USE_STRANDS=false) |
 | `ai_error` | 500 | AIParseError ほか AIServiceError |
-| `not_found` | 404 | ワーカー実行時点でカード等が消えていた |
-| `conflict` | 409 | ConcurrentSendError / SessionEnded（ワーカー時点） |
-| `internal` | 500 | 想定外例外 |
+| `content_fetch_timeout` | 408 | ContentFetchError（タイムアウト系。現行 ai_handler の分岐を移設） |
+| `content_forbidden` | 403 | ContentFetchError（private/blocked 系） |
+| `content_unsupported` | 422 | ContentFetchError（unsupported/meaningful 系）/ EmptyContentError / 生成 0 件 |
+| `content_fetch_error` | 502 | ContentFetchError（その他） |
+| `validation_error` | 422 | EmptyDeckError / InsufficientReviewDataError（ワーカー実行時。文言は現行と同一） |
+| `message_limit` | 429 | MessageLimitError（ワーカー実行時。現行 429 を維持） |
+| `not_found` | 404 | ワーカー実行時点でカード・セッション等が消えていた |
+| `conflict` | 409 | ConcurrentSendError / SessionEndedError（ワーカー時点） |
+| `internal` | 500 | 想定外例外 / 未知の schema_version |
 
 ## ポーリング仕様（フロント）
 
 - 間隔: 1.5 秒固定（inline モード・高速ジョブでは 1 回目で completed）
-- 全体タイムアウト: 既存のフロー別定数を継続使用
-  （生成 `MAX_GENERATION_TIME`、URL 生成 `MAX_URL_GENERATION_TIME`、
-  Tutor `TUTOR_AI_TIMEOUT_MS`、refine `REFINE_AI_TIMEOUT_MS` 等）。
-  呼び出し元が合成済み signal を渡し、abort でポーリングを停止する。
-- 移行互換: submit レスポンスが 200（旧同期形式）の場合はそのまま結果として返す
-  （フロント先行デプロイを可能にするデュアル対応）。
+- 全体タイムアウト: フロー別定数を使用。generate は 30s→**45s**、refine は 35s→**45s** に
+  引き上げ（キュー配信・コールドスタート・ポーリング粒度のオーバーヘッド分。
+  URL 生成 90s / Tutor 90s は据え置き）。
+  デッドラインは `submitAndPollAiJob` 内部で `createRequestSignal(timeoutMs, externalSignal)`
+  により必ず合成する（外部 signal を渡さない tutor 系呼び出しでも打ち切りが効く）。
+- 移行互換: submit レスポンスが **2xx かつ body に `job_id` フィールドがない**場合は
+  旧同期形式としてそのまま結果を返す（ステータス数値に依存しない判定。
+  tutor_start の現行 201 も安全に旧形式と判定される）。
+- **デプロイ順序: フロント先行が必須**。デュアル対応が保護するのは
+  「新フロント + 旧バックエンド」のみ。旧フロントは 202 ボディを成功として解釈し
+  壊れるため、バックエンド先行デプロイは行わない。
