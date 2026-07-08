@@ -14,6 +14,7 @@ LINE ベースの暗記カードアプリケーション。SRS (Spaced Repetitio
 - Strands Agents SDK / Amazon Bedrock (Claude)
 - Bedrock AgentCore Memory SDK (SessionManager)
 - SQS: LINE Webhook の URL カード生成を非同期ワーカーで処理（ローカルは `URL_WORKER_MODE=inline` で同期実行）
+- SQS: AI 系 REST エンドポイント（生成/採点/補足/アドバイス/チューター）を非同期ジョブ化（submit→202+job_id→`GET /ai-jobs/{id}` ポーリング。API Gateway 30 秒上限の恒久対応。ローカルは `AI_JOB_WORKER_MODE=inline`。設計: `docs/design/ai-async-jobs/`）
 
 ### フロントエンド
 - React 19 + TypeScript 5.x / Vite 7 / Tailwind CSS 4
@@ -34,7 +35,7 @@ backend/src/
 ├── services/      # ビジネスロジック層
 ├── utils/         # ユーティリティ
 ├── webhook/       # LINE Webhook ハンドラー
-└── jobs/          # スケジュール実行 Lambda
+└── jobs/          # スケジュール実行 Lambda + SQS ワーカー
 
 frontend/src/
 ├── components/    # UI コンポーネント
