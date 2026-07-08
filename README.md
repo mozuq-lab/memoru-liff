@@ -470,7 +470,7 @@ SAM local は SQS → Lambda トリガーを再現できないため、本番で
 - **AI 系 REST エンドポイント**（生成・URL生成・補足・AI採点・アドバイス・チューター開始/送信）: `AI_JOB_WORKER_MODE: "inline"`。submit ハンドラーがジョブ登録後にその場で AI 実行して結果を書き込み 202 を返すため、フロントの 1 回目のポーリング（`GET /ai-jobs/{jobId}`）で `completed` が返ります（本番と同一コードパス）。
 - **LINE の URL カード生成**（Webhook 経由）: `URL_WORKER_MODE: "inline"`。Webhook 内で同期実行されます。
 
-本番挙動どおりに SQS キューやワーカーの動作（可視性タイムアウト・DLQ 等）をローカルで検証したい場合は、LocalStack を導入して各 `*_QUEUE_URL` を設定します（詳細は [docs/design/ai-async-jobs/architecture.md](docs/design/ai-async-jobs/architecture.md) §7 を参照）。
+本番挙動どおりに SQS キューやワーカーの動作をローカルで検証したい場合は、LocalStack を導入して各 `*_QUEUE_URL` を設定し、あわせて対象の `*_WORKER_MODE=inline` を解除します（inline モードは「`*_WORKER_MODE=inline` **または** キュー URL 未設定」で発動するため、URL を設定するだけでは submit ハンドラーが同期実行のままになります）。キュー本数・BatchSize・DLQ・可視性タイムアウトの仕様は [docs/design/ai-async-jobs/architecture.md](docs/design/ai-async-jobs/architecture.md) §2、LocalStack の接続配線（`AWS_ENDPOINT_URL`）は同 §7 を参照。
 
 ### JWT フォールバックが動作しない（SAM local）
 

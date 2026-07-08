@@ -248,12 +248,13 @@ sequenceDiagram
 
     loop 選択した各カードに対して
         FE->>API: POST /cards<br/>{front, back, tags}
+        API->>DB: ユーザー存在確認 (get_or_create_user・冪等)
         API->>DB: カード作成 + card_count インクリメント<br/>（トランザクション）
         API->>FE: 作成完了
     end
 ```
 
-> **AI 非同期ジョブ（ai-async-jobs）**: 生成・採点・補足・アドバイス・チューターの各 AI 系
+> **AI 非同期ジョブ（ai-async-jobs）**: 生成・URL 生成・採点・補足・アドバイス・チューターの各 AI 系
 > エンドポイントは、API Gateway の 30 秒統合タイムアウトを超える処理を捌くため 202 + `job_id`
 > を返し、ワーカーが実処理を行います。詳細は [`docs/design/ai-async-jobs/`](design/ai-async-jobs/architecture.md)。
 >
@@ -429,7 +430,7 @@ sequenceDiagram
 >
 > **ローカル環境**: `URL_WORKER_MODE=inline` のとき Webhook が SQS を介さず生成本体をその場で同期実行します（sam local が SQS → Lambda トリガーを再現できないため）。
 
-> **補足**: フロントエンドの `POST /cards/generate-from-url`（[§7](#7-バックエンド-api-一覧)）は、上記の LINE 経由とは別系統で、LIFF 画面から同期的に URL カードを生成する専用 Lambda（`UrlGenerateFunction`）です。
+> **補足**: フロントエンドの `POST /cards/generate-from-url`（[§7](#7-バックエンド-api-一覧)）は、上記の LINE 経由とは別系統で、LIFF 画面から URL カードを生成する専用 Lambda（`UrlGenerateFunction`）です。ai-async-jobs 移行後はこの Lambda が submit ハンドラーとしてジョブを登録し heavy キューへ送信して 202 を返し、本体処理は AI ジョブワーカーが実行します（`job_type=generate_from_url`）。
 
 ---
 
@@ -487,6 +488,8 @@ erDiagram
 | `memoru-tutor-sessions-{env}` | PK: user_id / SK: session_id | AI チューターのセッション（TTL: `ttl`） |
 | `memoru-browser-profiles-{env}` | PK: user_id / SK: profile_id | 認証付きページ取得用プロファイル（準備中） |
 | `memoru-processed-events-{env}` | PK: webhook_event_id | Webhook 冪等 + URL カード一時保存（TTL: `expires_at`） |
+| `memoru-ai-jobs-{env}` | PK: job_id | AI 非同期ジョブ（ai-async-jobs）の状態・結果（TTL: `ttl` 24h） |
+| `memoru-rate-limits-{env}` | PK: pk | AI 系エンドポイントのユーザー単位レート制限カウンタ（TTL: `ttl`・ローカルは無効） |
 
 ### GSI（グローバルセカンダリインデックス）
 
@@ -575,7 +578,7 @@ erDiagram
 | POST | `/tutor/sessions/{sessionId}/messages` | メッセージ送信 ⏳ 202 |
 | DELETE | `/tutor/sessions/{sessionId}` | セッション終了 |
 
-> **注**: チューターは SessionManager 経由のマルチターン会話のため `USE_STRANDS=true` が必須です。`false` の場合、各エンドポイントは 503（`tutor_unavailable`）を返します。
+> **注**: チューターは SessionManager 経由のマルチターン会話のため `USE_STRANDS=true` が必須です。`false` の場合でも submit（`POST /tutor/sessions`・`.../messages`）は他の AI 系と同様に 202 + `job_id` を返し、実処理はジョブとして `failed` になります。不可状態はポーリング（`GET /ai-jobs/{id}`）した failed ジョブのエラーコード `ai_unavailable`（503）として表面化します。
 
 ### AI・学習 API
 
@@ -728,7 +731,7 @@ flowchart LR
 | JWT 検証 | API Gateway JWT Authorizer | JWT フォールバック（base64 デコード） |
 | データベース | DynamoDB (AWS) | DynamoDB Local (Docker) |
 | AI カード生成 | Amazon Bedrock (Claude) | **利用不可**（Bedrock 接続不可。`USE_STRANDS=true` + Ollama でローカル AI は可） |
-| AI 系 REST（生成/採点/補足/アドバイス/チューター） | SQS 非同期ジョブ（submit → 202 → ワーカー → ポーリング） | `AI_JOB_WORKER_MODE=inline` で受付ハンドラーが同期実行（1 回目のポーリングで completed。sam local が SQS トリガー非対応のため） |
+| AI 系 REST（生成/URL生成/採点/補足/アドバイス/チューター） | SQS 非同期ジョブ（submit → 202 → ワーカー → ポーリング） | `AI_JOB_WORKER_MODE=inline` で受付ハンドラーが同期実行（1 回目のポーリングで completed。sam local が SQS トリガー非対応のため） |
 | URL カード生成（LINE） | SQS 非同期（Webhook → Queue → ワーカー） | `URL_WORKER_MODE=inline` で Webhook 内同期実行（sam local が SQS トリガー非対応のため） |
 | LINE 通知 | EventBridge → Lambda → LINE API | 未対応 |
 | LINE 連携 | LIFF SDK で ID トークン取得 | **利用不可**（LIFF 環境外） |
