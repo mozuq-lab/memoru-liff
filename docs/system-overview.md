@@ -27,12 +27,14 @@ graph TB
         API[API Function<br/>localhost:8080]
         Webhook[LINE Webhook<br/>Function]
         Worker[URL生成ワーカー<br/>Function]
+        AIWorker[AIジョブワーカー<br/>Function]
         Job[通知ジョブ<br/>5分毎実行]
     end
 
     subgraph キュー["SQS (本番のみ)"]
         Queue[UrlGenerateQueue]
-        DLQ[DLQ<br/>通知/URL生成]
+        AIQueue[AiJobQueue /<br/>AiJobHeavyQueue]
+        DLQ[DLQ<br/>各キュー用]
     end
 
     subgraph データ
@@ -52,7 +54,11 @@ graph TB
     Vite -->|API 呼び出し<br/>Bearer JWT| API
 
     API -->|データ読み書き| DDB
-    API -->|カード生成| Bedrock
+    API -->|AIジョブを enqueue| AIQueue
+    AIQueue -->|トリガー| AIWorker
+    AIWorker -->|AI 生成/採点/対話| Bedrock
+    AIWorker -->|ジョブ結果を書き込み| DDB
+    AIQueue -.->|失敗時| DLQ
 
     Webhook -->|復習処理 / 冪等| DDB
     Webhook -->|返信| LINEAPI
@@ -70,7 +76,7 @@ graph TB
     KC -.->|JWT 検証| API
 ```
 
-> **ローカル環境の注記**: SQS（`UrlGenerateQueue` / DLQ）と URL 生成ワーカーは本番のみのリソースです。ローカルでは `URL_WORKER_MODE=inline` により Webhook が URL カード生成をその場で同期実行します（[§9](#9-本番環境-vs-ローカル環境の違い) 参照）。
+> **ローカル環境の注記**: SQS（`UrlGenerateQueue` / `AiJobQueue` / `AiJobHeavyQueue` と各 DLQ）とワーカー（URL 生成 / AI ジョブ）は本番のみのリソースです。ローカルでは `URL_WORKER_MODE=inline`（LINE の URL カード生成）と `AI_JOB_WORKER_MODE=inline`（AI 系 REST エンドポイント）により、受付ハンドラーがその場で同期実行します（[§9](#9-本番環境-vs-ローカル環境の違い) 参照）。
 
 ---
 
@@ -214,31 +220,45 @@ flowchart TD
 sequenceDiagram
     actor User as ユーザー
     participant FE as フロントエンド
-    participant API as バックエンド
+    participant API as バックエンド (submit)
+    participant Queue as AiJobQueue (SQS)
+    participant Worker as AIジョブワーカー
     participant Bedrock as Amazon Bedrock<br/>(Claude AI)
     participant DB as DynamoDB
 
     User->>FE: テキスト入力<br/>「日本の首都は東京で...」
     FE->>API: POST /cards/generate<br/>{input_text, language: "ja"}
+    API->>DB: ジョブ登録 (status=queued)
+    API->>Queue: {job_id} を enqueue<br/>(ローカルは inline 同期実行)
+    API->>FE: 202 Accepted<br/>{job_id, status: "queued"}
 
-    API->>Bedrock: Claude にプロンプト送信<br/>「以下のテキストから<br/>暗記カードを生成して」
-    Bedrock->>API: JSON レスポンス<br/>[{front: "日本の首都は?",<br/>  back: "東京"}]
+    Queue->>Worker: メッセージをトリガー
+    Worker->>DB: claim (queued→processing)
+    Worker->>Bedrock: Claude にプロンプト送信
+    Bedrock->>Worker: JSON レスポンス<br/>[{front, back}]
+    Worker->>DB: 結果を completed で記録
 
-    API->>FE: 生成されたカード一覧
+    loop 1.5 秒間隔でポーリング
+        FE->>API: GET /ai-jobs/{job_id}
+        API->>DB: ジョブ取得
+        API->>FE: status=processing / completed(result)
+    end
 
-    Note over FE: ユーザーが保存するカードを選択
+    Note over FE: completed の result から<br/>生成カード一覧を表示 → 保存するカードを選択
 
     loop 選択した各カードに対して
         FE->>API: POST /cards<br/>{front, back, tags}
-        API->>DB: ユーザー存在確認<br/>(get_or_create_user)
-        API->>DB: カード作成 +<br/>card_count インクリメント<br/>（トランザクション）
+        API->>DB: ユーザー存在確認 (get_or_create_user・冪等)
+        API->>DB: カード作成 + card_count インクリメント<br/>（トランザクション）
         API->>FE: 作成完了
     end
-
-    Note over FE: カード一覧に遷移<br/>「3枚のカードを保存しました」
 ```
 
-> **ローカル環境の制限**: Bedrock はローカルでは利用できないため、Bedrock 経路のカード生成は失敗します。`USE_STRANDS=true` + ローカル Ollama（:11434）を使うとローカル AI で代替できます。
+> **AI 非同期ジョブ（ai-async-jobs）**: 生成・URL 生成・採点・補足・アドバイス・チューターの各 AI 系
+> エンドポイントは、API Gateway の 30 秒統合タイムアウトを超える処理を捌くため 202 + `job_id`
+> を返し、ワーカーが実処理を行います。詳細は [`docs/design/ai-async-jobs/`](design/ai-async-jobs/architecture.md)。
+>
+> **ローカル環境の制限**: Bedrock はローカルでは利用できないため、Bedrock 経路のカード生成は失敗します（`AI_JOB_WORKER_MODE=inline` で受付ハンドラーが同期実行するが、その中の Bedrock 呼び出しが失敗する）。`USE_STRANDS=true` + ローカル Ollama（:11434）を使うとローカル AI で代替できます。
 
 ### 5.2 復習（SRS）フロー
 
@@ -410,7 +430,7 @@ sequenceDiagram
 >
 > **ローカル環境**: `URL_WORKER_MODE=inline` のとき Webhook が SQS を介さず生成本体をその場で同期実行します（sam local が SQS → Lambda トリガーを再現できないため）。
 
-> **補足**: フロントエンドの `POST /cards/generate-from-url`（[§7](#7-バックエンド-api-一覧)）は、上記の LINE 経由とは別系統で、LIFF 画面から同期的に URL カードを生成する専用 Lambda（`UrlGenerateFunction`）です。
+> **補足**: フロントエンドの `POST /cards/generate-from-url`（[§7](#7-バックエンド-api-一覧)）は、上記の LINE 経由とは別系統で、LIFF 画面から URL カードを生成する専用 Lambda（`UrlGenerateFunction`）です。ai-async-jobs 移行後はこの Lambda が submit ハンドラーとしてジョブを登録し heavy キューへ送信して 202 を返し、本体処理は AI ジョブワーカーが実行します（`job_type=generate_from_url`）。
 
 ---
 
@@ -468,6 +488,8 @@ erDiagram
 | `memoru-tutor-sessions-{env}` | PK: user_id / SK: session_id | AI チューターのセッション（TTL: `ttl`） |
 | `memoru-browser-profiles-{env}` | PK: user_id / SK: profile_id | 認証付きページ取得用プロファイル（準備中） |
 | `memoru-processed-events-{env}` | PK: webhook_event_id | Webhook 冪等 + URL カード一時保存（TTL: `expires_at`） |
+| `memoru-ai-jobs-{env}` | PK: job_id | AI 非同期ジョブ（ai-async-jobs）の状態・結果（TTL: `ttl` 24h） |
+| `memoru-rate-limits-{env}` | PK: pk | AI 系エンドポイントのユーザー単位レート制限カウンタ（TTL: `ttl`・ローカルは無効） |
 
 ### GSI（グローバルセカンダリインデックス）
 
@@ -492,6 +514,12 @@ erDiagram
 
 ## 7. バックエンド API 一覧
 
+> **AI 系エンドポイントの非同期化（ai-async-jobs）**: 下表で「⏳ 202」と記した AI 系
+> エンドポイントは、API Gateway の 30 秒統合タイムアウトを超える AI 処理を捌くため、
+> 同期検証後に `202 Accepted` + `job_id` を返し、実処理は SQS ワーカーが実行します。
+> クライアントは `GET /ai-jobs/{jobId}` をポーリングして結果を取得します。
+> 設計: [`docs/design/ai-async-jobs/`](design/ai-async-jobs/architecture.md)。
+
 ### ユーザー API
 
 | メソッド | パス | 説明 |
@@ -511,9 +539,9 @@ erDiagram
 | PUT | `/cards/{cardId}` | カード更新 |
 | DELETE | `/cards/{cardId}` | カード削除（レビュー履歴も削除） |
 | GET | `/cards/due` | 復習対象カード取得 |
-| POST | `/cards/generate` | AI でカード生成（Bedrock） |
-| POST | `/cards/generate-from-url` | URL からの AI カード生成（専用 Lambda `UrlGenerateFunction`） |
-| POST | `/cards/refine` | カード内容の AI 補足（表面・裏面の改善） |
+| POST | `/cards/generate` | AI でカード生成（Bedrock）⏳ 202 |
+| POST | `/cards/generate-from-url` | URL からの AI カード生成（heavy ジョブ・専用 Lambda `UrlGenerateFunction`）⏳ 202 |
+| POST | `/cards/refine` | カード内容の AI 補足（表面・裏面の改善）⏳ 202 |
 
 ### デッキ API
 
@@ -530,7 +558,7 @@ erDiagram
 |---------|------|------|
 | POST | `/reviews/{cardId}` | 復習結果送信（grade 0-5） |
 | POST | `/reviews/{cardId}/undo` | 復習取り消し |
-| POST | `/reviews/{cardId}/grade-ai` | AI による回答採点（専用 Lambda `ReviewsGradeAiFunction`） |
+| POST | `/reviews/{cardId}/grade-ai` | AI による回答採点（専用 Lambda `ReviewsGradeAiFunction`）⏳ 202 |
 
 ### 統計 API
 
@@ -544,19 +572,29 @@ erDiagram
 
 | メソッド | パス | 説明 |
 |---------|------|------|
-| POST | `/tutor/sessions` | チューターセッション開始 |
+| POST | `/tutor/sessions` | チューターセッション開始 ⏳ 202 |
 | GET | `/tutor/sessions` | セッション一覧取得 |
 | GET | `/tutor/sessions/{sessionId}` | セッション詳細取得 |
-| POST | `/tutor/sessions/{sessionId}/messages` | メッセージ送信 |
+| POST | `/tutor/sessions/{sessionId}/messages` | メッセージ送信 ⏳ 202 |
 | DELETE | `/tutor/sessions/{sessionId}` | セッション終了 |
 
-> **注**: チューターは SessionManager 経由のマルチターン会話のため `USE_STRANDS=true` が必須です。`false` の場合、各エンドポイントは 503（`tutor_unavailable`）を返します。
+> **注**: チューターは SessionManager 経由のマルチターン会話のため `USE_STRANDS=true` が必須です。`false` の場合でも submit（`POST /tutor/sessions`・`.../messages`）は他の AI 系と同様に 202 + `job_id` を返し、実処理はジョブとして `failed` になります。不可状態はポーリング（`GET /ai-jobs/{id}`）した failed ジョブのエラーコード `ai_unavailable`（503）として表面化します。
 
 ### AI・学習 API
 
 | メソッド | パス | 説明 |
 |---------|------|------|
-| GET | `/advice` | 学習アドバイス取得（専用 Lambda `AdviceFunction`） |
+| POST | `/advice` | 学習アドバイス取得（専用 Lambda `AdviceFunction`）⏳ 202 |
+
+### AI ジョブ API（ai-async-jobs）
+
+| メソッド | パス | 説明 |
+|---------|------|------|
+| GET | `/ai-jobs/{jobId}` | AI 非同期ジョブの状態・結果取得（ポーリング用。`queued`/`processing`/`completed`/`failed`）|
+
+> **注**: `GET /ai-jobs/{jobId}` はジョブ所有者以外・存在しない `job_id`（TTL 24h 失効後を含む）を
+> 一律 404 で返します（IDOR 対策）。`completed` は現行の同期レスポンスと同一スキーマの `result`、
+> `failed` は `{status, code, message}` の `error` を返します。
 
 ### ブラウザプロファイル API（準備中）
 
@@ -630,9 +668,10 @@ memoru-liff/
 │   │   │   ├── notification_service.py # 通知判定ロジック
 │   │   │   └── prompts/               # AI プロンプトテンプレート
 │   │   ├── webhook/line_handler.py    # LINE Webhook 処理（受付 → enqueue）
-│   │   └── jobs/
+│   │   └── jobs/                      # 定期実行ジョブ + SQS ワーカー
 │   │       ├── due_push_handler.py    # 定期通知ジョブ
-│   │       └── url_generate_worker_handler.py # URL 生成 SQS ワーカー
+│   │       ├── url_generate_worker_handler.py # URL 生成 SQS ワーカー
+│   │       └── ai_job_worker_handler.py       # AI 非同期ジョブ SQS ワーカー（ai-async-jobs）
 │   ├── tests/                         # pytest テスト一式（カバレッジ 80% 以上を目標）
 │   ├── template.yaml                  # SAM テンプレート（Lambda + API Gateway）
 │   ├── docker-compose.yaml            # ローカルサービス定義
@@ -665,8 +704,10 @@ flowchart LR
         CF --> APIGW[API Gateway<br/>JWT Authorizer]
         APIGW --> Lambda[Lambda]
         Lambda --> DDB_P[(DynamoDB)]
-        Lambda --> Bedrock_P[Bedrock]
-        WH_P[Webhook Lambda] --> SQS_P[SQS]
+        Lambda --> AISQS_P[SQS<br/>AiJobQueue]
+        AISQS_P --> AIWorker_P[AIジョブワーカー]
+        AIWorker_P --> Bedrock_P[Bedrock]
+        WH_P[Webhook Lambda] --> SQS_P[SQS<br/>UrlGenerateQueue]
         SQS_P --> Worker_P[URL生成ワーカー]
         Worker_P --> Bedrock_P
         EB_P[EventBridge] --> Lambda_N[通知 Lambda]
@@ -690,6 +731,7 @@ flowchart LR
 | JWT 検証 | API Gateway JWT Authorizer | JWT フォールバック（base64 デコード） |
 | データベース | DynamoDB (AWS) | DynamoDB Local (Docker) |
 | AI カード生成 | Amazon Bedrock (Claude) | **利用不可**（Bedrock 接続不可。`USE_STRANDS=true` + Ollama でローカル AI は可） |
+| AI 系 REST（生成/URL生成/採点/補足/アドバイス/チューター） | SQS 非同期ジョブ（submit → 202 → ワーカー → ポーリング） | `AI_JOB_WORKER_MODE=inline` で受付ハンドラーが同期実行（1 回目のポーリングで completed。sam local が SQS トリガー非対応のため） |
 | URL カード生成（LINE） | SQS 非同期（Webhook → Queue → ワーカー） | `URL_WORKER_MODE=inline` で Webhook 内同期実行（sam local が SQS トリガー非対応のため） |
 | LINE 通知 | EventBridge → Lambda → LINE API | 未対応 |
 | LINE 連携 | LIFF SDK で ID トークン取得 | **利用不可**（LIFF 環境外） |

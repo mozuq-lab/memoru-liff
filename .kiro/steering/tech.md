@@ -2,7 +2,7 @@
 
 ## Architecture
 
-サーバーレスアーキテクチャ。バックエンドは AWS SAM (Lambda + API Gateway + DynamoDB) で構成し、フロントエンドは React SPA を S3 + CloudFront でホスティング。認証は OIDC + PKCE フロー（Keycloak / Cognito 切り替え対応）。
+サーバーレスアーキテクチャ。バックエンドは AWS SAM (Lambda + API Gateway + DynamoDB + SQS) で構成し、フロントエンドは React SPA を S3 + CloudFront でホスティング。認証は OIDC + PKCE フロー（Keycloak / Cognito 切り替え対応）。AI 系エンドポイントと LINE の URL カード生成は SQS ワーカーで非同期化（API Gateway 30 秒上限の回避）。
 
 ## Core Technologies
 

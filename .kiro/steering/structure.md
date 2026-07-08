@@ -15,7 +15,7 @@
 - `models/`: Pydantic モデル。リクエスト/レスポンスの型定義とバリデーション
 - `services/prompts/`: AI プロンプトテンプレート。生成・採点・アドバイスごとに分離
 - `webhook/`: LINE Webhook ハンドラー（`line_handler.py`）
-- `jobs/`: スケジュール実行 Lambda（`due_push_handler.py`）
+- `jobs/`: スケジュール実行 Lambda（`due_push_handler.py`）+ SQS ワーカー（`url_generate_worker_handler.py` / `ai_job_worker_handler.py`）
 
 ### Frontend: Feature-Directory Organization
 **Location**: `frontend/src/`
