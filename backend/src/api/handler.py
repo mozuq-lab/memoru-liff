@@ -1,10 +1,10 @@
 """Main API handler for Memoru LIFF application.
 
 Routes API Gateway events to domain-specific handlers via Lambda Powertools Router.
-Standalone Lambda handlers (grade_ai, advice) remain in this file.
+Standalone Lambda handlers (grade_ai, advice) remain in this file
+(ai-async-jobs: いずれも同期検証 + ジョブ submit のみを行い 202 を返す).
 """
 
-import dataclasses
 import json
 from typing import Any
 
@@ -16,6 +16,7 @@ from aws_lambda_powertools.utilities.typing import LambdaContext
 from api.shared import (
     check_ai_rate_limit_event,
     get_user_id_from_event,
+    make_job_accepted_event_response,
     map_ai_error_to_http,
 )
 from api.handlers.user_handler import router as user_router
@@ -23,18 +24,16 @@ from api.handlers.cards_handler import router as cards_router
 from api.handlers.decks_handler import router as decks_router
 from api.handlers.review_handler import router as review_router
 from api.handlers.ai_handler import router as ai_router
+from api.handlers.ai_jobs_handler import router as ai_jobs_router
 from api.handlers.stats_handler import router as stats_router
 from api.handlers.browser_profile_handler import router as browser_profile_router
 from api.handlers.tutor_handler import router as tutor_router
 
 # Standalone handler dependencies
-from models.grading import GradeAnswerRequest, GradeAnswerResponse
-from models.advice import LearningAdviceResponse
+from models.grading import GradeAnswerRequest
 from pydantic import ValidationError
+from services.ai_job_service import submit_ai_job
 from services.card_service import CardService, CardNotFoundError
-from services.review_service import ReviewService
-from services.user_service import UserService
-from services.ai_service import create_ai_service, AIServiceError
 
 logger = Logger()
 tracer = Tracer()
@@ -50,14 +49,13 @@ app.include_router(cards_router)
 app.include_router(decks_router)
 app.include_router(review_router)
 app.include_router(ai_router)
+app.include_router(ai_jobs_router)
 app.include_router(stats_router)
 app.include_router(browser_profile_router)
 app.include_router(tutor_router)
 
 # Services for standalone Lambda handlers
 card_service = CardService()
-review_service = ReviewService()
-user_service = UserService()
 
 
 # Keep backward compatibility alias
@@ -79,9 +77,11 @@ def _make_lambda_response(status_code: int, body: dict) -> dict:
 
 
 def grade_ai_handler(event: dict, context: Any) -> dict:
-    """POST /reviews/{cardId}/grade-ai の Lambda ハンドラー。
+    """POST /reviews/{cardId}/grade-ai の Lambda ハンドラー（ai-async-jobs: submit のみ）。
 
     独立 Lambda 関数として API Gateway HTTP API v2 イベントを直接受け取る。
+    同期検証（認証・レート制限・バリデーション・カード所有権）後にジョブを登録し
+    202 を返す。AI 採点はワーカーが実行する。
     """
     try:
         user_id = get_user_id_from_event(event)
@@ -97,11 +97,6 @@ def grade_ai_handler(event: dict, context: Any) -> dict:
         if not card_id:
             return _make_lambda_response(400, {"error": "card_id is required"})
 
-        logger.info(
-            "Grade AI request",
-            extra={"card_id": card_id, "user_id": user_id, "user_answer_length": len(event.get("body") or "")},
-        )
-
         body_str = event.get("body") or ""
         try:
             body_dict = json.loads(body_str)
@@ -111,50 +106,31 @@ def grade_ai_handler(event: dict, context: Any) -> dict:
         except ValidationError as e:
             return _make_lambda_response(400, {"error": "Invalid request", "details": json.loads(e.json())})
 
+        logger.info(
+            "Grade AI job submit",
+            extra={"card_id": card_id, "user_id": user_id, "user_answer_length": len(request.user_answer)},
+        )
+
         language = (event.get("queryStringParameters") or {}).get("language", "ja")
         if language not in ALLOWED_LANGUAGES:
             return _make_lambda_response(400, {"error": "Unsupported language. Use 'ja' or 'en'."})
 
+        # fail-fast: カード存在＋所有権を submit 時に検証（ワーカー側でも再検証される）
         try:
-            card = card_service.get_card(user_id, card_id)
+            card_service.get_card(user_id, card_id)
         except CardNotFoundError:
             return _make_lambda_response(404, {"error": "Not Found"})
 
-        try:
-            ai_service = create_ai_service()
-            result = ai_service.grade_answer(
-                card_front=card.front,
-                card_back=card.back,
-                user_answer=request.user_answer,
-                language=language,
-            )
-        except AIServiceError as e:
-            logger.warning(
-                "AI service error grading card",
-                extra={"card_id": card_id, "user_id": user_id, "error_type": type(e).__name__, "error": str(e)},
-            )
-            ai_response = _map_ai_error_to_http(e)
-            return {
-                "statusCode": ai_response.status_code,
-                "headers": {"Content-Type": "application/json"},
-                "body": ai_response.body,
-            }
-
-        logger.info(
-            "Grade AI succeeded",
-            extra={"card_id": card_id, "grade": result.grade, "model": result.model_used},
-        )
-        response = GradeAnswerResponse(
-            grade=result.grade,
-            reasoning=result.reasoning,
-            card_front=card.front,
-            card_back=card.back,
-            grading_info={
-                "model_used": result.model_used,
-                "processing_time_ms": result.processing_time_ms,
+        job = submit_ai_job(
+            user_id=user_id,
+            job_type="grade_ai",
+            payload={
+                "card_id": card_id,
+                "user_answer": request.user_answer,
+                "language": language,
             },
         )
-        return _make_lambda_response(200, response.model_dump(mode="json"))
+        return make_job_accepted_event_response(job)
 
     except Exception as e:
         logger.error("Unexpected error in grade_ai_handler", extra={"error": str(e)})
@@ -162,9 +138,11 @@ def grade_ai_handler(event: dict, context: Any) -> dict:
 
 
 def advice_handler(event: dict, context: Any) -> dict:
-    """GET /advice の Lambda ハンドラー。
+    """POST /advice の Lambda ハンドラー（ai-async-jobs: submit のみ）。
 
     独立 Lambda 関数として API Gateway HTTP API v2 イベントを直接受け取る。
+    レビューサマリー集計と AI 呼び出しはワーカーが実行する
+    （GET → POST 変更。ジョブ作成は非冪等のため。フロント未使用につき互換対応不要）。
     """
     try:
         user_id = get_user_id_from_event(event)
@@ -175,61 +153,18 @@ def advice_handler(event: dict, context: Any) -> dict:
         if rate_limited:
             return rate_limited
 
-        logger.info("Advice request", extra={"user_id": user_id})
+        logger.info("Advice job submit", extra={"user_id": user_id})
 
         language = (event.get("queryStringParameters") or {}).get("language", "ja")
         if language not in ALLOWED_LANGUAGES:
             return _make_lambda_response(400, {"error": "Unsupported language. Use 'ja' or 'en'."})
 
-        # streak・cards_due_today の「今日」判定をユーザーのタイムゾーンで行う
-        # （UTC 固定だと JST 深夜〜朝のレビューでストリークが 0 に見える）。
-        user = user_service.get_or_create_user(user_id)
-        user_timezone = user.settings.get("timezone", "Asia/Tokyo")
-
-        review_summary = review_service.get_review_summary(
-            user_id, user_timezone=user_timezone
+        job = submit_ai_job(
+            user_id=user_id,
+            job_type="advice",
+            payload={"language": language},
         )
-        review_summary_dict = dataclasses.asdict(review_summary)
-
-        try:
-            ai_service = create_ai_service()
-            result = ai_service.get_learning_advice(
-                review_summary=review_summary_dict,
-                language=language,
-            )
-        except AIServiceError as e:
-            logger.warning(
-                "AI service error getting advice",
-                extra={"user_id": user_id, "error_type": type(e).__name__, "error": str(e)},
-            )
-            ai_response = _map_ai_error_to_http(e)
-            return {
-                "statusCode": ai_response.status_code,
-                "headers": {"Content-Type": "application/json"},
-                "body": ai_response.body,
-            }
-
-        logger.info(
-            "Advice succeeded",
-            extra={"user_id": user_id, "model": result.model_used, "time_ms": result.processing_time_ms},
-        )
-        response = LearningAdviceResponse(
-            advice_text=result.advice_text,
-            weak_areas=result.weak_areas,
-            recommendations=result.recommendations,
-            study_stats={
-                "total_reviews": review_summary.total_reviews,
-                "average_grade": review_summary.average_grade,
-                "total_cards": review_summary.total_cards,
-                "cards_due_today": review_summary.cards_due_today,
-                "streak_days": review_summary.streak_days,
-            },
-            advice_info={
-                "model_used": result.model_used,
-                "processing_time_ms": result.processing_time_ms,
-            },
-        )
-        return _make_lambda_response(200, response.model_dump(mode="json"))
+        return make_job_accepted_event_response(job)
 
     except Exception as e:
         logger.error("Unexpected error in advice_handler", extra={"error": str(e)})

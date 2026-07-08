@@ -109,6 +109,75 @@ class TutorService:
         self.ai_service = ai_service if ai_service is not None else create_tutor_ai_service()
         self.session_manager_factory = session_manager_factory or create_tutor_session_manager
 
+    def validate_start_session(
+        self,
+        user_id: str,
+        deck_id: str,
+        mode: str,
+    ) -> tuple[dict, list[dict], "str | None"]:
+        """セッション開始の事前検証（ai-async-jobs: submit 時の fail-fast にも使用）。
+
+        デッキ存在・カード有無・weak_point モードのレビュー履歴有無を検証する。
+        start_session と非同期 submit ハンドラーの双方から呼ばれ、検証内容と
+        例外（DeckNotFoundError / EmptyDeckError / InsufficientReviewDataError）を
+        単一実装に保つ。
+
+        Returns:
+            (deck, cards, weak_cards_context) のタプル。
+
+        Raises:
+            DeckNotFoundError: デッキが存在しない。
+            EmptyDeckError: デッキにカードがない。
+            InsufficientReviewDataError: weak_point モードでレビュー履歴が不足。
+        """
+        deck = self._repo.get_deck(user_id, deck_id)
+        cards = self._repo.get_deck_cards(user_id, deck_id)
+
+        if not cards:
+            raise EmptyDeckError(
+                "このデッキにはカードがありません。カードを追加してからセッションを開始してください。"
+            )
+
+        weak_cards_context = None
+        if mode == "weak_point":
+            weak_cards = self._get_weak_cards_for_deck(user_id, deck_id, cards)
+            if not weak_cards:
+                raise InsufficientReviewDataError(
+                    "レビュー履歴が不足しています。Free Talk モードをお試しください。"
+                )
+            weak_cards_context = self._format_weak_cards_context(weak_cards)
+
+        return deck, cards, weak_cards_context
+
+    def validate_send_message(self, user_id: str, session_id: str) -> None:
+        """メッセージ送信の事前検証（ai-async-jobs: submit 時の fail-fast 用）。
+
+        セッション存在・状態・メッセージ上限を検証する。授権チェックのみであり、
+        in-flight ロック取得と最終的な状態遷移の権威はワーカー内の send_message が持つ
+        （設計 architecture.md §5）。
+
+        Raises:
+            SessionNotFoundError: セッションが存在しない。
+            SessionEndedError: ended / timed_out、またはタイムアウト超過。
+            MessageLimitError: メッセージ上限に到達済み。
+        """
+        item = self._repo.get_session_item(user_id, session_id)
+
+        status = item["status"]
+        if status in ("ended", "timed_out"):
+            raise SessionEndedError(f"Session {session_id} is {status}")
+
+        updated_at = datetime.fromisoformat(item["updated_at"])
+        if datetime.now(timezone.utc) - updated_at > timedelta(minutes=self.TIMEOUT_MINUTES):
+            # send_message と同じ副作用を持たせる: timed_out へのマーキングと TTL 設定を
+            # 行わないと、この 409 以降クライアントが一覧/詳細を取得しない場合に
+            # status=active のまま TTL 未設定でレコードが無期限に残る（実装レビュー #2）。
+            self._mark_timed_out(user_id, session_id)
+            raise SessionEndedError(f"Session {session_id} has timed out")
+
+        if int(item.get("message_count", 0)) >= self.MAX_ROUNDS:
+            raise MessageLimitError(f"Session {session_id} has reached message limit")
+
     def start_session(
         self,
         user_id: str,
@@ -129,26 +198,12 @@ class TutorService:
             TutorSessionResponse with the new session data.
         """
         # Validate deck and cards BEFORE ending existing sessions (C-1 fix)
-        deck = self._repo.get_deck(user_id, deck_id)
-        cards = self._repo.get_deck_cards(user_id, deck_id)
-
-        if not cards:
-            raise EmptyDeckError(
-                "このデッキにはカードがありません。カードを追加してからセッションを開始してください。"
-            )
+        deck, cards, weak_cards_context = self.validate_start_session(
+            user_id, deck_id, mode
+        )
 
         # Build system prompt
         cards_context = format_cards_context(cards)
-
-        # For weak_point mode, retrieve weak card data
-        weak_cards_context = None
-        if mode == "weak_point":
-            weak_cards = self._get_weak_cards_for_deck(user_id, deck_id, cards)
-            if not weak_cards:
-                raise InsufficientReviewDataError(
-                    "レビュー履歴が不足しています。Free Talk モードをお試しください。"
-                )
-            weak_cards_context = self._format_weak_cards_context(weak_cards)
 
         system_prompt = get_system_prompt(
             mode=mode,  # type: ignore[arg-type]

@@ -1,28 +1,28 @@
-"""TASK-0062: GET /advice エンドポイントのテスト。
+"""POST /advice エンドポイントのテスト（ai-async-jobs 版）。
 
-advice_handler Lambda ハンドラーの本実装に対するテストケース。
+advice_handler Lambda ハンドラーのテストケース。
 構造的前提:
 - advice_handler は独立 Lambda 関数（app/APIGatewayHttpResolver 経由ではない）
 - 生の API Gateway HTTP API v2 イベントを直接受け取る
 - レスポンスは Lambda プロキシ統合形式の dict（statusCode, headers, body）
-- GET リクエストのためリクエストボディのパースは不要
+
+ai-async-jobs: ジョブ作成は非冪等のため GET → POST に変更された。
+ハンドラーは同期検証（認証・language）後に submit_ai_job でジョブを登録し
+202 を返すだけになった。レビューサマリー集計・AI 呼び出し・レスポンス形状・
+AI エラーマッピングの検証は
+tests/unit/test_ai_job_executors.py（execute_advice）と
+tests/unit/test_ai_job_errors.py（classify_ai_job_error）に移設した。
 """
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from api.handler import advice_handler
-from services.ai_service import (
-    AIInternalError,
-    AIParseError,
-    AIProviderError,
-    AIRateLimitError,
-    AITimeoutError,
-    LearningAdvice,
-    ReviewSummary,
-)
+
+# submit_ai_job モックの戻り値（作成直後の queued ジョブレコード相当）
+SUBMIT_RESULT = {"job_id": "aijob_t", "job_type": "advice", "status": "queued"}
 
 
 # =============================================================================
@@ -54,7 +54,7 @@ def _make_advice_event(
         }
     event = {
         "version": "2.0",
-        "routeKey": "GET /advice",
+        "routeKey": "POST /advice",
         "rawPath": "/advice",
         "rawQueryString": "",
         "pathParameters": None,
@@ -62,9 +62,9 @@ def _make_advice_event(
             "accountId": "123456789012",
             "apiId": "api-id",
             "authorizer": authorizer,
-            "http": {"method": "GET"},
+            "http": {"method": "POST"},
             "requestId": "test-request-id",
-            "routeKey": "GET /advice",
+            "routeKey": "POST /advice",
             "stage": "$default",
         },
         "headers": {"content-type": "application/json"},
@@ -81,70 +81,26 @@ def _make_advice_event(
 
 
 @pytest.fixture
-def mock_review_service():
-    """ReviewService のモック。ReviewSummary を返す。
+def mock_submit():
+    """submit_ai_job のモック。作成直後の queued ジョブレコードを返す。
 
-    パッチ対象: api.handler.review_service（モジュールレベルグローバル変数）
+    パッチ対象: api.handler.submit_ai_job（インポートされた関数）。
     """
-    with patch("api.handler.review_service") as mock:
-        mock.get_review_summary.return_value = ReviewSummary(
-            total_reviews=100,
-            average_grade=3.5,
-            total_cards=50,
-            cards_due_today=10,
-            streak_days=5,
-            tag_performance={"math": 0.8, "science": 0.6},
-            recent_review_dates=["2026-02-24", "2026-02-23"],
-        )
+    with patch("api.handler.submit_ai_job") as mock:
+        mock.return_value = dict(SUBMIT_RESULT)
         yield mock
-
-
-@pytest.fixture(autouse=True)
-def mock_user_service():
-    """UserService のモック（user_timezone 取得用）。
-
-    advice_handler はユーザー設定から timezone を取得して
-    get_review_summary に渡すため、全テストで自動的にパッチする。
-    """
-    with patch("api.handler.user_service") as mock:
-        mock.get_or_create_user.return_value.settings = {"timezone": "Asia/Tokyo"}
-        yield mock
-
-
-@pytest.fixture
-def mock_ai_service():
-    """create_ai_service のモック。LearningAdvice を返す。
-
-    パッチ対象: api.handler.create_ai_service（インポートされた関数）
-
-    Yields:
-        tuple: (mock_factory, mock_service)
-    """
-    with patch("api.handler.create_ai_service") as mock_factory:
-        mock_service = MagicMock()
-        mock_service.get_learning_advice.return_value = LearningAdvice(
-            advice_text="数学の復習頻度を上げましょう。",
-            weak_areas=["数学", "物理"],
-            recommendations=["毎日10枚のカードを復習する", "弱点タグを重点的に復習"],
-            model_used="test-model",
-            processing_time_ms=800,
-        )
-        mock_factory.return_value = mock_service
-        yield mock_factory, mock_service
 
 
 # =============================================================================
-# カテゴリ A: 認証テスト（TestAdviceHandlerAuth）
+# カテゴリ A: 認証テスト
 # =============================================================================
 
 
 class TestAdviceHandlerAuth:
-    """認証関連テスト（TC-062-AUTH-001 ~ 003）。"""
+    """認証関連テスト。認証失敗時はジョブを submit しない（同期 401）。"""
 
-    def test_advice_returns_401_when_no_authorizer(
-        self, lambda_context, mock_review_service, mock_ai_service
-    ):
-        """TC-062-AUTH-001: authorizer が空の場合に HTTP 401 を返すことを確認."""
+    def test_advice_returns_401_when_no_authorizer(self, lambda_context, mock_submit):
+        """authorizer が空の場合に HTTP 401 を返すことを確認."""
         event = _make_advice_event(authorizer={})
 
         response = advice_handler(event, lambda_context)
@@ -152,9 +108,10 @@ class TestAdviceHandlerAuth:
         assert response["statusCode"] == 401
         body = json.loads(response["body"])
         assert body["error"] == "Unauthorized"
+        mock_submit.assert_not_called()
 
-    def test_advice_returns_401_when_no_sub_claim(self, lambda_context):
-        """TC-062-AUTH-002: JWT claims に sub がない場合に HTTP 401 を返すことを確認."""
+    def test_advice_returns_401_when_no_sub_claim(self, lambda_context, mock_submit):
+        """JWT claims に sub がない場合に HTTP 401 を返すことを確認."""
         authorizer = {"jwt": {"claims": {"iss": "https://keycloak.example.com"}}}
         event = _make_advice_event(authorizer=authorizer)
 
@@ -163,346 +120,131 @@ class TestAdviceHandlerAuth:
         assert response["statusCode"] == 401
         body = json.loads(response["body"])
         assert body["error"] == "Unauthorized"
+        mock_submit.assert_not_called()
 
-    def test_advice_extracts_user_id_from_jwt_claims(
-        self, lambda_context, mock_review_service, mock_ai_service
-    ):
-        """TC-062-AUTH-003: JWT claims.sub から user_id を正しく抽出することを確認."""
+    def test_advice_extracts_user_id_from_jwt_claims(self, lambda_context, mock_submit):
+        """JWT claims.sub から抽出した user_id が submit に渡ることを確認."""
         event = _make_advice_event(user_id="user-abc-123")
 
         advice_handler(event, lambda_context)
 
-        mock_review_service.get_review_summary.assert_called_once_with(
-            "user-abc-123", user_timezone="Asia/Tokyo"
-        )
+        assert mock_submit.call_args.kwargs["user_id"] == "user-abc-123"
 
 
 # =============================================================================
-# カテゴリ B: データフローテスト（TestAdviceHandlerFlow）
+# カテゴリ B: ジョブ submit テスト
 # =============================================================================
 
 
-class TestAdviceHandlerFlow:
-    """データフロー関連テスト（TC-062-FLOW-001 ~ 005）。"""
+class TestAdviceHandlerSubmit:
+    """submit_ai_job の呼び出し引数（user_id / job_type / payload）を検証する。
 
-    def test_advice_calls_get_review_summary(
-        self, lambda_context, mock_review_service, mock_ai_service
-    ):
-        """TC-062-FLOW-001: review_service.get_review_summary が呼ばれることを確認."""
+    旧「データフローテスト」の後継。ReviewSummary の集計・AI への伝播は
+    test_ai_job_executors.py::TestExecuteAdvice が担保する。
+    """
+
+    def test_advice_submits_job_with_correct_args(self, lambda_context, mock_submit):
+        """submit_ai_job が user_id / job_type / payload 一式で 1 回呼ばれることを確認."""
         event = _make_advice_event()
 
         advice_handler(event, lambda_context)
 
-        mock_review_service.get_review_summary.assert_called_once_with(
-            "test-user-id", user_timezone="Asia/Tokyo"
+        mock_submit.assert_called_once_with(
+            user_id="test-user-id",
+            job_type="advice",
+            payload={"language": "ja"},
         )
 
-    def test_advice_calls_create_ai_service_factory(
-        self, lambda_context, mock_review_service, mock_ai_service
-    ):
-        """TC-062-FLOW-002: create_ai_service() ファクトリーが 1 回呼ばれることを確認."""
-        mock_factory, _ = mock_ai_service
-        event = _make_advice_event()
-
-        advice_handler(event, lambda_context)
-
-        mock_factory.assert_called_once()
-
-    def test_advice_passes_review_summary_dict_to_ai_service(
-        self, lambda_context, mock_review_service, mock_ai_service
-    ):
-        """TC-062-FLOW-003: ReviewSummary が dict に変換されて AI サービスに渡されることを確認."""
-        _, mock_service = mock_ai_service
-        event = _make_advice_event()
-
-        advice_handler(event, lambda_context)
-
-        # get_learning_advice が呼ばれたことを確認
-        mock_service.get_learning_advice.assert_called_once()
-        call_kwargs = mock_service.get_learning_advice.call_args.kwargs
-        # review_summary は dict であること
-        assert isinstance(call_kwargs["review_summary"], dict)
-        # 元の ReviewSummary のフィールドが含まれること
-        assert call_kwargs["review_summary"]["total_reviews"] == 100
-        assert call_kwargs["review_summary"]["average_grade"] == 3.5
-
-    def test_advice_passes_language_param_to_ai_service(
-        self, lambda_context, mock_review_service, mock_ai_service
-    ):
-        """TC-062-FLOW-004: language=en が AI サービスに渡されることを確認."""
-        _, mock_service = mock_ai_service
+    def test_advice_passes_language_param_to_payload(self, lambda_context, mock_submit):
+        """language=en が payload に渡ることを確認."""
         event = _make_advice_event(query_params={"language": "en"})
 
         advice_handler(event, lambda_context)
 
-        call_kwargs = mock_service.get_learning_advice.call_args.kwargs
-        assert call_kwargs["language"] == "en"
+        assert mock_submit.call_args.kwargs["payload"] == {"language": "en"}
 
-    def test_advice_uses_default_language_ja(
-        self, lambda_context, mock_review_service, mock_ai_service
-    ):
-        """TC-062-FLOW-005: queryStringParameters なしでデフォルト language=ja を確認."""
-        _, mock_service = mock_ai_service
+    def test_advice_uses_default_language_ja(self, lambda_context, mock_submit):
+        """queryStringParameters なしでデフォルト language=ja を確認."""
         event = _make_advice_event()  # query_params なし
 
         advice_handler(event, lambda_context)
 
-        call_kwargs = mock_service.get_learning_advice.call_args.kwargs
-        assert call_kwargs["language"] == "ja"
+        assert mock_submit.call_args.kwargs["payload"] == {"language": "ja"}
+
+    def test_advice_returns_400_when_language_is_invalid(
+        self, lambda_context, mock_submit
+    ):
+        """language が ja/en 以外の場合に HTTP 400 を返すことを確認（許可リスト検証）."""
+        event = _make_advice_event(query_params={"language": "xx"})
+
+        response = advice_handler(event, lambda_context)
+
+        assert response["statusCode"] == 400
+        body = json.loads(response["body"])
+        assert body["error"] == "Unsupported language. Use 'ja' or 'en'."
+        mock_submit.assert_not_called()
 
 
 # =============================================================================
-# カテゴリ C: 正常系レスポンステスト（TestAdviceHandlerSuccess）
+# カテゴリ C: 正常系レスポンステスト（202 Accepted）
 # =============================================================================
 
 
-class TestAdviceHandlerSuccess:
-    """正常系レスポンステスト（TC-062-RES-001 ~ 008）。"""
+class TestAdviceHandlerAccepted:
+    """202 レスポンスの検証（旧・正常系 200 レスポンステストの後継）。
 
-    def test_advice_success_returns_200(
-        self, lambda_context, mock_review_service, mock_ai_service
-    ):
-        """TC-062-RES-001: 正常系で HTTP 200 が返ることを確認."""
-        event = _make_advice_event()
-
-        response = advice_handler(event, lambda_context)
-
-        assert response["statusCode"] == 200
-
-    def test_advice_success_response_contains_advice_text(
-        self, lambda_context, mock_review_service, mock_ai_service
-    ):
-        """TC-062-RES-002: レスポンスに advice_text が正しく含まれることを確認."""
-        event = _make_advice_event()
-
-        response = advice_handler(event, lambda_context)
-
-        body = json.loads(response["body"])
-        assert body["advice_text"] == "数学の復習頻度を上げましょう。"
-
-    def test_advice_success_response_contains_weak_areas(
-        self, lambda_context, mock_review_service, mock_ai_service
-    ):
-        """TC-062-RES-003: レスポンスに weak_areas が正しく含まれることを確認."""
-        event = _make_advice_event()
-
-        response = advice_handler(event, lambda_context)
-
-        body = json.loads(response["body"])
-        assert body["weak_areas"] == ["数学", "物理"]
-
-    def test_advice_success_response_contains_recommendations(
-        self, lambda_context, mock_review_service, mock_ai_service
-    ):
-        """TC-062-RES-004: レスポンスに recommendations が正しく含まれることを確認."""
-        event = _make_advice_event()
-
-        response = advice_handler(event, lambda_context)
-
-        body = json.loads(response["body"])
-        assert len(body["recommendations"]) == 2
-        assert "毎日10枚のカードを復習する" in body["recommendations"]
-
-    def test_advice_success_response_contains_study_stats(
-        self, lambda_context, mock_review_service, mock_ai_service
-    ):
-        """TC-062-RES-005: レスポンスに study_stats が正しく含まれることを確認."""
-        event = _make_advice_event()
-
-        response = advice_handler(event, lambda_context)
-
-        body = json.loads(response["body"])
-        assert "study_stats" in body
-        stats = body["study_stats"]
-        assert stats["total_reviews"] == 100
-        assert stats["average_grade"] == 3.5
-        assert stats["total_cards"] == 50
-        assert stats["cards_due_today"] == 10
-        assert stats["streak_days"] == 5
-
-    def test_advice_success_response_contains_advice_info(
-        self, lambda_context, mock_review_service, mock_ai_service
-    ):
-        """TC-062-RES-006: レスポンスに advice_info が正しく含まれることを確認."""
-        event = _make_advice_event()
-
-        response = advice_handler(event, lambda_context)
-
-        body = json.loads(response["body"])
-        assert "advice_info" in body
-        assert body["advice_info"]["model_used"] == "test-model"
-        assert body["advice_info"]["processing_time_ms"] == 800
-
-    def test_advice_success_response_is_json(
-        self, lambda_context, mock_review_service, mock_ai_service
-    ):
-        """TC-062-RES-007: Content-Type が application/json であることを確認."""
-        event = _make_advice_event()
-
-        response = advice_handler(event, lambda_context)
-
-        assert response["statusCode"] == 200
-        assert response["headers"]["Content-Type"] == "application/json"
-
-    def test_advice_success_full_e2e_flow(self, lambda_context):
-        """TC-062-RES-008: 認証 -> ReviewSummary -> AI -> レスポンスの一連 E2E フロー."""
-        with patch("api.handler.review_service") as mock_rs, \
-             patch("api.handler.create_ai_service") as mock_factory:
-            # カスタム ReviewSummary
-            mock_rs.get_review_summary.return_value = ReviewSummary(
-                total_reviews=200,
-                average_grade=4.0,
-                total_cards=80,
-                cards_due_today=15,
-                streak_days=10,
-                tag_performance={"english": 0.9},
-                recent_review_dates=["2026-02-24"],
-            )
-            # カスタム AI 結果
-            mock_service = MagicMock()
-            mock_service.get_learning_advice.return_value = LearningAdvice(
-                advice_text="英語の学習は順調です。",
-                weak_areas=["英語リスニング"],
-                recommendations=["リスニング教材を追加する"],
-                model_used="claude-3-haiku",
-                processing_time_ms=600,
-            )
-            mock_factory.return_value = mock_service
-
-            event = _make_advice_event(
-                user_id="e2e-user",
-                query_params={"language": "ja"},
-            )
-
-            response = advice_handler(event, lambda_context)
-
-        # 全フィールドを検証
-        assert response["statusCode"] == 200
-        body = json.loads(response["body"])
-        assert body["advice_text"] == "英語の学習は順調です。"
-        assert body["weak_areas"] == ["英語リスニング"]
-        assert body["recommendations"] == ["リスニング教材を追加する"]
-        assert body["study_stats"]["total_reviews"] == 200
-        assert body["study_stats"]["average_grade"] == 4.0
-        assert body["study_stats"]["total_cards"] == 80
-        assert body["study_stats"]["cards_due_today"] == 15
-        assert body["study_stats"]["streak_days"] == 10
-        assert body["advice_info"]["model_used"] == "claude-3-haiku"
-        assert body["advice_info"]["processing_time_ms"] == 600
-
-        # コール引数を検証
-        mock_rs.get_review_summary.assert_called_once_with(
-            "e2e-user", user_timezone="Asia/Tokyo"
-        )
-        mock_factory.assert_called_once()
-        call_kwargs = mock_service.get_learning_advice.call_args.kwargs
-        assert call_kwargs["review_summary"]["total_reviews"] == 200
-        assert call_kwargs["language"] == "ja"
-
-
-# =============================================================================
-# カテゴリ D: AI エラーハンドリングテスト（TestAdviceHandlerAIErrors）
-# =============================================================================
-
-
-class TestAdviceHandlerAIErrors:
-    """AI エラーハンドリングテスト（TC-062-ERR-001 ~ 007）。
-
-    _map_ai_error_to_http() を使用した AI 例外の HTTP マッピングを検証。
+    completed 時の result 形状（LearningAdviceResponse 互換）は
+    test_ai_job_executors.py と tests/integration/test_integration.py が担保する。
     """
 
-    def test_advice_returns_504_on_ai_timeout(
-        self, lambda_context, mock_review_service, mock_ai_service
-    ):
-        """TC-062-ERR-001: AITimeoutError が HTTP 504 にマッピングされることを確認."""
-        _, mock_service = mock_ai_service
-        mock_service.get_learning_advice.side_effect = AITimeoutError("timeout")
+    def test_advice_returns_202(self, lambda_context, mock_submit):
+        """正常系で HTTP 202 Accepted が返ることを確認."""
         event = _make_advice_event()
 
         response = advice_handler(event, lambda_context)
 
-        assert response["statusCode"] == 504
-        body = json.loads(response["body"])
-        assert body["error"] == "AI service timeout"
+        assert response["statusCode"] == 202
 
-    def test_advice_returns_429_on_ai_rate_limit(
-        self, lambda_context, mock_review_service, mock_ai_service
-    ):
-        """TC-062-ERR-002: AIRateLimitError が HTTP 429 にマッピングされることを確認."""
-        _, mock_service = mock_ai_service
-        mock_service.get_learning_advice.side_effect = AIRateLimitError("rate limit")
+    def test_advice_accepted_body_has_job_fields(self, lambda_context, mock_submit):
+        """202 ボディが {job_id, job_type, status} のみを含むことを確認."""
         event = _make_advice_event()
 
         response = advice_handler(event, lambda_context)
 
-        assert response["statusCode"] == 429
         body = json.loads(response["body"])
-        assert body["error"] == "AI service rate limit exceeded"
+        assert body == {
+            "job_id": "aijob_t",
+            "job_type": "advice",
+            "status": "queued",
+        }
 
-    def test_advice_returns_503_on_ai_provider_error(
-        self, lambda_context, mock_review_service, mock_ai_service
-    ):
-        """TC-062-ERR-003: AIProviderError が HTTP 503 にマッピングされることを確認."""
-        _, mock_service = mock_ai_service
-        mock_service.get_learning_advice.side_effect = AIProviderError("provider down")
+    def test_advice_accepted_response_is_json(self, lambda_context, mock_submit):
+        """Content-Type が application/json であることを確認."""
         event = _make_advice_event()
 
         response = advice_handler(event, lambda_context)
 
-        assert response["statusCode"] == 503
-        body = json.loads(response["body"])
-        assert body["error"] == "AI service unavailable"
+        assert response["statusCode"] == 202
+        assert response["headers"]["Content-Type"] == "application/json"
 
-    def test_advice_returns_500_on_ai_parse_error(
-        self, lambda_context, mock_review_service, mock_ai_service
+
+# =============================================================================
+# カテゴリ D: 予期しないエラーテスト
+# =============================================================================
+
+
+class TestAdviceHandlerUnexpectedErrors:
+    """submit 段階での予期しない例外の汎用ハンドリングを検証する。
+
+    AI 例外のマッピング（504/429/503/500）と ReviewService 例外は
+    executor + classify_ai_job_error に移設した。
+    """
+
+    def test_advice_returns_500_when_submit_fails_unexpectedly(
+        self, lambda_context, mock_submit
     ):
-        """TC-062-ERR-004: AIParseError が HTTP 500 にマッピングされることを確認."""
-        _, mock_service = mock_ai_service
-        mock_service.get_learning_advice.side_effect = AIParseError("invalid json")
-        event = _make_advice_event()
-
-        response = advice_handler(event, lambda_context)
-
-        assert response["statusCode"] == 500
-        body = json.loads(response["body"])
-        assert body["error"] == "AI service response parse error"
-
-    def test_advice_returns_500_on_ai_internal_error(
-        self, lambda_context, mock_review_service, mock_ai_service
-    ):
-        """TC-062-ERR-005: AIInternalError が HTTP 500 にマッピングされることを確認."""
-        _, mock_service = mock_ai_service
-        mock_service.get_learning_advice.side_effect = AIInternalError("internal failure")
-        event = _make_advice_event()
-
-        response = advice_handler(event, lambda_context)
-
-        assert response["statusCode"] == 500
-        body = json.loads(response["body"])
-        assert body["error"] == "AI service error"
-
-    def test_advice_returns_503_on_factory_init_failure(
-        self, lambda_context, mock_review_service
-    ):
-        """TC-062-ERR-006: ファクトリー初期化失敗で HTTP 503 を返すことを確認."""
-        with patch("api.handler.create_ai_service") as mock_factory:
-            mock_factory.side_effect = AIProviderError(
-                "Failed to initialize AI service"
-            )
-            event = _make_advice_event()
-
-            response = advice_handler(event, lambda_context)
-
-        assert response["statusCode"] == 503
-        body = json.loads(response["body"])
-        assert body["error"] == "AI service unavailable"
-
-    def test_advice_returns_500_on_unexpected_exception(
-        self, lambda_context, mock_review_service, mock_ai_service
-    ):
-        """TC-062-ERR-007: 予期しない例外が HTTP 500 にマッピングされることを確認."""
-        _, mock_service = mock_ai_service
-        mock_service.get_learning_advice.side_effect = RuntimeError("unexpected")
+        """submit_ai_job が予期しない例外を送出した場合に HTTP 500 を返すことを確認."""
+        mock_submit.side_effect = RuntimeError("unexpected")
         event = _make_advice_event()
 
         response = advice_handler(event, lambda_context)
@@ -513,58 +255,18 @@ class TestAdviceHandlerAIErrors:
 
 
 # =============================================================================
-# カテゴリ E: DB/ReviewService エラーテスト（TestAdviceHandlerDBErrors）
-# =============================================================================
-
-
-class TestAdviceHandlerDBErrors:
-    """DB/ReviewService エラーテスト（TC-062-DB-001 ~ 002）。"""
-
-    def test_advice_handles_review_service_exception(
-        self, lambda_context, mock_ai_service
-    ):
-        """TC-062-DB-001: ReviewService 例外で HTTP 500 を返すことを確認."""
-        with patch("api.handler.review_service") as mock_rs:
-            mock_rs.get_review_summary.side_effect = Exception("DB connection error")
-            event = _make_advice_event()
-
-            response = advice_handler(event, lambda_context)
-
-        assert response["statusCode"] == 500
-        body = json.loads(response["body"])
-        assert body["error"] == "Internal Server Error"
-
-    def test_advice_works_with_empty_review_summary(
-        self, lambda_context, mock_ai_service
-    ):
-        """TC-062-DB-002: 全ゼロの ReviewSummary でも HTTP 200 が返ることを確認."""
-        with patch("api.handler.review_service") as mock_rs:
-            mock_rs.get_review_summary.return_value = ReviewSummary(
-                total_reviews=0,
-                average_grade=0.0,
-                total_cards=0,
-                cards_due_today=0,
-                streak_days=0,
-            )
-            event = _make_advice_event()
-
-            response = advice_handler(event, lambda_context)
-
-        assert response["statusCode"] == 200
-
-
-# =============================================================================
-# カテゴリ F: ロギングテスト（TestAdviceHandlerLogging）
+# カテゴリ E: ロギングテスト
 # =============================================================================
 
 
 class TestAdviceHandlerLogging:
-    """ロギング関連テスト（TC-062-LOG-001 ~ 003）。"""
+    """submit 時のリクエストロギングを検証する。
 
-    def test_advice_logs_request_info(
-        self, lambda_context, mock_review_service, mock_ai_service
-    ):
-        """TC-062-LOG-001: リクエスト受信時のロギングを確認."""
+    詳細な構造化フィールドの検証は tests/unit/test_structured_logging.py。
+    """
+
+    def test_advice_logs_request_info(self, lambda_context, mock_submit):
+        """submit 受付時に logger.info で user_id を含む情報を記録することを確認."""
         event = _make_advice_event(user_id="log-test-user")
 
         with patch("api.handler.logger") as mock_logger:
@@ -572,28 +274,3 @@ class TestAdviceHandlerLogging:
 
         info_calls_str = str(mock_logger.info.call_args_list)
         assert "log-test-user" in info_calls_str
-
-    def test_advice_logs_success_info(
-        self, lambda_context, mock_review_service, mock_ai_service
-    ):
-        """TC-062-LOG-002: 成功時のロギングを確認."""
-        event = _make_advice_event()
-
-        with patch("api.handler.logger") as mock_logger:
-            advice_handler(event, lambda_context)
-
-        # logger.info が少なくとも 1 回呼ばれていること（リクエスト + 成功ログ）
-        assert mock_logger.info.call_count >= 2
-
-    def test_advice_logs_ai_error(
-        self, lambda_context, mock_review_service, mock_ai_service
-    ):
-        """TC-062-LOG-003: AI エラー時のロギングを確認."""
-        _, mock_service = mock_ai_service
-        mock_service.get_learning_advice.side_effect = AITimeoutError("timeout")
-        event = _make_advice_event()
-
-        with patch("api.handler.logger") as mock_logger:
-            advice_handler(event, lambda_context)
-
-        assert mock_logger.warning.called or mock_logger.error.called

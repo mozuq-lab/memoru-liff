@@ -1,16 +1,17 @@
-"""POST /cards/refine ハンドラーテスト."""
+"""POST /cards/refine ハンドラーテスト（ai-async-jobs 版）。
+
+ai-async-jobs: ハンドラーは同期検証（認証・バリデーション）後に submit_ai_job で
+ジョブを登録し 202 を返すだけになった。AI 改善の実行・レスポンス形状・
+AI エラーマッピングの検証は tests/unit/test_ai_job_executors.py
+（TestExecuteRefine）に移設した。
+"""
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 
-from services.ai_service import (
-    AIParseError,
-    AITimeoutError,
-    AIRateLimitError,
-    AIProviderError,
-    RefineResult,
-)
+# submit_ai_job モックの戻り値（作成直後の queued ジョブレコード相当）
+SUBMIT_RESULT = {"job_id": "aijob_t", "job_type": "refine", "status": "queued"}
 
 
 def _make_refine_event(
@@ -71,93 +72,108 @@ def _make_refine_event_no_auth(body: dict | None = None) -> dict:
     }
 
 
-class TestRefineCardSuccess:
-    """正常系テスト."""
+class TestRefineCardSubmit:
+    """正常系: ジョブ submit + 202 検証."""
 
-    def test_refine_card_success(self, lambda_context):
-        """認証済みユーザーが front と back を送信し結果が返ること."""
+    def test_refine_card_returns_202_with_job_body(self, lambda_context):
+        """認証済みユーザーが front と back を送信すると 202 + ジョブ情報が返ること."""
         event = _make_refine_event()
 
-        with patch("api.handlers.ai_handler.create_ai_service") as mock_factory:
-            mock_service = MagicMock()
-            mock_service.refine_card.return_value = RefineResult(
-                refined_front="クロージャとは何か？",
-                refined_back="外部スコープの変数を参照し続ける関数。",
-                model_used="strands_bedrock",
-                processing_time_ms=1200,
-            )
-            mock_service.model_used = "strands_bedrock"
-            mock_factory.return_value = mock_service
+        with patch("api.handlers.ai_handler.submit_ai_job") as mock_submit:
+            mock_submit.return_value = dict(SUBMIT_RESULT)
 
             from api.handler import handler
             response = handler(event, lambda_context)
 
-        assert response["statusCode"] == 200
+        assert response["statusCode"] == 202
         body = json.loads(response["body"])
-        assert body["refined_front"] == "クロージャとは何か？"
-        assert body["refined_back"] == "外部スコープの変数を参照し続ける関数。"
-        assert body["model_used"] == "strands_bedrock"
-        assert body["processing_time_ms"] == 1200
+        assert body == {
+            "job_id": "aijob_t",
+            "job_type": "refine",
+            "status": "queued",
+        }
+
+    def test_refine_card_submits_payload(self, lambda_context):
+        """submit_ai_job が user_id / job_type / payload 一式で呼ばれること."""
+        event = _make_refine_event(
+            body={"front": "クロージャとは？", "back": "変数を覚えてる関数", "language": "en"}
+        )
+
+        with patch("api.handlers.ai_handler.submit_ai_job") as mock_submit:
+            mock_submit.return_value = dict(SUBMIT_RESULT)
+
+            from api.handler import handler
+            handler(event, lambda_context)
+
+        mock_submit.assert_called_once_with(
+            user_id="test-user-id",
+            job_type="refine",
+            payload={
+                "front": "クロージャとは？",
+                "back": "変数を覚えてる関数",
+                "language": "en",
+            },
+        )
 
     def test_refine_card_front_only(self, lambda_context):
-        """表面のみ送信でも成功すること."""
+        """表面のみ送信でも 202 になり、back は既定の空文字で submit されること."""
         event = _make_refine_event(body={"front": "クロージャ"})
 
-        with patch("api.handlers.ai_handler.create_ai_service") as mock_factory:
-            mock_service = MagicMock()
-            mock_service.refine_card.return_value = RefineResult(
-                refined_front="クロージャとは何か？",
-                refined_back="",
-                model_used="strands_bedrock",
-                processing_time_ms=800,
-            )
-            mock_service.model_used = "strands_bedrock"
-            mock_factory.return_value = mock_service
+        with patch("api.handlers.ai_handler.submit_ai_job") as mock_submit:
+            mock_submit.return_value = dict(SUBMIT_RESULT)
 
             from api.handler import handler
             response = handler(event, lambda_context)
 
-        assert response["statusCode"] == 200
-        body = json.loads(response["body"])
-        assert body["refined_front"] == "クロージャとは何か？"
-        assert body["refined_back"] == ""
+        assert response["statusCode"] == 202
+        assert mock_submit.call_args.kwargs["payload"] == {
+            "front": "クロージャ",
+            "back": "",
+            "language": "ja",
+        }
 
 
 class TestRefineCardValidation:
-    """バリデーションエラーテスト."""
+    """バリデーションエラーテスト（400 は同期のまま。ジョブ化しない）."""
 
     def test_both_empty_returns_400(self, lambda_context):
         """front と back の両方が空の場合 400 が返ること."""
         event = _make_refine_event(body={"front": "", "back": ""})
 
-        from api.handler import handler
-        response = handler(event, lambda_context)
+        with patch("api.handlers.ai_handler.submit_ai_job") as mock_submit:
+            from api.handler import handler
+            response = handler(event, lambda_context)
 
         assert response["statusCode"] == 400
         body = json.loads(response["body"])
         assert "error" in body
+        mock_submit.assert_not_called()
 
     def test_front_exceeds_max_length_returns_400(self, lambda_context):
         """front が 1000 文字を超える場合 400 が返ること."""
         event = _make_refine_event(body={"front": "あ" * 1001})
 
-        from api.handler import handler
-        response = handler(event, lambda_context)
+        with patch("api.handlers.ai_handler.submit_ai_job") as mock_submit:
+            from api.handler import handler
+            response = handler(event, lambda_context)
 
         assert response["statusCode"] == 400
+        mock_submit.assert_not_called()
 
 
 class TestRefineCardAuth:
     """認証エラーテスト."""
 
     def test_no_auth_returns_401(self, lambda_context):
-        """未認証リクエストで 401 が返ること."""
+        """未認証リクエストで 401 が返り、ジョブ化しないこと."""
         event = _make_refine_event_no_auth()
 
-        from api.handler import handler
-        response = handler(event, lambda_context)
+        with patch("api.handlers.ai_handler.submit_ai_job") as mock_submit:
+            from api.handler import handler
+            response = handler(event, lambda_context)
 
         assert response["statusCode"] == 401
+        mock_submit.assert_not_called()
 
 
 class TestRefineCardInvalidBody:
@@ -222,63 +238,3 @@ class TestRefineCardInvalidBody:
         assert response["statusCode"] == 400
         body = json.loads(response["body"])
         assert "error" in body
-
-
-class TestRefineCardAIErrors:
-    """AI サービスエラーテスト."""
-
-    def test_timeout_returns_504(self, lambda_context):
-        """AI タイムアウト時に 504 が返ること."""
-        event = _make_refine_event()
-
-        with patch("api.handlers.ai_handler.create_ai_service") as mock_factory:
-            mock_service = MagicMock()
-            mock_service.refine_card.side_effect = AITimeoutError("timeout")
-            mock_factory.return_value = mock_service
-
-            from api.handler import handler
-            response = handler(event, lambda_context)
-
-        assert response["statusCode"] == 504
-
-    def test_parse_error_returns_500(self, lambda_context):
-        """AI パースエラー時に 500 が返ること."""
-        event = _make_refine_event()
-
-        with patch("api.handlers.ai_handler.create_ai_service") as mock_factory:
-            mock_service = MagicMock()
-            mock_service.refine_card.side_effect = AIParseError("parse failed")
-            mock_factory.return_value = mock_service
-
-            from api.handler import handler
-            response = handler(event, lambda_context)
-
-        assert response["statusCode"] == 500
-
-    def test_rate_limit_returns_429(self, lambda_context):
-        """レート制限時に 429 が返ること."""
-        event = _make_refine_event()
-
-        with patch("api.handlers.ai_handler.create_ai_service") as mock_factory:
-            mock_service = MagicMock()
-            mock_service.refine_card.side_effect = AIRateLimitError("rate limit")
-            mock_factory.return_value = mock_service
-
-            from api.handler import handler
-            response = handler(event, lambda_context)
-
-        assert response["statusCode"] == 429
-
-    def test_provider_error_returns_503(self, lambda_context):
-        """AI プロバイダーエラー時に 503 が返ること."""
-        event = _make_refine_event()
-
-        with patch("api.handlers.ai_handler.create_ai_service") as mock_factory:
-            mock_service = MagicMock()
-            mock_service.refine_card.side_effect = AIProviderError("unavailable")
-            mock_factory.return_value = mock_service
-
-            from api.handler import handler
-            response = handler(event, lambda_context)
-
-        assert response["statusCode"] == 503

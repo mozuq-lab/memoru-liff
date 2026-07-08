@@ -52,6 +52,32 @@ def check_ai_rate_limit(user_id: str) -> Response | None:
     return None
 
 
+def make_job_accepted_response(job: dict) -> Response:
+    """AI 非同期ジョブ受付の 202 Response を生成する（Router ハンドラー用）。"""
+    return Response(
+        status_code=202,
+        content_type=content_types.APPLICATION_JSON,
+        body=json.dumps(_job_accepted_body(job), ensure_ascii=False),
+    )
+
+
+def make_job_accepted_event_response(job: dict) -> dict:
+    """AI 非同期ジョブ受付の 202 レスポンス（スタンドアロン Lambda ハンドラー用）。"""
+    return {
+        "statusCode": 202,
+        "headers": {"Content-Type": "application/json"},
+        "body": json.dumps(_job_accepted_body(job), ensure_ascii=False),
+    }
+
+
+def _job_accepted_body(job: dict) -> dict:
+    return {
+        "job_id": job["job_id"],
+        "job_type": job["job_type"],
+        "status": job["status"],
+    }
+
+
 def check_ai_rate_limit_event(user_id: str) -> dict | None:
     """check_ai_rate_limit の Lambda プロキシレスポンス (dict) 版。
 

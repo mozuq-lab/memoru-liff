@@ -1,4 +1,10 @@
-"""AI card generation API route handler."""
+"""AI card generation API route handler (ai-async-jobs: submit のみ担当).
+
+各エンドポイントは同期検証（認証・レート制限・バリデーション）後にジョブを登録し、
+202 Accepted + job_id を即返す。AI 実行はワーカー（jobs/ai_job_worker_handler）が
+行い、フロントは GET /ai-jobs/{job_id} をポーリングして結果を取得する。
+コンテンツ取得エラー等の分類は services/ai_job_errors.classify_ai_job_error に移設した。
+"""
 
 import json
 
@@ -9,46 +15,47 @@ from aws_lambda_powertools.event_handler.api_gateway import Router
 from api.shared import (
     check_ai_rate_limit,
     get_user_id_from_context,
-    map_ai_error_to_http,
+    make_job_accepted_response,
     parse_json_body,
 )
-from services.card_service import CardService
-from models.generate import (
-    GenerateCardsRequest,
-    GenerateCardsResponse,
-    GeneratedCardResponse,
-    GenerationInfoResponse,
-    RefineCardRequest,
-    RefineCardResponse,
-)
-from models.url_generate import (
-    GenerateFromUrlRequest,
-    GenerateFromUrlResponse,
-    PageInfoResponse,
-    UrlGenerationInfoResponse,
-)
-from services.ai_service import (
-    create_ai_service,
-    AIServiceError,
-)
-from services.browser_service import BrowserService
-from services.url_content_service import ContentFetchError, UrlContentService
-from services.url_generation_service import (
-    fetch_and_generate_cards,
-    EmptyContentError,
-)
+from models.generate import GenerateCardsRequest, RefineCardRequest
+from models.url_generate import GenerateFromUrlRequest
+from services.ai_job_service import submit_ai_job
+from utils.url_validator import UrlValidationError, validate_url
 
 logger = Logger()
 tracer = Tracer()
 router = Router()
 
 
+def _submit_job_response(user_id: str, job_type: str, payload: dict) -> Response:
+    """ジョブを submit して 202 Response を返す（インフラ例外は統一 500 に変換）。
+
+    submit（DynamoDB PutItem + SQS SendMessage / inline 実行）の一時的な障害を
+    Lambda 未処理例外として漏らさず、スタンドアロンハンドラー（grade_ai/advice）と
+    同じ ``{"error": ...}`` 形式の 500 を返す（実装レビュー #1）。
+    """
+    try:
+        job = submit_ai_job(user_id=user_id, job_type=job_type, payload=payload)
+    except Exception as e:
+        logger.error(
+            "Failed to submit AI job",
+            extra={"user_id": user_id, "job_type": job_type, "error": str(e)},
+        )
+        return Response(
+            status_code=500,
+            content_type=content_types.APPLICATION_JSON,
+            body=json.dumps({"error": "Internal Server Error"}),
+        )
+    return make_job_accepted_response(job)
+
+
 @router.post("/cards/generate")
 @tracer.capture_method
 def generate_cards():
-    """Generate flashcards from input text using AI."""
+    """Generate flashcards from input text using AI (async job submit)."""
     user_id = get_user_id_from_context(router)
-    logger.info("Generating cards", extra={"user_id": user_id})
+    logger.info("Submitting generate job", extra={"user_id": user_id})
 
     rate_limited = check_ai_rate_limit(user_id)
     if rate_limited:
@@ -59,50 +66,24 @@ def generate_cards():
         return parsed
     request = parsed
 
-    try:
-        ai_service = create_ai_service()
-        result = ai_service.generate_cards(
-            input_text=request.input_text,
-            card_count=request.card_count,
-            difficulty=request.difficulty,
-            language=request.language,
-        )
-        logger.info(
-            "Card generation succeeded",
-            extra={"model": result.model_used, "cards": len(result.cards), "time_ms": result.processing_time_ms},
-        )
-
-        response = GenerateCardsResponse(
-            generated_cards=[
-                GeneratedCardResponse(
-                    front=card.front,
-                    back=card.back,
-                    suggested_tags=card.suggested_tags,
-                )
-                for card in result.cards
-            ],
-            generation_info=GenerationInfoResponse(
-                input_length=result.input_length,
-                model_used=result.model_used,
-                processing_time_ms=result.processing_time_ms,
-            ),
-        )
-        return response.model_dump(mode="json")
-
-    except AIServiceError as e:
-        logger.warning("AI service error", extra={"user_id": user_id, "error_type": type(e).__name__, "error": str(e)})
-        return map_ai_error_to_http(e)
-    except Exception as e:
-        logger.error("Error generating cards", extra={"error": str(e)})
-        raise
+    return _submit_job_response(
+        user_id,
+        "generate",
+        {
+            "input_text": request.input_text,
+            "card_count": request.card_count,
+            "difficulty": request.difficulty,
+            "language": request.language,
+        },
+    )
 
 
 @router.post("/cards/generate-from-url")
 @tracer.capture_method
 def generate_from_url():
-    """Generate flashcards from a URL using AI."""
+    """Generate flashcards from a URL using AI (async job submit)."""
     user_id = get_user_id_from_context(router)
-    logger.info("Generating cards from URL", extra={"user_id": user_id})
+    logger.info("Submitting generate-from-url job", extra={"user_id": user_id})
 
     rate_limited = check_ai_rate_limit(user_id)
     if rate_limited:
@@ -112,19 +93,6 @@ def generate_from_url():
     if isinstance(parsed, Response):
         return parsed
     request = parsed
-
-    # Duplicate URL detection warning.
-    # C-5: use the paginated reference-URL lookup so cards beyond the first
-    # page (list_cards default 50) are also considered. Non-critical: a check
-    # failure must not block generation.
-    duplicate_warning = None
-    try:
-        card_service = CardService()
-        matched_cards = card_service.find_cards_by_reference_url(user_id, request.url)
-        if matched_cards:
-            duplicate_warning = "この URL からは既にカードが生成されています。"
-    except Exception:
-        pass  # Non-critical: don't block generation on duplicate check failure
 
     # Authenticated-page support (profile_id) is disabled until the
     # AgentCore Browser integration is rewritten. Reject early with 501
@@ -148,98 +116,36 @@ def generate_from_url():
             ),
         )
 
-    # Fetch → chunk → generate（共通パイプライン fetch_and_generate_cards）。
-    # エラー表現は本ハンドラー固有（granular な HTTP ステータス）なので、ここで変換する。
-    # profile_id は上で 501 拒否済みのため常に None（SPA fallback も無効化されており、
-    # BrowserFetchError → ContentFetchError チェーンで 422/502 に落ちる）。
+    # SSRF バリデーションは submit 時に fail-fast する（ワーカーの fetch 内でも
+    # 再検証されるが、無効 URL のジョブ化を避けて即 400 を返す）。
     try:
-        page, chunk_texts, result = fetch_and_generate_cards(
-            request.url,
-            card_type=request.card_type,
-            target_count=request.target_count,
-            difficulty=request.difficulty,
-            language=request.language,
-            content_service=UrlContentService(browser_service=BrowserService()),
-            profile_id=None,
-        )
-    except ContentFetchError as e:
-        logger.warning("Content fetch error", extra={"user_id": user_id, "error": str(e)})
-        error_msg = str(e)
-        if "timeout" in error_msg.lower():
-            status_code = 408
-        elif "private" in error_msg.lower() or "blocked" in error_msg.lower():
-            status_code = 403
-        elif "supported" in error_msg.lower() or "meaningful" in error_msg.lower():
-            status_code = 422
-        else:
-            status_code = 502
+        normalized_url = validate_url(request.url)
+    except UrlValidationError as e:
         return Response(
-            status_code=status_code,
+            status_code=400,
             content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": error_msg}),
-        )
-    except EmptyContentError:
-        return Response(
-            status_code=422,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Could not extract meaningful text content from the page"}),
-        )
-    except AIServiceError as e:
-        logger.warning("AI service error", extra={"user_id": user_id, "error_type": type(e).__name__, "error": str(e)})
-        return map_ai_error_to_http(e)
-    except Exception as e:
-        logger.error("Error generating cards from URL", extra={"error": str(e)})
-        raise
-
-    if not result.cards:
-        return Response(
-            status_code=422,
-            content_type=content_types.APPLICATION_JSON,
-            body=json.dumps({"error": "Failed to generate cards from the page content"}),
+            body=json.dumps({"error": f"無効なURLです: {e}"}, ensure_ascii=False),
         )
 
-    logger.info(
-        "URL card generation succeeded",
-        extra={
-            "model": result.model_used,
-            "cards": len(result.cards),
-            "chunks": len(chunk_texts),
-            "time_ms": result.processing_time_ms,
+    return _submit_job_response(
+        user_id,
+        "generate_from_url",
+        {
+            "url": normalized_url,
+            "card_type": request.card_type,
+            "target_count": request.target_count,
+            "difficulty": request.difficulty,
+            "language": request.language,
         },
     )
-
-    response = GenerateFromUrlResponse(
-        generated_cards=[
-            GeneratedCardResponse(
-                front=card.front,
-                back=card.back,
-                suggested_tags=card.suggested_tags,
-            )
-            for card in result.cards
-        ],
-        generation_info=UrlGenerationInfoResponse(
-            model_used=result.model_used,
-            processing_time_ms=result.processing_time_ms,
-            fetch_method=page.fetch_method,
-            chunk_count=len(chunk_texts),
-            content_length=len(page.text_content),
-        ),
-        page_info=PageInfoResponse(
-            url=page.url,
-            title=page.title,
-            fetched_at=page.fetched_at,
-        ),
-        warning=duplicate_warning,
-    )
-    return response.model_dump(mode="json", exclude_none=True)
 
 
 @router.post("/cards/refine")
 @tracer.capture_method
 def refine_card():
-    """Refine/improve user-input flashcard using AI."""
+    """Refine/improve user-input flashcard using AI (async job submit)."""
     user_id = get_user_id_from_context(router)
-    logger.info("Refining card", extra={"user_id": user_id})
+    logger.info("Submitting refine job", extra={"user_id": user_id})
 
     rate_limited = check_ai_rate_limit(user_id)
     if rate_limited:
@@ -250,29 +156,12 @@ def refine_card():
         return parsed
     request = parsed
 
-    try:
-        ai_service = create_ai_service()
-        result = ai_service.refine_card(
-            front=request.front,
-            back=request.back,
-            language=request.language,
-        )
-        logger.info(
-            "Card refinement succeeded",
-            extra={"user_id": user_id, "model": result.model_used, "time_ms": result.processing_time_ms},
-        )
-
-        response = RefineCardResponse(
-            refined_front=result.refined_front,
-            refined_back=result.refined_back,
-            model_used=result.model_used,
-            processing_time_ms=result.processing_time_ms,
-        )
-        return response.model_dump(mode="json")
-
-    except AIServiceError as e:
-        logger.warning("AI service error", extra={"user_id": user_id, "error_type": type(e).__name__, "error": str(e)})
-        return map_ai_error_to_http(e)
-    except Exception as e:
-        logger.error("Error refining card", extra={"error": str(e)})
-        raise
+    return _submit_job_response(
+        user_id,
+        "refine",
+        {
+            "front": request.front,
+            "back": request.back,
+            "language": request.language,
+        },
+    )

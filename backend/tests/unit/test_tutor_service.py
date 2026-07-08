@@ -1596,3 +1596,50 @@ class TestCompleteSendEndedSessionRace:
         assert item["status"] == "active"
         assert int(item["message_count"]) == 1
         assert "processing_started_at" not in item
+
+
+class TestValidateSendMessageTimeoutMarking:
+    """validate_send_message のタイムアウト検出時マーキング（実装レビュー #2）。
+
+    submit 時の fail-fast 経路でも send_message と同様に timed_out へ遷移させないと、
+    以降クライアントが一覧/詳細を取得しない場合に status=active・TTL 未設定のまま
+    レコードが無期限に残る。
+    """
+
+    def test_timeout_marks_session_timed_out_with_ttl(
+        self, tutor_service, dynamodb_tables
+    ):
+        from services.tutor_errors import SessionEndedError
+
+        _seed_deck(dynamodb_tables)
+        session = tutor_service.start_session(
+            user_id="test-user", deck_id="deck_001", mode="free_talk"
+        )
+
+        # updated_at を TIMEOUT_MINUTES より過去に書き換えてタイムアウト状態にする
+        table = dynamodb_tables.Table("memoru-tutor-sessions-test")
+        stale = datetime.now(timezone.utc) - timedelta(
+            minutes=tutor_service.TIMEOUT_MINUTES + 5
+        )
+        table.update_item(
+            Key={"user_id": "test-user", "session_id": session.session_id},
+            UpdateExpression="SET updated_at = :u",
+            ExpressionAttributeValues={":u": stale.isoformat()},
+        )
+
+        with pytest.raises(SessionEndedError):
+            tutor_service.validate_send_message("test-user", session.session_id)
+
+        item = table.get_item(
+            Key={"user_id": "test-user", "session_id": session.session_id}
+        )["Item"]
+        assert item["status"] == "timed_out"
+        assert "ttl" in item
+
+    def test_active_session_passes_validation(self, tutor_service, dynamodb_tables):
+        _seed_deck(dynamodb_tables)
+        session = tutor_service.start_session(
+            user_id="test-user", deck_id="deck_001", mode="free_talk"
+        )
+        # 例外が出ないこと
+        tutor_service.validate_send_message("test-user", session.session_id)

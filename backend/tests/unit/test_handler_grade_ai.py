@@ -1,10 +1,16 @@
-"""TASK-0060: POST /reviews/{card_id}/grade-ai エンドポイントのテスト。
+"""POST /reviews/{card_id}/grade-ai エンドポイントのテスト（ai-async-jobs 版）。
 
-grade_ai_handler Lambda ハンドラーの本実装に対するテストケース。
+grade_ai_handler Lambda ハンドラーのテストケース。
 構造的前提:
 - grade_ai_handler は独立 Lambda 関数（app/APIGatewayHttpResolver 経由ではない）
 - 生の API Gateway HTTP API v2 イベントを直接受け取る
 - レスポンスは Lambda プロキシ統合形式の dict（statusCode, headers, body）
+
+ai-async-jobs: ハンドラーは同期検証（認証・バリデーション・カード所有権）後に
+submit_ai_job でジョブを登録し 202 を返すだけになった。AI 採点の実行・
+レスポンス形状・AI エラーマッピングの検証は
+tests/unit/test_ai_job_executors.py（execute_grade_ai）と
+tests/unit/test_ai_job_errors.py（classify_ai_job_error）に移設した。
 """
 
 import json
@@ -13,15 +19,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from api.handler import grade_ai_handler
-from services.ai_service import (
-    AIInternalError,
-    AIParseError,
-    AIProviderError,
-    AIRateLimitError,
-    AITimeoutError,
-    GradingResult,
-)
 from services.card_service import CardNotFoundError
+
+# submit_ai_job モックの戻り値（作成直後の queued ジョブレコード相当）
+SUBMIT_RESULT = {"job_id": "aijob_t", "job_type": "grade_ai", "status": "queued"}
 
 
 # =============================================================================
@@ -48,11 +49,9 @@ def _make_grade_ai_event(
     Returns:
         API Gateway HTTP API v2 形式のイベント辞書
     """
-    # デフォルトボディ設定
     if body is None:
         body = {"user_answer": "東京"}
 
-    # デフォルト authorizer 設定（JWT Authorizer 形式）
     if authorizer is None:
         authorizer = {
             "jwt": {
@@ -94,7 +93,8 @@ def _make_grade_ai_event(
 def mock_card_service():
     """CardService のモック。card.front / card.back をモック Card で返す。
 
-    パッチ対象: api.handler.card_service（モジュールレベルグローバル変数）
+    パッチ対象: api.handler.card_service（モジュールレベルグローバル変数）。
+    submit 時の fail-fast 所有権チェックで使用される。
     """
     with patch("api.handler.card_service") as mock:
         mock_card = MagicMock()
@@ -105,24 +105,14 @@ def mock_card_service():
 
 
 @pytest.fixture
-def mock_ai_service():
-    """create_ai_service のモック。GradingResult を返す。
+def mock_submit():
+    """submit_ai_job のモック。作成直後の queued ジョブレコードを返す。
 
-    パッチ対象: api.handler.create_ai_service（インポートされた関数）
-
-    Yields:
-        tuple: (mock_factory, mock_service)
+    パッチ対象: api.handler.submit_ai_job（インポートされた関数）。
     """
-    with patch("api.handler.create_ai_service") as mock_factory:
-        mock_service = MagicMock()
-        mock_service.grade_answer.return_value = GradingResult(
-            grade=4,
-            reasoning="Correct answer with good understanding",
-            model_used="test-model",
-            processing_time_ms=500,
-        )
-        mock_factory.return_value = mock_service
-        yield mock_factory, mock_service
+    with patch("api.handler.submit_ai_job") as mock:
+        mock.return_value = dict(SUBMIT_RESULT)
+        yield mock
 
 
 # =============================================================================
@@ -131,73 +121,50 @@ def mock_ai_service():
 
 
 class TestGradeAiHandlerAuth:
-    """認証関連テスト（TC-060-AUTH-001 ~ 003）。
+    """認証関連テスト。
 
     grade_ai_handler は独立 Lambda のため、JWT claims を
     event.requestContext.authorizer.jwt.claims.sub から直接抽出する。
+    認証失敗時はジョブを submit しないこと（同期 401）を確認する。
     """
 
     def test_grade_ai_returns_401_when_no_authorizer(
-        self, lambda_context, mock_card_service, mock_ai_service
+        self, lambda_context, mock_card_service, mock_submit
     ):
-        """TC-060-AUTH-001: authorizer が空の場合に HTTP 401 を返すことを確認。
-
-        【テスト目的】: authorizer が空辞書 {} の場合の認証失敗ハンドリングを検証
-        【テスト内容】: requestContext.authorizer = {} として grade_ai_handler を呼び出す
-        【期待される動作】: HTTP 401 Unauthorized が返る
-        🔵 信頼性レベル: 青信号 - get_user_id_from_context() の既存パターン、api-endpoints.md 認証仕様
-        """
-        # 【テストデータ準備】: authorizer が空の場合
+        """authorizer が空の場合に HTTP 401 を返し、submit されないことを確認。"""
         event = _make_grade_ai_event(authorizer={})
 
-        # 【実際の処理実行】: grade_ai_handler を直接呼び出す
         response = grade_ai_handler(event, lambda_context)
 
-        # 【結果検証】: 401 Unauthorized が返ることを確認
-        assert response["statusCode"] == 401  # 【確認内容】: HTTP ステータスコードが 401 であること
+        assert response["statusCode"] == 401
         body = json.loads(response["body"])
-        assert body["error"] == "Unauthorized"  # 【確認内容】: エラーメッセージが "Unauthorized" であること
+        assert body["error"] == "Unauthorized"
+        mock_submit.assert_not_called()
 
-    def test_grade_ai_returns_401_when_no_sub_claim(self, lambda_context):
-        """TC-060-AUTH-002: JWT claims に sub がない場合に HTTP 401 を返すことを確認。
-
-        【テスト目的】: JWT claims に sub クレームが欠如している場合の認証失敗を検証
-        【テスト内容】: authorizer.jwt.claims に sub キーなし（iss のみ）でリクエスト
-        【期待される動作】: HTTP 401 Unauthorized が返る
-        🔵 信頼性レベル: 青信号 - JWT claims 構造は API Gateway HTTP API v2 仕様で確定
-        """
-        # 【テストデータ準備】: sub クレームなしの JWT claims
+    def test_grade_ai_returns_401_when_no_sub_claim(
+        self, lambda_context, mock_card_service, mock_submit
+    ):
+        """JWT claims に sub がない場合に HTTP 401 を返すことを確認。"""
         authorizer = {"jwt": {"claims": {"iss": "https://keycloak.example.com"}}}
         event = _make_grade_ai_event(authorizer=authorizer)
 
-        # 【実際の処理実行】
         response = grade_ai_handler(event, lambda_context)
 
-        # 【結果検証】
-        assert response["statusCode"] == 401  # 【確認内容】: sub クレームなしで 401 が返ること
+        assert response["statusCode"] == 401
         body = json.loads(response["body"])
-        assert body["error"] == "Unauthorized"  # 【確認内容】: エラーメッセージが "Unauthorized" であること
+        assert body["error"] == "Unauthorized"
+        mock_submit.assert_not_called()
 
     def test_grade_ai_extracts_user_id_from_jwt_claims(
-        self, lambda_context, mock_card_service, mock_ai_service
+        self, lambda_context, mock_card_service, mock_submit
     ):
-        """TC-060-AUTH-003: authorizer.jwt.claims.sub から user_id を正しく抽出することを確認。
-
-        【テスト目的】: JWT claims の sub フィールドから user_id を抽出し CardService に渡す処理を検証
-        【テスト内容】: user_id="user-abc-123" で grade_ai_handler を呼び出す
-        【期待される動作】: card_service.get_card が user_id="user-abc-123" で呼ばれる
-        🔵 信頼性レベル: 青信号 - 既存 get_user_id_from_context() の HTTP API パス（handler.py L122-123）
-        """
-        # 【テストデータ準備】: カスタム user_id を持つイベント
+        """authorizer.jwt.claims.sub の user_id が所有権チェックと submit に渡ることを確認。"""
         event = _make_grade_ai_event(user_id="user-abc-123")
 
-        # 【実際の処理実行】
         grade_ai_handler(event, lambda_context)
 
-        # 【結果検証】: CardService.get_card が正しい user_id で呼ばれたことを確認
-        mock_card_service.get_card.assert_called_once_with(
-            "user-abc-123", "card-123"
-        )  # 【確認内容】: user_id="user-abc-123" が get_card に渡されること
+        mock_card_service.get_card.assert_called_once_with("user-abc-123", "card-123")
+        assert mock_submit.call_args.kwargs["user_id"] == "user-abc-123"
 
 
 # =============================================================================
@@ -206,50 +173,36 @@ class TestGradeAiHandlerAuth:
 
 
 class TestGradeAiHandlerPathParams:
-    """パスパラメータ関連テスト（TC-060-PATH-001 ~ 002）。
+    """パスパラメータ関連テスト。
 
     template.yaml で /reviews/{cardId}/grade-ai と定義されているため、
     pathParameters のキーは cardId（camelCase）。
     """
 
     def test_grade_ai_extracts_card_id_from_path_params(
-        self, lambda_context, mock_card_service, mock_ai_service
+        self, lambda_context, mock_card_service, mock_submit
     ):
-        """TC-060-PATH-001: pathParameters.cardId から card_id を正しく取得することを確認。
-
-        【テスト目的】: camelCase の cardId キーから card_id を抽出して CardService に渡す処理を検証
-        【テスト内容】: card_id="card-xyz-789" のイベントで grade_ai_handler を呼び出す
-        【期待される動作】: card_service.get_card が card_id="card-xyz-789" で呼ばれる
-        🔵 信頼性レベル: 青信号 - template.yaml /reviews/{cardId}/grade-ai のキー名は camelCase で確定
-        """
-        # 【テストデータ準備】: カスタム card_id を持つイベント
+        """pathParameters.cardId から card_id を正しく取得することを確認。"""
         event = _make_grade_ai_event(card_id="card-xyz-789")
 
-        # 【実際の処理実行】
         grade_ai_handler(event, lambda_context)
 
-        # 【結果検証】: CardService.get_card が正しい card_id で呼ばれたことを確認
         mock_card_service.get_card.assert_called_once_with(
             "test-user-id", "card-xyz-789"
-        )  # 【確認内容】: card_id="card-xyz-789" が get_card に渡されること
+        )
+        assert mock_submit.call_args.kwargs["payload"]["card_id"] == "card-xyz-789"
 
-    def test_grade_ai_returns_400_when_card_id_missing(self, lambda_context):
-        """TC-060-PATH-002: pathParameters が null の場合に HTTP 400 を返すことを確認。
-
-        【テスト目的】: pathParameters がない場合の防御的処理を検証
-        【テスト内容】: event["pathParameters"] = None として grade_ai_handler を呼び出す
-        【期待される動作】: HTTP 400 Bad Request が返る
-        🔵 信頼性レベル: 青信号 - 防御的プログラミング、api-endpoints.md バリデーションエラー 400
-        """
-        # 【テストデータ準備】: pathParameters が None のイベント
+    def test_grade_ai_returns_400_when_card_id_missing(
+        self, lambda_context, mock_card_service, mock_submit
+    ):
+        """pathParameters が null の場合に HTTP 400 を返し、submit されないことを確認。"""
         event = _make_grade_ai_event()
         event["pathParameters"] = None
 
-        # 【実際の処理実行】
         response = grade_ai_handler(event, lambda_context)
 
-        # 【結果検証】
-        assert response["statusCode"] == 400  # 【確認内容】: pathParameters なしで 400 が返ること
+        assert response["statusCode"] == 400
+        mock_submit.assert_not_called()
 
 
 # =============================================================================
@@ -258,688 +211,279 @@ class TestGradeAiHandlerPathParams:
 
 
 class TestGradeAiHandlerValidation:
-    """リクエストバリデーション関連テスト（TC-060-VAL-001 ~ 006）。
+    """リクエストバリデーション関連テスト。
 
-    GradeAnswerRequest の Pydantic バリデーションと JSON パースエラーのハンドリングを検証。
+    GradeAnswerRequest の Pydantic バリデーションと JSON パースエラーは
+    submit 前の同期検証として維持される（400 を即時に返し、ジョブ化しない）。
     """
 
-    def test_grade_ai_returns_400_when_body_is_null(self, lambda_context):
-        """TC-060-VAL-001: event.body が null の場合に HTTP 400 を返すことを確認。
-
-        【テスト目的】: body が None の場合の JSON パースエラーハンドリングを検証
-        【テスト内容】: event["body"] = None として grade_ai_handler を呼び出す
-        【期待される動作】: HTTP 400 Bad Request が返る
-        🔵 信頼性レベル: 青信号 - 既存 handler.py の json.JSONDecodeError ハンドリングパターン
-        """
-        # 【テストデータ準備】: body が None のイベント
+    def test_grade_ai_returns_400_when_body_is_null(
+        self, lambda_context, mock_card_service, mock_submit
+    ):
+        """event.body が null の場合に HTTP 400 を返すことを確認。"""
         event = _make_grade_ai_event()
         event["body"] = None
 
-        # 【実際の処理実行】
         response = grade_ai_handler(event, lambda_context)
 
-        # 【結果検証】
-        assert response["statusCode"] == 400  # 【確認内容】: body=None で 400 が返ること
+        assert response["statusCode"] == 400
+        mock_submit.assert_not_called()
 
-    def test_grade_ai_returns_400_when_body_is_invalid_json(self, lambda_context):
-        """TC-060-VAL-002: event.body が不正な JSON の場合に HTTP 400 を返すことを確認。
-
-        【テスト目的】: JSON パース失敗時のエラーハンドリングを検証
-        【テスト内容】: event["body"] = "not json" として grade_ai_handler を呼び出す
-        【期待される動作】: HTTP 400 Bad Request が返る
-        🔵 信頼性レベル: 青信号 - 既存 handler.py の json.JSONDecodeError パターン
-        """
-        # 【テストデータ準備】: 不正な JSON 文字列
+    def test_grade_ai_returns_400_when_body_is_invalid_json(
+        self, lambda_context, mock_card_service, mock_submit
+    ):
+        """event.body が不正な JSON の場合に HTTP 400 を返すことを確認。"""
         event = _make_grade_ai_event()
         event["body"] = "not json"
 
-        # 【実際の処理実行】
         response = grade_ai_handler(event, lambda_context)
 
-        # 【結果検証】
-        assert response["statusCode"] == 400  # 【確認内容】: 不正 JSON で 400 が返ること
+        assert response["statusCode"] == 400
+        mock_submit.assert_not_called()
 
-    def test_grade_ai_returns_400_when_user_answer_empty(self, lambda_context):
-        """TC-060-VAL-003: user_answer が空文字列の場合に HTTP 400 を返すことを確認。
-
-        【テスト目的】: GradeAnswerRequest の min_length=1 バリデーション制約を検証
-        【テスト内容】: {"user_answer": ""} として grade_ai_handler を呼び出す
-        【期待される動作】: HTTP 400 Bad Request が返る（Pydantic ValidationError）
-        🔵 信頼性レベル: 青信号 - GradeAnswerRequest の min_length=1 制約（grading.py L17）
-        """
-        # 【テストデータ準備】: 空文字列の user_answer
+    def test_grade_ai_returns_400_when_user_answer_empty(
+        self, lambda_context, mock_card_service, mock_submit
+    ):
+        """user_answer が空文字列の場合に HTTP 400 を返すことを確認（min_length=1）。"""
         event = _make_grade_ai_event(body={"user_answer": ""})
 
-        # 【実際の処理実行】
         response = grade_ai_handler(event, lambda_context)
 
-        # 【結果検証】
-        assert response["statusCode"] == 400  # 【確認内容】: 空文字列 user_answer で 400 が返ること
+        assert response["statusCode"] == 400
+        mock_submit.assert_not_called()
 
-    def test_grade_ai_returns_400_when_user_answer_whitespace_only(self, lambda_context):
-        """TC-060-VAL-004: user_answer が空白のみの場合に HTTP 400 を返すことを確認。
-
-        【テスト目的】: GradeAnswerRequest の validate_user_answer バリデータを検証
-        【テスト内容】: {"user_answer": "   "} として grade_ai_handler を呼び出す
-        【期待される動作】: HTTP 400 Bad Request が返る（Pydantic ValidationError）
-        🔵 信頼性レベル: 青信号 - GradeAnswerRequest の validate_user_answer バリデータ（grading.py L23-28）
-        """
-        # 【テストデータ準備】: 空白のみの user_answer
+    def test_grade_ai_returns_400_when_user_answer_whitespace_only(
+        self, lambda_context, mock_card_service, mock_submit
+    ):
+        """user_answer が空白のみの場合に HTTP 400 を返すことを確認。"""
         event = _make_grade_ai_event(body={"user_answer": "   "})
 
-        # 【実際の処理実行】
         response = grade_ai_handler(event, lambda_context)
 
-        # 【結果検証】
-        assert response["statusCode"] == 400  # 【確認内容】: 空白のみ user_answer で 400 が返ること
+        assert response["statusCode"] == 400
+        mock_submit.assert_not_called()
 
-    def test_grade_ai_returns_400_when_user_answer_too_long(self, lambda_context):
-        """TC-060-VAL-005: user_answer が 2000 文字超の場合に HTTP 400 を返すことを確認。
-
-        【テスト目的】: GradeAnswerRequest の max_length=2000 バリデーション制約を検証
-        【テスト内容】: {"user_answer": "a" * 2001} として grade_ai_handler を呼び出す
-        【期待される動作】: HTTP 400 Bad Request が返る（Pydantic ValidationError）
-        🔵 信頼性レベル: 青信号 - GradeAnswerRequest の max_length=2000 制約（grading.py L18）
-        """
-        # 【テストデータ準備】: 2001 文字の user_answer
+    def test_grade_ai_returns_400_when_user_answer_too_long(
+        self, lambda_context, mock_card_service, mock_submit
+    ):
+        """user_answer が 2000 文字超の場合に HTTP 400 を返すことを確認（max_length=2000）。"""
         event = _make_grade_ai_event(body={"user_answer": "a" * 2001})
 
-        # 【実際の処理実行】
         response = grade_ai_handler(event, lambda_context)
 
-        # 【結果検証】
-        assert response["statusCode"] == 400  # 【確認内容】: 2001 文字 user_answer で 400 が返ること
+        assert response["statusCode"] == 400
+        mock_submit.assert_not_called()
 
-    def test_grade_ai_returns_400_when_user_answer_missing(self, lambda_context):
-        """TC-060-VAL-006: user_answer フィールドが未指定の場合に HTTP 400 を返すことを確認。
-
-        【テスト目的】: GradeAnswerRequest の必須フィールドバリデーションを検証
-        【テスト内容】: {} （空オブジェクト）として grade_ai_handler を呼び出す
-        【期待される動作】: HTTP 400 Bad Request が返る（Pydantic ValidationError）
-        🔵 信頼性レベル: 青信号 - GradeAnswerRequest の user_answer は必須フィールド（... = Required）
-        """
-        # 【テストデータ準備】: user_answer なしの空ボディ
+    def test_grade_ai_returns_400_when_user_answer_missing(
+        self, lambda_context, mock_card_service, mock_submit
+    ):
+        """user_answer フィールドが未指定の場合に HTTP 400 を返すことを確認。"""
         event = _make_grade_ai_event(body={})
 
-        # 【実際の処理実行】
         response = grade_ai_handler(event, lambda_context)
 
-        # 【結果検証】
-        assert response["statusCode"] == 400  # 【確認内容】: user_answer 未指定で 400 が返ること
+        assert response["statusCode"] == 400
+        mock_submit.assert_not_called()
+
+    def test_grade_ai_returns_400_when_language_is_invalid(
+        self, lambda_context, mock_card_service, mock_submit
+    ):
+        """language が ja/en 以外の場合に HTTP 400 を返すことを確認（許可リスト検証）。"""
+        event = _make_grade_ai_event(query_params={"language": "xx"})
+
+        response = grade_ai_handler(event, lambda_context)
+
+        assert response["statusCode"] == 400
+        body = json.loads(response["body"])
+        assert body["error"] == "Unsupported language. Use 'ja' or 'en'."
+        mock_submit.assert_not_called()
 
 
 # =============================================================================
-# テストカテゴリ D: カード関連エラーテスト
+# テストカテゴリ D: カード関連エラーテスト（fail-fast 所有権チェック）
 # =============================================================================
 
 
 class TestGradeAiHandlerCardErrors:
-    """カード取得関連エラーテスト（TC-060-CARD-001 ~ 003）。
+    """カード取得関連エラーテスト。
 
-    CardService.get_card() の CardNotFoundError ハンドリングを検証。
-    CardService は user_id をパーティションキーとして使用するため、
-    他ユーザーのカードにはアクセスできない。
+    submit 時の fail-fast 検証として CardService.get_card() の
+    CardNotFoundError ハンドリング（404 + submit しない）を検証する。
+    ワーカー実行時点の再検証は test_ai_job_executors.py が担保する。
     """
 
     def test_grade_ai_returns_404_when_card_not_found(
-        self, lambda_context, mock_ai_service
+        self, lambda_context, mock_submit
     ):
-        """TC-060-CARD-001: CardNotFoundError が raise された場合に HTTP 404 を返すことを確認。
-
-        【テスト目的】: card_service.get_card() が CardNotFoundError を raise した場合のハンドリングを検証
-        【テスト内容】: mock_card_service.get_card.side_effect = CardNotFoundError
-        【期待される動作】: HTTP 404 Not Found が返る
-        🔵 信頼性レベル: 青信号 - api-endpoints.md エラーコード 404、CardService.get_card() 仕様
-        """
-        # 【テストデータ準備】: CardNotFoundError を raise するモック
+        """CardNotFoundError の場合に HTTP 404 を返し、ジョブ化しないことを確認。"""
         with patch("api.handler.card_service") as mock_cs:
             mock_cs.get_card.side_effect = CardNotFoundError("Card not found")
             event = _make_grade_ai_event()
 
-            # 【実際の処理実行】
             response = grade_ai_handler(event, lambda_context)
 
-        # 【結果検証】: 404 Not Found が返ることを確認
-        assert response["statusCode"] == 404  # 【確認内容】: CardNotFoundError で 404 が返ること
+        assert response["statusCode"] == 404
         body = json.loads(response["body"])
-        assert body["error"] == "Not Found"  # 【確認内容】: エラーメッセージが "Not Found" であること
-
-    def test_grade_ai_passes_card_front_back_to_ai_service(
-        self, lambda_context, mock_card_service, mock_ai_service
-    ):
-        """TC-060-CARD-002: 取得したカードの .front と .back が AI サービスに渡されることを確認。
-
-        【テスト目的】: Card Pydantic モデルの .front/.back 属性が grade_answer() に渡される処理を検証
-        【テスト内容】: card.front="日本の首都は？", card.back="東京" で grade_ai_handler を呼び出す
-        【期待される動作】: ai_service.grade_answer() に card_front, card_back が渡される
-        🔵 信頼性レベル: 青信号 - Card モデル（Pydantic BaseModel）の .front/.back 属性アクセスで確定
-        """
-        # 【テストデータ準備】: フィクスチャのデフォルト card（front="日本の首都は？", back="東京"）
-        _, mock_service = mock_ai_service
-        event = _make_grade_ai_event(body={"user_answer": "東京"})
-
-        # 【実際の処理実行】
-        grade_ai_handler(event, lambda_context)
-
-        # 【結果検証】: grade_answer に card_front, card_back が正しく渡されたことを確認
-        mock_service.grade_answer.assert_called_once_with(
-            card_front="日本の首都は？",
-            card_back="東京",
-            user_answer="東京",
-            language="ja",
-        )  # 【確認内容】: card の .front / .back 属性から正しく引数が渡されること
+        assert body["error"] == "Not Found"
+        mock_submit.assert_not_called()
 
     def test_grade_ai_returns_404_for_other_users_card(
-        self, lambda_context, mock_ai_service
+        self, lambda_context, mock_submit
     ):
-        """TC-060-CARD-003: 他ユーザーのカードにアクセスした場合に HTTP 404 を返すことを確認。
+        """他ユーザーのカードにアクセスした場合に HTTP 404 を返すことを確認。
 
-        【テスト目的】: CardService の user_id ベースのアクセス制御を検証
-        【テスト内容】: 他ユーザーの card_id でアクセス → CardNotFoundError
-        【期待される動作】: HTTP 404 Not Found が返る（情報漏洩防止のため 403 ではなく 404）
-        🔵 信頼性レベル: 青信号 - CardService.get_card() は user_id をパーティションキーとして使用
+        CardService は user_id をパーティションキーとして使用するため、
+        情報漏洩防止のため 403 ではなく 404 を返す。
         """
-        # 【テストデータ準備】: 他ユーザーの card_id でアクセス
         with patch("api.handler.card_service") as mock_cs:
             mock_cs.get_card.side_effect = CardNotFoundError("Card not found")
             event = _make_grade_ai_event(
                 user_id="user-other", card_id="card-owned-by-someone-else"
             )
 
-            # 【実際の処理実行】
             response = grade_ai_handler(event, lambda_context)
 
-        # 【結果検証】
-        assert response["statusCode"] == 404  # 【確認内容】: 他ユーザーのカードにアクセスで 404 が返ること
+        assert response["statusCode"] == 404
+        mock_submit.assert_not_called()
 
 
 # =============================================================================
-# テストカテゴリ E: AI 採点呼び出しテスト
+# テストカテゴリ E: ジョブ submit テスト
 # =============================================================================
 
 
-class TestGradeAiHandlerAICall:
-    """AI 採点呼び出し関連テスト（TC-060-AI-001 ~ 004）。
+class TestGradeAiHandlerSubmit:
+    """submit_ai_job の呼び出し引数（user_id / job_type / payload）を検証する。
 
-    create_ai_service() ファクトリーの使用と grade_answer() の引数検証。
-    language パラメータは queryStringParameters から取得（デフォルト "ja"）。
+    旧「AI 採点呼び出しテスト」の後継。AI サービスへの引数伝播は
+    test_ai_job_executors.py::TestExecuteGradeAi が担保する。
     """
 
-    def test_grade_ai_calls_create_ai_service_factory(
-        self, lambda_context, mock_card_service, mock_ai_service
+    def test_grade_ai_submits_job_with_correct_args(
+        self, lambda_context, mock_card_service, mock_submit
     ):
-        """TC-060-AI-001: create_ai_service() ファクトリーが 1 回呼ばれることを確認。
-
-        【テスト目的】: AI サービスファクトリーが適切に呼ばれることを検証
-        【テスト内容】: 正常リクエストで grade_ai_handler を呼び出す
-        【期待される動作】: create_ai_service() が exactly 1 回呼ばれる
-        🔵 信頼性レベル: 青信号 - 既存 generate_cards エンドポイントのパターン（handler.py L317）
-        """
-        # 【テストデータ準備】: 正常イベント
-        mock_factory, _ = mock_ai_service
-        event = _make_grade_ai_event()
-
-        # 【実際の処理実行】
-        grade_ai_handler(event, lambda_context)
-
-        # 【結果検証】: create_ai_service() が 1 回呼ばれたことを確認
-        mock_factory.assert_called_once()  # 【確認内容】: ファクトリーが exactly 1 回呼ばれること
-
-    def test_grade_ai_passes_correct_args_to_grade_answer(
-        self, lambda_context, mock_card_service, mock_ai_service
-    ):
-        """TC-060-AI-002: grade_answer() に正しい引数が渡されることを確認。
-
-        【テスト目的】: grade_answer() 呼び出し時の引数（card_front, card_back, user_answer, language）を検証
-        【テスト内容】: user_answer="東京", card.front="日本の首都は？", card.back="東京" でリクエスト
-        【期待される動作】: grade_answer(card_front="日本の首都は？", card_back="東京", user_answer="東京", language="ja")
-        🔵 信頼性レベル: 青信号 - AIService Protocol の grade_answer シグネチャ（ai_service.py L133-151）
-        """
-        # 【テストデータ準備】: デフォルトカード（front="日本の首都は？", back="東京"）と user_answer="東京"
-        _, mock_service = mock_ai_service
+        """submit_ai_job が user_id / job_type / payload 一式で 1 回呼ばれることを確認。"""
         event = _make_grade_ai_event(body={"user_answer": "東京"})
 
-        # 【実際の処理実行】
         grade_ai_handler(event, lambda_context)
 
-        # 【結果検証】: grade_answer の引数を確認
-        mock_service.grade_answer.assert_called_once_with(
-            card_front="日本の首都は？",
-            card_back="東京",
-            user_answer="東京",
-            language="ja",
-        )  # 【確認内容】: 全引数が正しく渡されること
+        mock_submit.assert_called_once_with(
+            user_id="test-user-id",
+            job_type="grade_ai",
+            payload={
+                "card_id": "card-123",
+                "user_answer": "東京",
+                "language": "ja",
+            },
+        )
 
-    def test_grade_ai_passes_language_param_to_grade_answer(
-        self, lambda_context, mock_card_service, mock_ai_service
+    def test_grade_ai_passes_language_param_to_payload(
+        self, lambda_context, mock_card_service, mock_submit
     ):
-        """TC-060-AI-003: クエリパラメータ language=en が AI サービスに渡されることを確認。
-
-        【テスト目的】: queryStringParameters から language を取得して grade_answer() に渡す処理を検証
-        【テスト内容】: queryStringParameters = {"language": "en"} でリクエスト
-        【期待される動作】: grade_answer(..., language="en") が呼ばれる
-        🔵 信頼性レベル: 青信号 - api-endpoints.md の language パラメータ仕様
-        """
-        # 【テストデータ準備】: language=en のクエリパラメータ
-        _, mock_service = mock_ai_service
+        """クエリパラメータ language=en が payload に渡ることを確認。"""
         event = _make_grade_ai_event(query_params={"language": "en"})
 
-        # 【実際の処理実行】
         grade_ai_handler(event, lambda_context)
 
-        # 【結果検証】: language="en" が grade_answer に渡されたことを確認
-        call_kwargs = mock_service.grade_answer.call_args.kwargs
-        assert call_kwargs["language"] == "en"  # 【確認内容】: language="en" が渡されること
+        assert mock_submit.call_args.kwargs["payload"]["language"] == "en"
 
     def test_grade_ai_uses_default_language_ja(
-        self, lambda_context, mock_card_service, mock_ai_service
+        self, lambda_context, mock_card_service, mock_submit
     ):
-        """TC-060-AI-004: queryStringParameters なしの場合にデフォルト "ja" が使われることを確認。
-
-        【テスト目的】: language パラメータのデフォルト値 "ja" を検証
-        【テスト内容】: queryStringParameters なしでリクエスト（_make_grade_ai_event のデフォルト）
-        【期待される動作】: grade_answer(..., language="ja") が呼ばれる
-        🔵 信頼性レベル: 青信号 - TASK-0060.md「language デフォルト "ja"」
-        """
-        # 【テストデータ準備】: query_params なしのイベント（デフォルト）
-        _, mock_service = mock_ai_service
+        """queryStringParameters なしの場合にデフォルト "ja" が使われることを確認。"""
         event = _make_grade_ai_event()  # query_params なし
 
-        # 【実際の処理実行】
         grade_ai_handler(event, lambda_context)
 
-        # 【結果検証】: language="ja" が grade_answer に渡されたことを確認
-        call_kwargs = mock_service.grade_answer.call_args.kwargs
-        assert call_kwargs["language"] == "ja"  # 【確認内容】: デフォルト language="ja" が渡されること
+        assert mock_submit.call_args.kwargs["payload"]["language"] == "ja"
 
 
 # =============================================================================
-# テストカテゴリ F: 正常系レスポンステスト
+# テストカテゴリ F: 正常系レスポンステスト（202 Accepted）
 # =============================================================================
 
 
-class TestGradeAiHandlerSuccess:
-    """正常系レスポンステスト（TC-060-RES-001 ~ 007）。
+class TestGradeAiHandlerAccepted:
+    """202 レスポンスの検証（旧・正常系 200 レスポンステストの後継）。
 
-    GradeAnswerResponse の全フィールドと HTTP 200 ステータスを検証。
+    completed 時の result 形状（GradeAnswerResponse 互換）は
+    test_ai_job_executors.py と tests/integration/test_integration.py が担保する。
     """
 
-    def test_grade_ai_success_returns_200(
-        self, lambda_context, mock_card_service, mock_ai_service
+    def test_grade_ai_returns_202(
+        self, lambda_context, mock_card_service, mock_submit
     ):
-        """TC-060-RES-001: 正常系で HTTP 200 が返ることを確認。
-
-        【テスト目的】: 成功時の HTTP ステータスコードを検証
-        【テスト内容】: 正常リクエスト + カード存在 + AI 採点成功
-        【期待される動作】: HTTP 200 OK が返る
-        🔵 信頼性レベル: 青信号 - api-endpoints.md「レスポンス（成功 200）」
-        """
-        # 【テストデータ準備】: 正常イベント（フィクスチャでモック設定済み）
+        """正常系で HTTP 202 Accepted が返ることを確認。"""
         event = _make_grade_ai_event()
 
-        # 【実際の処理実行】
         response = grade_ai_handler(event, lambda_context)
 
-        # 【結果検証】
-        assert response["statusCode"] == 200  # 【確認内容】: 成功時に HTTP 200 が返ること
+        assert response["statusCode"] == 202
 
-    def test_grade_ai_success_response_contains_grade(
-        self, lambda_context, mock_card_service, mock_ai_service
+    def test_grade_ai_accepted_body_has_job_fields(
+        self, lambda_context, mock_card_service, mock_submit
     ):
-        """TC-060-RES-002: レスポンスに grade フィールドが正しく含まれることを確認。
-
-        【テスト目的】: GradeAnswerResponse の grade フィールドを検証
-        【テスト内容】: AI が grade=4 を返す（フィクスチャのデフォルト）
-        【期待される動作】: response body の grade == 4
-        🔵 信頼性レベル: 青信号 - GradeAnswerResponse モデル定義（grading.py L45-49）
-        """
-        # 【テストデータ準備】: AI は grade=4 を返す（フィクスチャで設定済み）
+        """202 ボディが {job_id, job_type, status} のみを含むことを確認。"""
         event = _make_grade_ai_event()
 
-        # 【実際の処理実行】
         response = grade_ai_handler(event, lambda_context)
 
-        # 【結果検証】
         body = json.loads(response["body"])
-        assert body["grade"] == 4  # 【確認内容】: grade フィールドが 4 であること
+        assert body == {
+            "job_id": "aijob_t",
+            "job_type": "grade_ai",
+            "status": "queued",
+        }
 
-    def test_grade_ai_success_response_contains_reasoning(
-        self, lambda_context, mock_card_service, mock_ai_service
+    def test_grade_ai_accepted_response_is_json(
+        self, lambda_context, mock_card_service, mock_submit
     ):
-        """TC-060-RES-003: レスポンスに reasoning フィールドが正しく含まれることを確認。
-
-        【テスト目的】: GradeAnswerResponse の reasoning フィールドを検証
-        【テスト内容】: AI が reasoning="Correct answer with good understanding" を返す
-        【期待される動作】: response body の reasoning が正しく設定されている
-        🔵 信頼性レベル: 青信号 - GradeAnswerResponse モデル定義（grading.py L51-53）
-        """
-        # 【テストデータ準備】: フィクスチャで reasoning を設定済み
+        """202 レスポンスの Content-Type が application/json であることを確認。"""
         event = _make_grade_ai_event()
 
-        # 【実際の処理実行】
         response = grade_ai_handler(event, lambda_context)
 
-        # 【結果検証】
-        body = json.loads(response["body"])
-        assert (
-            body["reasoning"] == "Correct answer with good understanding"
-        )  # 【確認内容】: reasoning フィールドが正しく設定されること
-
-    def test_grade_ai_success_response_contains_card_front_back(
-        self, lambda_context, mock_card_service, mock_ai_service
-    ):
-        """TC-060-RES-004: レスポンスに card_front と card_back が含まれることを確認。
-
-        【テスト目的】: GradeAnswerResponse の card_front / card_back フィールドを検証
-        【テスト内容】: card.front="日本の首都は？", card.back="東京"（フィクスチャのデフォルト）
-        【期待される動作】: body の card_front == "日本の首都は？", card_back == "東京"
-        🔵 信頼性レベル: 青信号 - GradeAnswerResponse の card_front / card_back フィールド（grading.py L55-62）
-        """
-        # 【テストデータ準備】: フィクスチャで card.front="日本の首都は？", card.back="東京" を設定済み
-        event = _make_grade_ai_event()
-
-        # 【実際の処理実行】
-        response = grade_ai_handler(event, lambda_context)
-
-        # 【結果検証】
-        body = json.loads(response["body"])
-        assert body["card_front"] == "日本の首都は？"  # 【確認内容】: card_front が正しく設定されること
-        assert body["card_back"] == "東京"  # 【確認内容】: card_back が正しく設定されること
-
-    def test_grade_ai_success_response_contains_grading_info(
-        self, lambda_context, mock_card_service, mock_ai_service
-    ):
-        """TC-060-RES-005: レスポンスの grading_info に model_used と processing_time_ms が含まれることを確認。
-
-        【テスト目的】: GradeAnswerResponse の grading_info フィールドを検証
-        【テスト内容】: AI が model_used="test-model", processing_time_ms=500 を返す
-        【期待される動作】: grading_info["model_used"] == "test-model", grading_info["processing_time_ms"] == 500
-        🔵 信頼性レベル: 青信号 - api-endpoints.md の grading_info 仕様
-        """
-        # 【テストデータ準備】: フィクスチャで model_used="test-model", processing_time_ms=500 を設定済み
-        event = _make_grade_ai_event()
-
-        # 【実際の処理実行】
-        response = grade_ai_handler(event, lambda_context)
-
-        # 【結果検証】
-        body = json.loads(response["body"])
-        assert (
-            body["grading_info"]["model_used"] == "test-model"
-        )  # 【確認内容】: model_used が grading_info に含まれること
-        assert (
-            body["grading_info"]["processing_time_ms"] == 500
-        )  # 【確認内容】: processing_time_ms が grading_info に含まれること
-
-    def test_grade_ai_success_response_is_json(
-        self, lambda_context, mock_card_service, mock_ai_service
-    ):
-        """TC-060-RES-006: 正常系（HTTP 200）で Content-Type ヘッダーが application/json であることを確認。
-
-        【テスト目的】: 正常系レスポンスの Content-Type ヘッダーを検証
-        【テスト内容】: 正常リクエストで grade_ai_handler を呼び出し HTTP 200 かつ Content-Type を確認
-        【期待される動作】: HTTP 200 かつ Content-Type が "application/json" である
-        🔵 信頼性レベル: 青信号 - _make_lambda_response のレスポンスパターン（handler.py）
-        """
-        # 【テストデータ準備】: 正常イベント
-        event = _make_grade_ai_event()
-
-        # 【実際の処理実行】
-        response = grade_ai_handler(event, lambda_context)
-
-        # 【結果検証】
-        assert response["statusCode"] == 200  # 【確認内容】: 正常系で HTTP 200 が返ること
-        assert (
-            response["headers"]["Content-Type"] == "application/json"
-        )  # 【確認内容】: Content-Type が application/json であること
-
-    def test_grade_ai_success_full_e2e_flow(self, lambda_context):
-        """TC-060-RES-007: 認証 -> カード取得 -> AI 採点 -> レスポンス返却の一連フローを確認。
-
-        【テスト目的】: grade_ai_handler の全フローが正しく動作することを検証（E2E シナリオ）
-        【テスト内容】: カスタム user_id, card_id, user_answer でフル E2E テスト
-        【期待される動作】: 全フィールドが正しく返される
-        🔵 信頼性レベル: 青信号 - dataflow.md 機能2: 回答採点フロー全体
-        """
-        # 【テストデータ準備】: E2E シナリオ専用のカスタムモック
-        with patch("api.handler.card_service") as mock_cs, patch(
-            "api.handler.create_ai_service"
-        ) as mock_factory:
-            mock_card = MagicMock()
-            mock_card.front = "フランスの首都は？"
-            mock_card.back = "パリ"
-            mock_cs.get_card.return_value = mock_card
-
-            mock_service = MagicMock()
-            mock_service.grade_answer.return_value = GradingResult(
-                grade=5,
-                reasoning="Perfect match",
-                model_used="claude-3-haiku",
-                processing_time_ms=350,
-            )
-            mock_factory.return_value = mock_service
-
-            event = _make_grade_ai_event(
-                user_id="e2e-user",
-                card_id="e2e-card",
-                body={"user_answer": "パリ"},
-            )
-
-            # 【実際の処理実行】: フル E2E フロー
-            response = grade_ai_handler(event, lambda_context)
-
-        # 【結果検証】: 全フィールドを検証
-        assert response["statusCode"] == 200  # 【確認内容】: HTTP 200 が返ること
-        body = json.loads(response["body"])
-        assert body["grade"] == 5  # 【確認内容】: grade が 5 であること
-        assert body["reasoning"] == "Perfect match"  # 【確認内容】: reasoning が正しいこと
-        assert body["card_front"] == "フランスの首都は？"  # 【確認内容】: card_front が正しいこと
-        assert body["card_back"] == "パリ"  # 【確認内容】: card_back が正しいこと
-        assert (
-            body["grading_info"]["model_used"] == "claude-3-haiku"
-        )  # 【確認内容】: grading_info.model_used が正しいこと
-        assert (
-            body["grading_info"]["processing_time_ms"] == 350
-        )  # 【確認内容】: grading_info.processing_time_ms が正しいこと
-
-        # コール引数を検証
-        mock_cs.get_card.assert_called_once_with(
-            "e2e-user", "e2e-card"
-        )  # 【確認内容】: get_card に正しい引数が渡されること
-        mock_service.grade_answer.assert_called_once_with(
-            card_front="フランスの首都は？",
-            card_back="パリ",
-            user_answer="パリ",
-            language="ja",
-        )  # 【確認内容】: grade_answer に正しい引数が渡されること
+        assert response["statusCode"] == 202
+        assert response["headers"]["Content-Type"] == "application/json"
 
 
 # =============================================================================
-# テストカテゴリ G: AI エラーハンドリングテスト
+# テストカテゴリ G: 予期しないエラーテスト
 # =============================================================================
 
 
-class TestGradeAiHandlerAIErrors:
-    """AI エラーハンドリングテスト（TC-060-ERR-001 ~ 007）。
+class TestGradeAiHandlerUnexpectedErrors:
+    """submit 段階での予期しない例外の汎用ハンドリングを検証する。
 
-    _map_ai_error_to_http() を使用した AI 例外の HTTP マッピングを検証。
-    独立 Lambda では Response オブジェクトを dict 形式に変換する必要がある。
+    AI 例外のマッピング（504/429/503/500）は executor + classify_ai_job_error に
+    移設した（test_ai_job_executors.py / test_ai_job_errors.py）。
     """
 
-    def test_grade_ai_returns_504_on_ai_timeout(
-        self, lambda_context, mock_card_service, mock_ai_service
+    def test_grade_ai_returns_500_when_submit_fails_unexpectedly(
+        self, lambda_context, mock_card_service, mock_submit
     ):
-        """TC-060-ERR-001: AITimeoutError が HTTP 504 にマッピングされることを確認。
-
-        【テスト目的】: AITimeoutError → 504 Gateway Timeout のマッピングを検証
-        【テスト内容】: grade_answer が AITimeoutError を raise する
-        【期待される動作】: HTTP 504, {"error": "AI service timeout"}
-        🔵 信頼性レベル: 青信号 - _map_ai_error_to_http() 実装（handler.py L74-80）
-        """
-        # 【テストデータ準備】: AITimeoutError を raise する設定
-        _, mock_service = mock_ai_service
-        mock_service.grade_answer.side_effect = AITimeoutError("timeout")
+        """submit_ai_job が予期しない例外を送出した場合に HTTP 500 を返すことを確認。"""
+        mock_submit.side_effect = RuntimeError("unexpected")
         event = _make_grade_ai_event()
 
-        # 【実際の処理実行】
         response = grade_ai_handler(event, lambda_context)
 
-        # 【結果検証】
-        assert response["statusCode"] == 504  # 【確認内容】: AITimeoutError で 504 が返ること
+        assert response["statusCode"] == 500
         body = json.loads(response["body"])
-        assert body["error"] == "AI service timeout"  # 【確認内容】: エラーメッセージが "AI service timeout" であること
+        assert body["error"] == "Internal Server Error"
 
-    def test_grade_ai_returns_429_on_ai_rate_limit(
-        self, lambda_context, mock_card_service, mock_ai_service
+    def test_grade_ai_returns_500_on_unexpected_card_service_error(
+        self, lambda_context, mock_submit
     ):
-        """TC-060-ERR-002: AIRateLimitError が HTTP 429 にマッピングされることを確認。
-
-        【テスト目的】: AIRateLimitError → 429 Too Many Requests のマッピングを検証
-        【テスト内容】: grade_answer が AIRateLimitError を raise する
-        【期待される動作】: HTTP 429, {"error": "AI service rate limit exceeded"}
-        🔵 信頼性レベル: 青信号 - _map_ai_error_to_http() 実装（handler.py L81-86）
-        """
-        # 【テストデータ準備】: AIRateLimitError を raise する設定
-        _, mock_service = mock_ai_service
-        mock_service.grade_answer.side_effect = AIRateLimitError("rate limit")
-        event = _make_grade_ai_event()
-
-        # 【実際の処理実行】
-        response = grade_ai_handler(event, lambda_context)
-
-        # 【結果検証】
-        assert response["statusCode"] == 429  # 【確認内容】: AIRateLimitError で 429 が返ること
-        body = json.loads(response["body"])
-        assert (
-            body["error"] == "AI service rate limit exceeded"
-        )  # 【確認内容】: エラーメッセージが "AI service rate limit exceeded" であること
-
-    def test_grade_ai_returns_503_on_ai_provider_error(
-        self, lambda_context, mock_card_service, mock_ai_service
-    ):
-        """TC-060-ERR-003: AIProviderError が HTTP 503 にマッピングされることを確認。
-
-        【テスト目的】: AIProviderError → 503 Service Unavailable のマッピングを検証
-        【テスト内容】: grade_answer が AIProviderError を raise する
-        【期待される動作】: HTTP 503, {"error": "AI service unavailable"}
-        🔵 信頼性レベル: 青信号 - _map_ai_error_to_http() 実装（handler.py L88-93）
-        """
-        # 【テストデータ準備】: AIProviderError を raise する設定
-        _, mock_service = mock_ai_service
-        mock_service.grade_answer.side_effect = AIProviderError("provider down")
-        event = _make_grade_ai_event()
-
-        # 【実際の処理実行】
-        response = grade_ai_handler(event, lambda_context)
-
-        # 【結果検証】
-        assert response["statusCode"] == 503  # 【確認内容】: AIProviderError で 503 が返ること
-        body = json.loads(response["body"])
-        assert (
-            body["error"] == "AI service unavailable"
-        )  # 【確認内容】: エラーメッセージが "AI service unavailable" であること
-
-    def test_grade_ai_returns_500_on_ai_parse_error(
-        self, lambda_context, mock_card_service, mock_ai_service
-    ):
-        """TC-060-ERR-004: AIParseError が HTTP 500 にマッピングされることを確認。
-
-        【テスト目的】: AIParseError → 500 Internal Server Error のマッピングを検証
-        【テスト内容】: grade_answer が AIParseError を raise する
-        【期待される動作】: HTTP 500, {"error": "AI service response parse error"}
-        🔵 信頼性レベル: 青信号 - _map_ai_error_to_http() 実装（handler.py L95-100）
-        """
-        # 【テストデータ準備】: AIParseError を raise する設定
-        _, mock_service = mock_ai_service
-        mock_service.grade_answer.side_effect = AIParseError("invalid json")
-        event = _make_grade_ai_event()
-
-        # 【実際の処理実行】
-        response = grade_ai_handler(event, lambda_context)
-
-        # 【結果検証】
-        assert response["statusCode"] == 500  # 【確認内容】: AIParseError で 500 が返ること
-        body = json.loads(response["body"])
-        assert (
-            body["error"] == "AI service response parse error"
-        )  # 【確認内容】: エラーメッセージが "AI service response parse error" であること
-
-    def test_grade_ai_returns_500_on_ai_internal_error(
-        self, lambda_context, mock_card_service, mock_ai_service
-    ):
-        """TC-060-ERR-005: AIInternalError が HTTP 500 にマッピングされることを確認。
-
-        【テスト目的】: AIInternalError → 500 Internal Server Error のマッピングを検証
-        【テスト内容】: grade_answer が AIInternalError を raise する
-        【期待される動作】: HTTP 500, {"error": "AI service error"}
-        🔵 信頼性レベル: 青信号 - _map_ai_error_to_http() 実装（handler.py L102-106）
-        """
-        # 【テストデータ準備】: AIInternalError を raise する設定
-        _, mock_service = mock_ai_service
-        mock_service.grade_answer.side_effect = AIInternalError("internal failure")
-        event = _make_grade_ai_event()
-
-        # 【実際の処理実行】
-        response = grade_ai_handler(event, lambda_context)
-
-        # 【結果検証】
-        assert response["statusCode"] == 500  # 【確認内容】: AIInternalError で 500 が返ること
-        body = json.loads(response["body"])
-        assert (
-            body["error"] == "AI service error"
-        )  # 【確認内容】: エラーメッセージが "AI service error" であること
-
-    def test_grade_ai_returns_503_on_factory_init_failure(
-        self, lambda_context, mock_card_service
-    ):
-        """TC-060-ERR-006: create_ai_service() 自体が AIProviderError を raise した場合に HTTP 503 を返すことを確認。
-
-        【テスト目的】: AI ファクトリー初期化失敗時のエラーハンドリングを検証
-        【テスト内容】: create_ai_service() が AIProviderError を raise する
-        【期待される動作】: HTTP 503, {"error": "AI service unavailable"}
-        🔵 信頼性レベル: 青信号 - ai_service.py「raise AIProviderError」、TC-056-013 のテストパターン
-        """
-        # 【テストデータ準備】: ファクトリー自体が AIProviderError を raise する
-        with patch("api.handler.create_ai_service") as mock_factory:
-            mock_factory.side_effect = AIProviderError(
-                "Failed to initialize AI service"
-            )
+        """カード取得の予期しない例外（RuntimeError 等）で HTTP 500 を返すことを確認。"""
+        with patch("api.handler.card_service") as mock_cs:
+            mock_cs.get_card.side_effect = RuntimeError("unexpected db error")
             event = _make_grade_ai_event()
 
-            # 【実際の処理実行】
             response = grade_ai_handler(event, lambda_context)
 
-        # 【結果検証】
-        assert response["statusCode"] == 503  # 【確認内容】: ファクトリー初期化失敗で 503 が返ること
-        body = json.loads(response["body"])
-        assert (
-            body["error"] == "AI service unavailable"
-        )  # 【確認内容】: エラーメッセージが "AI service unavailable" であること
-
-    def test_grade_ai_returns_500_on_unexpected_exception(
-        self, lambda_context, mock_card_service, mock_ai_service
-    ):
-        """TC-060-ERR-007: 予期しない例外（RuntimeError 等）が HTTP 500 にマッピングされることを確認。
-
-        【テスト目的】: 予期しない例外の汎用エラーハンドリングを検証
-        【テスト内容】: grade_answer が RuntimeError を raise する
-        【期待される動作】: HTTP 500, {"error": "Internal Server Error"}
-        🔵 信頼性レベル: 青信号 - TASK-0060.md の except Exception as e パターン
-        """
-        # 【テストデータ準備】: RuntimeError を raise する設定
-        _, mock_service = mock_ai_service
-        mock_service.grade_answer.side_effect = RuntimeError("unexpected")
-        event = _make_grade_ai_event()
-
-        # 【実際の処理実行】
-        response = grade_ai_handler(event, lambda_context)
-
-        # 【結果検証】
-        assert response["statusCode"] == 500  # 【確認内容】: 予期しない例外で 500 が返ること
-        body = json.loads(response["body"])
-        assert (
-            body["error"] == "Internal Server Error"
-        )  # 【確認内容】: エラーメッセージが "Internal Server Error" であること
+        assert response["statusCode"] == 500
+        mock_submit.assert_not_called()
 
 
 # =============================================================================
@@ -948,77 +492,19 @@ class TestGradeAiHandlerAIErrors:
 
 
 class TestGradeAiHandlerLogging:
-    """ロギング関連テスト（TC-060-LOG-001 ~ 003）。
+    """submit 時のリクエストロギングを検証する。
 
-    grade_ai_handler が適切なタイミングで適切なフィールドをロギングすることを検証。
+    詳細な構造化フィールドの検証は tests/unit/test_structured_logging.py。
     """
 
     def test_grade_ai_logs_request_info(
-        self, lambda_context, mock_card_service, mock_ai_service
+        self, lambda_context, mock_card_service, mock_submit
     ):
-        """TC-060-LOG-001: 採点リクエスト受信時に logger.info で card_id, user_id, user_answer_length を記録することを確認。
-
-        【テスト目的】: リクエスト受信時のロギングを検証
-        【テスト内容】: user_answer="テスト回答"（5文字）でリクエスト
-        【期待される動作】: logger.info が card_id, user_id, user_answer_length を含む引数で呼ばれる
-        🔵 信頼性レベル: 青信号 - TASK-0060.md ロギング仕様 L204-209
-        """
-        # 【テストデータ準備】: ロギング検証用のリクエスト
+        """submit 受付時に logger.info で card_id を含む情報を記録することを確認。"""
         event = _make_grade_ai_event(body={"user_answer": "テスト回答"})
 
-        # 【実際の処理実行】: logger をモックして呼び出しを記録
         with patch("api.handler.logger") as mock_logger:
             grade_ai_handler(event, lambda_context)
 
-        # 【結果検証】: logger.info が card_id, user_id, user_answer_length を含む引数で呼ばれたことを確認
         info_calls_str = str(mock_logger.info.call_args_list)
-        assert (
-            "card" in info_calls_str or "card-123" in info_calls_str
-        )  # 【確認内容】: card_id がログに含まれること
-
-    def test_grade_ai_logs_success_info(
-        self, lambda_context, mock_card_service, mock_ai_service
-    ):
-        """TC-060-LOG-002: 採点成功時に logger.info で grade を含む情報を記録することを確認。
-
-        【テスト目的】: 採点成功時のロギングを検証
-        【テスト内容】: 正常リクエスト + AI 採点成功（grade=4）
-        【期待される動作】: logger.info が grade を含む引数で呼ばれる
-        🔵 信頼性レベル: 青信号 - 既存 generate_cards の成功ログパターン（handler.py L324-326）
-        """
-        # 【テストデータ準備】: 正常フロー（AI は grade=4 を返す）
-        event = _make_grade_ai_event()
-
-        # 【実際の処理実行】
-        with patch("api.handler.logger") as mock_logger:
-            grade_ai_handler(event, lambda_context)
-
-        # 【結果検証】: logger.info が grade を含む引数で呼ばれたことを確認
-        info_calls_str = str(mock_logger.info.call_args_list)
-        assert (
-            "grade" in info_calls_str or "4" in info_calls_str
-        )  # 【確認内容】: grade がログに含まれること
-
-    def test_grade_ai_logs_ai_error(
-        self, lambda_context, mock_card_service, mock_ai_service
-    ):
-        """TC-060-LOG-003: AI エラー発生時に logger.warning または logger.error で記録することを確認。
-
-        【テスト目的】: AI エラー発生時のエラーロギングを検証
-        【テスト内容】: grade_answer が AITimeoutError を raise する
-        【期待される動作】: logger.warning または logger.error が呼ばれる
-        🔵 信頼性レベル: 青信号 - 既存 generate_cards の AI エラーログパターン（handler.py L348）
-        """
-        # 【テストデータ準備】: AITimeoutError を raise する設定
-        _, mock_service = mock_ai_service
-        mock_service.grade_answer.side_effect = AITimeoutError("timeout")
-        event = _make_grade_ai_event()
-
-        # 【実際の処理実行】
-        with patch("api.handler.logger") as mock_logger:
-            grade_ai_handler(event, lambda_context)
-
-        # 【結果検証】: logger.warning または logger.error が呼ばれたことを確認
-        assert (
-            mock_logger.warning.called or mock_logger.error.called
-        )  # 【確認内容】: AI エラー時に warning または error がログに記録されること
+        assert "card" in info_calls_str or "card-123" in info_calls_str

@@ -14,6 +14,9 @@ os.environ["AWS_DEFAULT_REGION"] = "ap-northeast-1"
 os.environ["USERS_TABLE"] = "memoru-users-test"
 os.environ["CARDS_TABLE"] = "memoru-cards-test"
 os.environ["REVIEWS_TABLE"] = "memoru-reviews-test"
+# ai-async-jobs: AiJobStore の既定テーブル名 (memoru-ai-jobs-dev) への
+# 実アクセスを防ぐため、テストでは必ずテスト用テーブル名を指す。
+os.environ["AI_JOBS_TABLE"] = "memoru-ai-jobs-test"
 os.environ["LOG_LEVEL"] = "DEBUG"
 os.environ["POWERTOOLS_SERVICE_NAME"] = "memoru-test"
 os.environ["POWERTOOLS_TRACE_DISABLED"] = "true"

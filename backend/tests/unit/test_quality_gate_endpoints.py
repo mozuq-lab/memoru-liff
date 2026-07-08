@@ -1,19 +1,32 @@
-"""TASK-0065: 品質ゲート - エンドポイント動作検証.
+"""TASK-0065: 品質ゲート - エンドポイント動作検証（ai-async-jobs 版）.
 
-カテゴリ 7: 全エンドポイント動作検証 (TC-QG-007)
-カテゴリ 8: レスポンスフォーマット検証 (TC-QG-008)
-カテゴリ 9: クロスエンドポイントエラーマッピング (TC-QG-010)
+カテゴリ 7: 全 submit エンドポイント動作検証（旧: 全エンドポイント 200 → 202）
+カテゴリ 8: レスポンスフォーマット検証（executor result の薄い確認。
+            厳密な形状は tests/unit/test_ai_job_executors.py に移設）
+カテゴリ 9/10: クロスエンドポイントエラーマッピング（executor +
+            classify_ai_job_error の組で旧ステータスとの一致を検証）
 
-🔵 信頼性: 既存 test_quality_gate.py から分割。ロジック変更なし。
+ai-async-jobs: AI 系 7 エンドポイントは submit（202 + job_id）に変換されたため、
+- 「全エンドポイント 200」→「全 submit エンドポイント 202」
+- 「レスポンス形状」→ executor の result dict 検証
+- 「エラーマッピング」→ executor 例外 + classify_ai_job_error の status 検証
+に書き換えた。USE_STRANDS フラグによるサービス選択は submit 経路に影響しない
+（executor 内の create_ai_service で解決される。test_migration_compat.py の
+TestFeatureFlagBehavior が担保）。
 """
 
 import json
-import os
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 
+from services.ai_job_errors import classify_ai_job_error
+from services.ai_job_executors import (
+    execute_advice,
+    execute_generate,
+    execute_grade_ai,
+)
 from services.ai_service import (
     AIInternalError,
     AIParseError,
@@ -31,130 +44,140 @@ from tests.unit.conftest import (
     make_mock_review_summary,
 )
 
+GENERATE_PAYLOAD = {
+    "input_text": "テスト用のテキストです。" * 5,
+    "card_count": 3,
+    "difficulty": "medium",
+    "language": "ja",
+}
+GRADE_PAYLOAD = {"card_id": "card-123", "user_answer": "東京", "language": "ja"}
+ADVICE_PAYLOAD = {"language": "ja"}
 
-@pytest.fixture(autouse=True)
-def _mock_advice_user_service():
-    """advice_handler の user_timezone 取得用に api.handler.user_service を自動モック。
 
-    advice_handler はユーザー設定から timezone を取得して get_review_summary に
-    渡すため、実 UserService（DynamoDB アクセス）に到達しないようパッチする。
-    """
-    with patch("api.handler.user_service") as mock:
-        mock.get_or_create_user.return_value.settings = {"timezone": "Asia/Tokyo"}
-        yield mock
+def _submit_result(job_type: str) -> dict:
+    """submit_ai_job モックの戻り値（作成直後の queued ジョブレコード相当）."""
+    return {"job_id": "aijob_qg", "job_type": job_type, "status": "queued"}
 
 
 # =============================================================================
-# カテゴリ 7: 全エンドポイント動作検証 (TestEndpointFunctionalFinal)
+# カテゴリ 7: 全 submit エンドポイント動作検証 (TestSubmitEndpointsReturn202)
 # =============================================================================
 
 
-class TestEndpointFunctionalFinal:
-    """USE_STRANDS 環境変数の各状態で全 3 AI エンドポイントが HTTP 200 を返すことを最終確認.
+class TestSubmitEndpointsReturn202:
+    """全 AI submit エンドポイントが HTTP 202 + ジョブ情報を返すことを最終確認.
 
-    TC-QG-007-001 ~ TC-QG-007-007
-
-    【テスト方針】: create_ai_service() をモックして AI 呼び出しをスタブし、
-    ハンドラーのルーティングと環境変数フラグの動作のみを検証する。
+    旧 TC-QG-007（全エンドポイント 200）の後継。
+    【テスト方針】: submit_ai_job をモックして AI 実行・DynamoDB をスタブし、
+    ルーティングと 202 変換のみを検証する。
     """
 
-    @patch("api.handlers.ai_handler.create_ai_service")
-    def test_use_strands_true_generate_returns_200(self, mock_factory):
-        """TC-QG-007-001: USE_STRANDS=true で POST /cards/generate が HTTP 200 を返す."""
-        from api.handler import handler
-        mock_factory.return_value = make_mock_ai_service()
+    def _assert_202(self, response, job_type):
+        assert response["statusCode"] == 202
+        body = json.loads(response["body"])
+        assert body == {
+            "job_id": "aijob_qg",
+            "job_type": job_type,
+            "status": "queued",
+        }
 
-        with patch.dict("os.environ", {"USE_STRANDS": "true"}):
+    def test_generate_returns_202(self):
+        """POST /cards/generate が 202 を返す."""
+        from api.handler import handler
+
+        with patch("api.handlers.ai_handler.submit_ai_job") as mock_submit:
+            mock_submit.return_value = _submit_result("generate")
             response = handler(make_generate_event(), MagicMock())
 
-        assert response["statusCode"] == 200
+        self._assert_202(response, "generate")
 
-    @patch("api.handler.card_service")
-    @patch("api.handler.create_ai_service")
-    def test_use_strands_true_grade_ai_returns_200(self, mock_factory, mock_card_service):
-        """TC-QG-007-002: USE_STRANDS=true で POST /reviews/{cardId}/grade-ai が HTTP 200 を返す."""
-        from api.handler import grade_ai_handler
-        mock_factory.return_value = make_mock_ai_service()
-        mock_card_service.get_card.return_value = make_mock_card()
-
-        with patch.dict("os.environ", {"USE_STRANDS": "true"}):
-            response = grade_ai_handler(make_grade_ai_event(), MagicMock())
-
-        assert response["statusCode"] == 200
-
-    @patch("api.handler.review_service")
-    @patch("api.handler.create_ai_service")
-    def test_use_strands_true_advice_returns_200(self, mock_factory, mock_review_service):
-        """TC-QG-007-003: USE_STRANDS=true で GET /advice が HTTP 200 を返す."""
-        from api.handler import advice_handler
-        mock_factory.return_value = make_mock_ai_service()
-        mock_review_service.get_review_summary.return_value = make_mock_review_summary()
-
-        with patch.dict("os.environ", {"USE_STRANDS": "true"}):
-            response = advice_handler(make_advice_event(), MagicMock())
-
-        assert response["statusCode"] == 200
-
-    @patch("api.handlers.ai_handler.create_ai_service")
-    def test_use_strands_false_generate_returns_200(self, mock_factory):
-        """TC-QG-007-004: USE_STRANDS=false で POST /cards/generate が HTTP 200 を返す."""
+    def test_generate_from_url_returns_202(self, api_gateway_event):
+        """POST /cards/generate-from-url が 202 を返す."""
         from api.handler import handler
-        mock_factory.return_value = make_mock_ai_service()
 
-        with patch.dict("os.environ", {"USE_STRANDS": "false"}):
-            response = handler(make_generate_event(), MagicMock())
+        event = api_gateway_event(
+            method="POST",
+            path="/cards/generate-from-url",
+            body={"url": "https://example.com/page"},
+        )
+        with patch("api.handlers.ai_handler.submit_ai_job") as mock_submit:
+            mock_submit.return_value = _submit_result("generate_from_url")
+            response = handler(event, MagicMock())
 
-        assert response["statusCode"] == 200
+        self._assert_202(response, "generate_from_url")
 
-    @patch("api.handler.card_service")
-    @patch("api.handler.create_ai_service")
-    def test_use_strands_false_grade_ai_returns_200(self, mock_factory, mock_card_service):
-        """TC-QG-007-005: USE_STRANDS=false で POST /reviews/{cardId}/grade-ai が HTTP 200 を返す."""
+    def test_refine_returns_202(self, api_gateway_event):
+        """POST /cards/refine が 202 を返す."""
+        from api.handler import handler
+
+        event = api_gateway_event(
+            method="POST",
+            path="/cards/refine",
+            body={"front": "クロージャとは？", "back": "変数を覚えてる関数"},
+        )
+        with patch("api.handlers.ai_handler.submit_ai_job") as mock_submit:
+            mock_submit.return_value = _submit_result("refine")
+            response = handler(event, MagicMock())
+
+        self._assert_202(response, "refine")
+
+    def test_grade_ai_returns_202(self):
+        """POST /reviews/{cardId}/grade-ai が 202 を返す."""
         from api.handler import grade_ai_handler
-        mock_factory.return_value = make_mock_ai_service()
-        mock_card_service.get_card.return_value = make_mock_card()
 
-        with patch.dict("os.environ", {"USE_STRANDS": "false"}):
-            response = grade_ai_handler(make_grade_ai_event(), MagicMock())
-
-        assert response["statusCode"] == 200
-
-    @patch("api.handler.review_service")
-    @patch("api.handler.create_ai_service")
-    def test_use_strands_false_advice_returns_200(self, mock_factory, mock_review_service):
-        """TC-QG-007-006: USE_STRANDS=false で GET /advice が HTTP 200 を返す."""
-        from api.handler import advice_handler
-        mock_factory.return_value = make_mock_ai_service()
-        mock_review_service.get_review_summary.return_value = make_mock_review_summary()
-
-        with patch.dict("os.environ", {"USE_STRANDS": "false"}):
-            response = advice_handler(make_advice_event(), MagicMock())
-
-        assert response["statusCode"] == 200
-
-    def test_use_strands_unset_all_endpoints_return_200(self):
-        """TC-QG-007-007: USE_STRANDS 未設定で全 3 エンドポイントがデフォルト動作 (HTTP 200)."""
-        from api.handler import handler, grade_ai_handler, advice_handler
-
-        # 【検証】: USE_STRANDS を環境から除去してデフォルト動作（BedrockService）を確認
-        env = {k: v for k, v in os.environ.items() if k != "USE_STRANDS"}
-        with patch.dict("os.environ", env, clear=True), \
-             patch("api.handlers.ai_handler.create_ai_service") as mock_generate_factory, \
-             patch("api.handler.create_ai_service") as mock_standalone_factory, \
-             patch("api.handler.card_service") as mock_card_service, \
-             patch("api.handler.review_service") as mock_review_service:
-            mock_generate_factory.return_value = make_mock_ai_service()
-            mock_standalone_factory.return_value = make_mock_ai_service()
+        with patch("api.handler.submit_ai_job") as mock_submit, patch(
+            "api.handler.card_service"
+        ) as mock_card_service:
+            mock_submit.return_value = _submit_result("grade_ai")
             mock_card_service.get_card.return_value = make_mock_card()
-            mock_review_service.get_review_summary.return_value = make_mock_review_summary()
+            response = grade_ai_handler(make_grade_ai_event(), MagicMock())
 
-            resp1 = handler(make_generate_event(), MagicMock())
-            resp2 = grade_ai_handler(make_grade_ai_event(), MagicMock())
-            resp3 = advice_handler(make_advice_event(), MagicMock())
+        self._assert_202(response, "grade_ai")
 
-        assert resp1["statusCode"] == 200
-        assert resp2["statusCode"] == 200
-        assert resp3["statusCode"] == 200
+    def test_advice_returns_202(self):
+        """POST /advice が 202 を返す."""
+        from api.handler import advice_handler
+
+        with patch("api.handler.submit_ai_job") as mock_submit:
+            mock_submit.return_value = _submit_result("advice")
+            response = advice_handler(make_advice_event(), MagicMock())
+
+        self._assert_202(response, "advice")
+
+    def test_tutor_start_returns_202(self, api_gateway_event):
+        """POST /tutor/sessions が 202 を返す."""
+        from api.handler import handler
+
+        event = api_gateway_event(
+            method="POST",
+            path="/tutor/sessions",
+            body={"deck_id": "deck_001", "mode": "free_talk"},
+        )
+        with patch("api.handlers.tutor_handler.tutor_service"), patch(
+            "api.handlers.tutor_handler.submit_ai_job"
+        ) as mock_submit:
+            mock_submit.return_value = _submit_result("tutor_start")
+            response = handler(event, MagicMock())
+
+        self._assert_202(response, "tutor_start")
+
+    def test_tutor_message_returns_202(self, api_gateway_event):
+        """POST /tutor/sessions/{sessionId}/messages が 202 を返す."""
+        from api.handler import handler
+
+        event = api_gateway_event(
+            method="POST",
+            path="/tutor/sessions/tutor_test-id/messages",
+            body={"content": "hello"},
+            path_parameters={"sessionId": "tutor_test-id"},
+        )
+        with patch("api.handlers.tutor_handler.tutor_service"), patch(
+            "api.handlers.tutor_handler.submit_ai_job"
+        ) as mock_submit:
+            mock_submit.return_value = _submit_result("tutor_message")
+            response = handler(event, MagicMock())
+
+        self._assert_202(response, "tutor_message")
 
 
 # =============================================================================
@@ -163,239 +186,222 @@ class TestEndpointFunctionalFinal:
 
 
 class TestResponseFormatFinal:
-    """各エンドポイントのレスポンス構造が API 仕様に準拠していることを最終確認.
+    """各 executor の result が API 仕様（旧同期レスポンス）に準拠していることを最終確認.
 
-    TC-QG-008-001 ~ TC-QG-008-007
-
-    【テスト方針】: make_mock_ai_service() を使い、レスポンス body の JSON 構造を検証する。
+    旧 TC-QG-008 の後継。厳密なフィールド値の検証は
+    tests/unit/test_ai_job_executors.py に移設したため、ここでは executor を
+    inline で通した result の必須トップレベル構造のみを薄く確認する。
     """
 
-    @patch("api.handlers.ai_handler.create_ai_service")
-    def test_generate_response_has_generated_cards_and_generation_info(self, mock_factory):
-        """TC-QG-008-001: POST /cards/generate レスポンスに generated_cards 配列 + generation_info が含まれる."""
-        from api.handler import handler
-        mock_factory.return_value = make_mock_ai_service()
+    def _run_generate(self):
+        with patch("services.ai_job_executors.create_ai_service") as mock_factory:
+            mock_factory.return_value = make_mock_ai_service()
+            return execute_generate("test-user-id", dict(GENERATE_PAYLOAD))
 
-        response = handler(make_generate_event(), MagicMock())
-        body = json.loads(response["body"])
+    def _run_grade_ai(self):
+        with patch("services.ai_job_executors.CardService") as mock_card_cls, patch(
+            "services.ai_job_executors.create_ai_service"
+        ) as mock_factory:
+            mock_card_cls.return_value.get_card.return_value = make_mock_card()
+            mock_factory.return_value = make_mock_ai_service()
+            return execute_grade_ai("test-user-id", dict(GRADE_PAYLOAD))
 
-        assert "generated_cards" in body
-        assert isinstance(body["generated_cards"], list)
-        assert "generation_info" in body
-        assert isinstance(body["generation_info"], dict)
+    def _run_advice(self):
+        with patch("services.ai_job_executors.UserService") as mock_user_cls, patch(
+            "services.ai_job_executors.ReviewService"
+        ) as mock_review_cls, patch(
+            "services.ai_job_executors.create_ai_service"
+        ) as mock_factory:
+            mock_user_cls.return_value.get_or_create_user.return_value.settings = {}
+            mock_review_cls.return_value.get_review_summary.return_value = (
+                make_mock_review_summary()
+            )
+            mock_factory.return_value = make_mock_ai_service()
+            return execute_advice("test-user-id", dict(ADVICE_PAYLOAD))
 
-    @patch("api.handlers.ai_handler.create_ai_service")
-    def test_generate_cards_have_required_fields(self, mock_factory):
-        """TC-QG-008-002: POST /cards/generate の generated_cards[].front, back, suggested_tags が存在."""
-        from api.handler import handler
-        mock_factory.return_value = make_mock_ai_service()
+    def test_generate_result_has_generated_cards_and_generation_info(self):
+        """TC-QG-008-001: generate result に generated_cards 配列 + generation_info が含まれる."""
+        result = self._run_generate()
 
-        response = handler(make_generate_event(), MagicMock())
-        body = json.loads(response["body"])
-        card = body["generated_cards"][0]
+        assert "generated_cards" in result
+        assert isinstance(result["generated_cards"], list)
+        assert "generation_info" in result
+        assert isinstance(result["generation_info"], dict)
+
+    def test_generate_cards_have_required_fields(self):
+        """TC-QG-008-002: generated_cards[].front, back, suggested_tags が存在."""
+        result = self._run_generate()
+        card = result["generated_cards"][0]
 
         assert "front" in card
         assert "back" in card
         assert "suggested_tags" in card
 
-    @patch("api.handlers.ai_handler.create_ai_service")
-    def test_generate_info_has_required_fields(self, mock_factory):
-        """TC-QG-008-003: POST /cards/generate の generation_info に input_length, model_used, processing_time_ms が存在."""
-        from api.handler import handler
-        mock_factory.return_value = make_mock_ai_service()
-
-        response = handler(make_generate_event(), MagicMock())
-        body = json.loads(response["body"])
-        info = body["generation_info"]
+    def test_generate_info_has_required_fields(self):
+        """TC-QG-008-003: generation_info に input_length, model_used, processing_time_ms が存在."""
+        result = self._run_generate()
+        info = result["generation_info"]
 
         assert "input_length" in info
         assert "model_used" in info
         assert "processing_time_ms" in info
 
-    @patch("api.handler.card_service")
-    @patch("api.handler.create_ai_service")
-    def test_grade_ai_response_has_required_fields(self, mock_factory, mock_card_service):
-        """TC-QG-008-004: POST /reviews/{cardId}/grade-ai レスポンスに grade, reasoning, card_front, card_back, grading_info が含まれる."""
-        from api.handler import grade_ai_handler
-        mock_factory.return_value = make_mock_ai_service()
-        mock_card_service.get_card.return_value = make_mock_card()
+    def test_grade_ai_result_has_required_fields(self):
+        """TC-QG-008-004: grade_ai result に grade, reasoning, card_front, card_back, grading_info が含まれる."""
+        result = self._run_grade_ai()
 
-        response = grade_ai_handler(make_grade_ai_event(), MagicMock())
-        body = json.loads(response["body"])
+        assert "grade" in result
+        assert "reasoning" in result
+        assert "card_front" in result
+        assert "card_back" in result
+        assert "grading_info" in result
 
-        assert "grade" in body
-        assert "reasoning" in body
-        assert "card_front" in body
-        assert "card_back" in body
-        assert "grading_info" in body
+    def test_grade_ai_grade_is_int_in_range(self):
+        """TC-QG-008-005: grade_ai result の grade が int 型で 0-5 範囲."""
+        result = self._run_grade_ai()
 
-    @patch("api.handler.card_service")
-    @patch("api.handler.create_ai_service")
-    def test_grade_ai_grade_is_int_in_range(self, mock_factory, mock_card_service):
-        """TC-QG-008-005: POST /reviews/{cardId}/grade-ai の grade が int 型で 0-5 範囲."""
-        from api.handler import grade_ai_handler
-        mock_factory.return_value = make_mock_ai_service()
-        mock_card_service.get_card.return_value = make_mock_card()
+        assert isinstance(result["grade"], int)
+        assert 0 <= result["grade"] <= 5
 
-        response = grade_ai_handler(make_grade_ai_event(), MagicMock())
-        body = json.loads(response["body"])
+    def test_advice_result_has_required_fields(self):
+        """TC-QG-008-006: advice result に advice_text, weak_areas, recommendations, study_stats, advice_info が含まれる."""
+        result = self._run_advice()
 
-        assert isinstance(body["grade"], int)
-        assert 0 <= body["grade"] <= 5
+        assert "advice_text" in result
+        assert "weak_areas" in result
+        assert "recommendations" in result
+        assert "study_stats" in result
+        assert "advice_info" in result
 
-    @patch("api.handler.review_service")
-    @patch("api.handler.create_ai_service")
-    def test_advice_response_has_required_fields(self, mock_factory, mock_review_service):
-        """TC-QG-008-006: GET /advice レスポンスに advice_text, weak_areas, recommendations, study_stats, advice_info が含まれる."""
-        from api.handler import advice_handler
-        mock_factory.return_value = make_mock_ai_service()
-        mock_review_service.get_review_summary.return_value = make_mock_review_summary()
-
-        response = advice_handler(make_advice_event(), MagicMock())
-        body = json.loads(response["body"])
-
-        assert "advice_text" in body
-        assert "weak_areas" in body
-        assert "recommendations" in body
-        assert "study_stats" in body
-        assert "advice_info" in body
-
-    @patch("api.handler.review_service")
-    @patch("api.handler.create_ai_service")
-    def test_advice_info_has_required_fields(self, mock_factory, mock_review_service):
-        """TC-QG-008-007: GET /advice の advice_info に model_used, processing_time_ms が存在."""
-        from api.handler import advice_handler
-        mock_factory.return_value = make_mock_ai_service()
-        mock_review_service.get_review_summary.return_value = make_mock_review_summary()
-
-        response = advice_handler(make_advice_event(), MagicMock())
-        body = json.loads(response["body"])
-        info = body["advice_info"]
+    def test_advice_info_has_required_fields(self):
+        """TC-QG-008-007: advice result の advice_info に model_used, processing_time_ms が存在."""
+        result = self._run_advice()
+        info = result["advice_info"]
 
         assert "model_used" in info
         assert "processing_time_ms" in info
 
 
 # =============================================================================
-# カテゴリ 9: クロスエンドポイントエラーマッピング (TestCrossEndpointErrorMappingFinal)
+# カテゴリ 9/10: クロスエンドポイントエラーマッピング (TestCrossEndpointErrorMappingFinal)
 # =============================================================================
 
 
 class TestCrossEndpointErrorMappingFinal:
-    """AI サービスの各例外タイプが全 3 エンドポイントで同一の HTTP ステータスコードにマッピングされることを最終確認.
+    """AI 例外が全 executor で同一の旧 HTTP ステータスに分類されることを最終確認.
 
-    TC-QG-010-001 ~ TC-QG-010-007
-
-    【テスト方針】: _get_responses() で全 3 エンドポイントのレスポンスをまとめて取得し、
-    同一エラーに対して同一ステータスコードが返ることを確認する。
+    旧 TC-QG-010 の後継。旧同期実装では map_ai_error_to_http が全エンドポイント
+    共通のステータス・文言を返していた。現在は executor から素の例外が伝播し、
+    classify_ai_job_error が failed ジョブの error {status, code, message} に
+    分類するため、「executor + classify」の組で同一の status / message になる
+    ことを横断検証する。
     """
 
-    def _make_error_service(self, error: Exception) -> MagicMock:
-        """指定した例外を全メソッドで raise するモックサービスを作成する."""
-        mock_service = MagicMock()
-        mock_service.generate_cards.side_effect = error
-        mock_service.grade_answer.side_effect = error
-        mock_service.get_learning_advice.side_effect = error
-        return mock_service
+    def _collect_job_errors(self, error: Exception) -> list:
+        """全 3 executor を同一の AI 例外で実行し、classify 結果を集める."""
+        error_service = MagicMock()
+        error_service.generate_cards.side_effect = error
+        error_service.grade_answer.side_effect = error
+        error_service.get_learning_advice.side_effect = error
 
-    def _get_responses(self, error: Exception) -> tuple:
-        """全 3 エンドポイントのレスポンスをまとめて取得するヘルパー."""
-        from api.handler import handler, grade_ai_handler, advice_handler
+        job_errors = []
 
-        error_service = self._make_error_service(error)
+        with patch(
+            "services.ai_job_executors.create_ai_service", return_value=error_service
+        ), patch("services.ai_job_executors.CardService") as mock_card_cls, patch(
+            "services.ai_job_executors.UserService"
+        ) as mock_user_cls, patch(
+            "services.ai_job_executors.ReviewService"
+        ) as mock_review_cls:
+            mock_card_cls.return_value.get_card.return_value = make_mock_card()
+            mock_user_cls.return_value.get_or_create_user.return_value.settings = {}
+            mock_review_cls.return_value.get_review_summary.return_value = (
+                make_mock_review_summary()
+            )
 
-        with patch("api.handlers.ai_handler.create_ai_service") as mock_generate_factory, \
-             patch("api.handler.create_ai_service") as mock_standalone_factory, \
-             patch("api.handler.card_service") as mock_card_service, \
-             patch("api.handler.review_service") as mock_review_service:
-            mock_generate_factory.return_value = error_service
-            mock_standalone_factory.return_value = error_service
-            mock_card_service.get_card.return_value = make_mock_card()
-            mock_review_service.get_review_summary.return_value = make_mock_review_summary()
+            for executor, payload in [
+                (execute_generate, GENERATE_PAYLOAD),
+                (execute_grade_ai, GRADE_PAYLOAD),
+                (execute_advice, ADVICE_PAYLOAD),
+            ]:
+                with pytest.raises(type(error)) as exc_info:
+                    executor("test-user-id", dict(payload))
+                job_errors.append(classify_ai_job_error(exc_info.value))
 
-            resp1 = handler(make_generate_event(), MagicMock())
-            resp2 = grade_ai_handler(make_grade_ai_event(), MagicMock())
-            resp3 = advice_handler(make_advice_event(), MagicMock())
+        return job_errors
 
-        return resp1, resp2, resp3
+    def _assert_uniform(self, job_errors, status, code, message):
+        for job_error in job_errors:
+            assert job_error.status == status
+            assert job_error.code == code
+            assert job_error.message == message
 
-    def test_timeout_error_maps_to_504_all_endpoints(self):
-        """TC-QG-010-001: AITimeoutError -> 全 3 エンドポイントで HTTP 504."""
-        resp1, resp2, resp3 = self._get_responses(AITimeoutError("timeout"))
+    def test_timeout_error_maps_to_504_all_executors(self):
+        """TC-QG-010-001: AITimeoutError -> 全 executor で failed(504) + 旧文言."""
+        job_errors = self._collect_job_errors(AITimeoutError("timeout"))
+        self._assert_uniform(job_errors, 504, "ai_timeout", "AI service timeout")
 
-        assert resp1["statusCode"] == 504
-        assert resp2["statusCode"] == 504
-        assert resp3["statusCode"] == 504
-        assert json.loads(resp1["body"])["error"] == "AI service timeout"
-        assert json.loads(resp2["body"])["error"] == "AI service timeout"
-        assert json.loads(resp3["body"])["error"] == "AI service timeout"
+    def test_rate_limit_error_maps_to_429_all_executors(self):
+        """TC-QG-010-002: AIRateLimitError -> 全 executor で failed(429) + 旧文言."""
+        job_errors = self._collect_job_errors(AIRateLimitError("rate limit"))
+        self._assert_uniform(
+            job_errors, 429, "ai_rate_limit", "AI service rate limit exceeded"
+        )
 
-    def test_rate_limit_error_maps_to_429_all_endpoints(self):
-        """TC-QG-010-002: AIRateLimitError -> 全 3 エンドポイントで HTTP 429."""
-        resp1, resp2, resp3 = self._get_responses(AIRateLimitError("rate limit"))
+    def test_provider_error_maps_to_503_all_executors(self):
+        """TC-QG-010-003: AIProviderError -> 全 executor で failed(503) + 旧文言."""
+        job_errors = self._collect_job_errors(AIProviderError("provider down"))
+        self._assert_uniform(
+            job_errors, 503, "ai_unavailable", "AI service unavailable"
+        )
 
-        assert resp1["statusCode"] == 429
-        assert resp2["statusCode"] == 429
-        assert resp3["statusCode"] == 429
-        assert json.loads(resp1["body"])["error"] == "AI service rate limit exceeded"
+    def test_parse_error_maps_to_500_all_executors(self):
+        """TC-QG-010-004: AIParseError -> 全 executor で failed(500) + 旧文言."""
+        job_errors = self._collect_job_errors(AIParseError("invalid json"))
+        self._assert_uniform(
+            job_errors, 500, "ai_error", "AI service response parse error"
+        )
 
-    def test_provider_error_maps_to_503_all_endpoints(self):
-        """TC-QG-010-003: AIProviderError -> 全 3 エンドポイントで HTTP 503."""
-        resp1, resp2, resp3 = self._get_responses(AIProviderError("provider down"))
+    def test_internal_error_maps_to_500_all_executors(self):
+        """TC-QG-010-005: AIInternalError -> 全 executor で failed(500) + 旧文言."""
+        job_errors = self._collect_job_errors(AIInternalError("internal failure"))
+        self._assert_uniform(job_errors, 500, "ai_error", "AI service error")
 
-        assert resp1["statusCode"] == 503
-        assert resp2["statusCode"] == 503
-        assert resp3["statusCode"] == 503
-        assert json.loads(resp1["body"])["error"] == "AI service unavailable"
+    def test_base_ai_service_error_maps_to_500_all_executors(self):
+        """TC-QG-010-006: AIServiceError (基底) -> 全 executor で failed(500) + 旧文言."""
+        job_errors = self._collect_job_errors(AIServiceError("generic error"))
+        self._assert_uniform(job_errors, 500, "ai_error", "AI service error")
 
-    def test_parse_error_maps_to_500_all_endpoints(self):
-        """TC-QG-010-004: AIParseError -> 全 3 エンドポイントで HTTP 500."""
-        resp1, resp2, resp3 = self._get_responses(AIParseError("invalid json"))
+    def test_factory_init_failure_maps_to_503_all_executors(self):
+        """TC-QG-010-007: create_ai_service() 初期化失敗 -> 全 executor で failed(503)."""
+        job_errors = []
 
-        assert resp1["statusCode"] == 500
-        assert resp2["statusCode"] == 500
-        assert resp3["statusCode"] == 500
-        assert json.loads(resp1["body"])["error"] == "AI service response parse error"
+        with patch(
+            "services.ai_job_executors.create_ai_service",
+            side_effect=AIProviderError("Failed to initialize"),
+        ), patch("services.ai_job_executors.CardService") as mock_card_cls, patch(
+            "services.ai_job_executors.UserService"
+        ) as mock_user_cls, patch(
+            "services.ai_job_executors.ReviewService"
+        ) as mock_review_cls:
+            mock_card_cls.return_value.get_card.return_value = make_mock_card()
+            mock_user_cls.return_value.get_or_create_user.return_value.settings = {}
+            mock_review_cls.return_value.get_review_summary.return_value = (
+                make_mock_review_summary()
+            )
 
-    def test_internal_error_maps_to_500_all_endpoints(self):
-        """TC-QG-010-005: AIInternalError -> 全 3 エンドポイントで HTTP 500."""
-        resp1, resp2, resp3 = self._get_responses(AIInternalError("internal failure"))
+            for executor, payload in [
+                (execute_generate, GENERATE_PAYLOAD),
+                (execute_grade_ai, GRADE_PAYLOAD),
+                (execute_advice, ADVICE_PAYLOAD),
+            ]:
+                with pytest.raises(AIProviderError) as exc_info:
+                    executor("test-user-id", dict(payload))
+                job_errors.append(classify_ai_job_error(exc_info.value))
 
-        assert resp1["statusCode"] == 500
-        assert resp2["statusCode"] == 500
-        assert resp3["statusCode"] == 500
-        assert json.loads(resp1["body"])["error"] == "AI service error"
-
-    def test_base_ai_service_error_maps_to_500_all_endpoints(self):
-        """TC-QG-010-006: AIServiceError (基底) -> 全 3 エンドポイントで HTTP 500."""
-        resp1, resp2, resp3 = self._get_responses(AIServiceError("generic error"))
-
-        assert resp1["statusCode"] == 500
-        assert resp2["statusCode"] == 500
-        assert resp3["statusCode"] == 500
-        assert json.loads(resp1["body"])["error"] == "AI service error"
-
-    def test_factory_init_failure_maps_to_503_all_endpoints(self):
-        """TC-QG-010-007: create_ai_service() 初期化失敗 -> 全 3 エンドポイントで HTTP 503."""
-        from api.handler import handler, grade_ai_handler, advice_handler
-
-        with patch("api.handlers.ai_handler.create_ai_service") as mock_generate_factory, \
-             patch("api.handler.create_ai_service") as mock_standalone_factory, \
-             patch("api.handler.card_service") as mock_card_service, \
-             patch("api.handler.review_service") as mock_review_service:
-
-            mock_generate_factory.side_effect = AIProviderError("Failed to initialize")
-            mock_standalone_factory.side_effect = AIProviderError("Failed to initialize")
-            mock_card_service.get_card.return_value = make_mock_card()
-            mock_review_service.get_review_summary.return_value = make_mock_review_summary()
-
-            resp1 = handler(make_generate_event(), MagicMock())
-            resp2 = grade_ai_handler(make_grade_ai_event(), MagicMock())
-            resp3 = advice_handler(make_advice_event(), MagicMock())
-
-        assert resp1["statusCode"] == 503
-        assert resp2["statusCode"] == 503
-        assert resp3["statusCode"] == 503
+        self._assert_uniform(
+            job_errors, 503, "ai_unavailable", "AI service unavailable"
+        )
 
 
 # =============================================================================
@@ -404,7 +410,7 @@ class TestCrossEndpointErrorMappingFinal:
 
 
 class TestHandlerCoveragePaths:
-    """handler.py の未カバーパスを補完するテスト群.
+    """handler.py / shared.py の未カバーパスを補完するテスト群.
 
     AI エンドポイントに隣接する補助関数・エラーパスの動作を確認する。
     目的: 全体カバレッジを 80% 以上に到達させる。
@@ -460,8 +466,7 @@ class TestHandlerCoveragePaths:
 
         assert result == "jwt-header-user-id"
 
-    @patch("api.handlers.ai_handler.create_ai_service")
-    def test_generate_cards_json_decode_error_returns_400(self, mock_factory):
+    def test_generate_cards_json_decode_error_returns_400(self):
         """generate_cards エンドポイントが無効な JSON ボディに対して HTTP 400 を返す."""
         from api.handler import handler
 
@@ -489,16 +494,17 @@ class TestHandlerCoveragePaths:
             "isBase64Encoded": False,
         }
 
-        response = handler(event, MagicMock())
+        with patch("api.handlers.ai_handler.submit_ai_job") as mock_submit:
+            response = handler(event, MagicMock())
+
         assert response["statusCode"] == 400
         body = json.loads(response["body"])
         assert "error" in body
+        mock_submit.assert_not_called()
 
-    @patch("api.handlers.ai_handler.create_ai_service")
-    def test_handler_stage_prefix_injection(self, mock_factory):
+    def test_handler_stage_prefix_injection(self):
         """main handler() が stage != $default 時に rawPath にステージプレフィックスを付与する."""
         from api.handler import handler
-        mock_factory.return_value = make_mock_ai_service()
 
         event = {
             "version": "2.0",
@@ -525,7 +531,10 @@ class TestHandlerCoveragePaths:
         }
 
         # The handler should prepend "/dev" to rawPath before resolving
-        handler(event, MagicMock())
+        with patch("api.handlers.ai_handler.submit_ai_job") as mock_submit:
+            mock_submit.return_value = _submit_result("generate")
+            handler(event, MagicMock())
+
         # rawPath should now have been modified by handler()
         assert event["rawPath"] == "/dev/cards/generate"
 
@@ -545,8 +554,7 @@ class TestHandlerCoveragePaths:
         assert result is None
 
     @patch("api.handler.card_service")
-    @patch("api.handler.create_ai_service")
-    def test_grade_ai_generic_exception_returns_500(self, mock_factory, mock_card_service):
+    def test_grade_ai_generic_exception_returns_500(self, mock_card_service):
         """grade_ai_handler の汎用例外ハンドラーが予期しない例外に対して HTTP 500 を返す."""
         from api.handler import grade_ai_handler
 
@@ -558,17 +566,22 @@ class TestHandlerCoveragePaths:
         body = json.loads(response["body"])
         assert body["error"] == "Internal Server Error"
 
-    @patch("api.handlers.ai_handler.create_ai_service")
-    def test_generate_cards_generic_exception_raises(self, mock_factory):
-        """generate_cards エンドポイントが非 AIServiceError 例外をログして re-raise する."""
+    def test_generate_cards_submit_infra_error_returns_500(self):
+        """submit（DynamoDB/SQS）のインフラ例外は Lambda 未処理例外にせず統一 500 を返す.
+
+        実装レビュー #1: スタンドアロンハンドラー（grade_ai/advice）と同じ
+        {"error": ...} 形式で返し、API Gateway 独自形式の 500 を露出させない。
+        """
         from api.handler import handler
 
-        mock_factory.side_effect = RuntimeError("unexpected infrastructure error")
+        with patch("api.handlers.ai_handler.submit_ai_job") as mock_submit:
+            mock_submit.side_effect = RuntimeError("unexpected infrastructure error")
 
-        # The except Exception branch logs the error and re-raises
-        # Powertools propagates the raise as a 500 or re-raises it through the stack
-        with pytest.raises((RuntimeError, Exception)):
-            handler(make_generate_event(), MagicMock())
+            response = handler(make_generate_event(), MagicMock())
+
+        assert response["statusCode"] == 500
+        body = json.loads(response["body"])
+        assert body["error"] == "Internal Server Error"
 
     def test_generate_cards_request_whitespace_only_raises_validation_error(self):
         """GenerateCardsRequest が空白のみのテキストで ValueError を raise する."""
