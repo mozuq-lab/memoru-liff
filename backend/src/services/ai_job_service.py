@@ -15,12 +15,12 @@ import os
 import time
 from typing import Any, Optional
 
-import boto3
 from aws_lambda_powertools import Logger
 
 from services.ai_job_errors import classify_ai_job_error
 from services.ai_job_executors import HEAVY_JOB_TYPES, execute_job
 from services.ai_job_store import AiJobStore
+from utils.sqs_client import get_sqs_client
 
 logger = Logger()
 
@@ -35,7 +35,7 @@ def _get_sqs_client() -> Any:
     """SQS クライアントを遅延生成して返す。"""
     global _sqs_client
     if _sqs_client is None:
-        _sqs_client = boto3.client("sqs")
+        _sqs_client = get_sqs_client()
     return _sqs_client
 
 

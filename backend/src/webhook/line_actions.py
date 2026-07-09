@@ -11,7 +11,6 @@ import json
 import os
 from typing import Any, Optional
 
-import boto3
 from aws_lambda_powertools import Logger, Tracer
 
 from models.card import Reference
@@ -29,6 +28,7 @@ from services.url_generation_service import (
     fetch_and_generate_cards,
     generate_and_push_url_cards,
 )
+from utils.sqs_client import get_sqs_client
 from utils.url_validator import UrlValidationError, validate_url
 from webhook import dependencies as deps
 
@@ -55,7 +55,7 @@ def _get_sqs_client() -> Any:
     """SQS クライアントを遅延生成して返す。"""
     global _sqs_client
     if _sqs_client is None:
-        _sqs_client = boto3.client("sqs")
+        _sqs_client = get_sqs_client()
     return _sqs_client
 
 
