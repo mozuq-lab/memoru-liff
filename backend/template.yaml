@@ -40,6 +40,11 @@ Globals:
         AI_JOB_QUEUE_URL: !Ref AiJobQueue
         AI_JOB_HEAVY_QUEUE_URL: !Ref AiJobHeavyQueue
         AI_JOB_WORKER_MODE: ""
+        # utils/sqs_client.get_sqs_client() 参照。DYNAMODB_ENDPOINT_URL と同じ役割で、
+        # ローカル開発時に SQS エンドポイントを差し替えられるようにする
+        # (env.json でオーバーライドするための空デフォルト宣言。SAM の --env-vars は
+        # テンプレート未宣言のキーを上書きできないため、ここでの宣言が必須)。
+        SQS_ENDPOINT_URL: ""
 
 Parameters:
   Environment:
