@@ -136,6 +136,21 @@ cd frontend && npm run dev
 | DynamoDB Admin | http://localhost:8001 | DB 管理 UI |
 | Ollama | http://localhost:11434 | AI 推論（ローカル LLM） |
 
+`OLLAMA_HOST`（`env.json`）は `http://host.docker.internal:11434` を指しており、Docker 版 Ollama
+（`make local-ollama`）でもホストにネイティブインストールした Ollama（Ollama.app / `ollama serve`）
+でもアプリ側の設定変更なしに動作します。ホストの 11434 番ポートをどちらか一方が握る形になるため、
+併用はできません。ネイティブ版に切り替える場合:
+
+```bash
+make local-ollama-stop          # Docker 版を使っていれば先に停止（ポート競合を避ける）
+# Ollama.app を起動するか、ターミナルで `ollama serve`
+make local-ollama-native-pull   # モデル取得（ホスト CLI 経由）
+make local-ollama-native-check  # :11434 への到達確認
+```
+
+Mac の GPU (Metal) を直接使えるぶんネイティブ版のほうが体感速度が上がることが多い一方、Docker 版は
+チーム内でバージョン・モデル管理を揃えやすい利点があります。
+
 #### テストユーザー
 
 | ユーザー名 | パスワード | ロール |
@@ -162,8 +177,10 @@ make local-all-stop       # 全サービス停止
 make local-api            # SAM Local API 起動（ポート 8080）
 make local-db             # DynamoDB Local のみ起動
 make local-keycloak       # Keycloak のみ起動
-make local-ollama         # Ollama のみ起動
-make local-ollama-pull    # Ollama モデル取得
+make local-ollama         # Ollama のみ起動（Docker）
+make local-ollama-pull    # Ollama モデル取得（Docker）
+make local-ollama-native-check  # ホストで動かしている Ollama への到達確認
+make local-ollama-native-pull   # Ollama モデル取得（ホスト CLI 経由）
 
 # ビルド・デプロイ
 make build                # SAM ビルド（Docker コンテナで Python 3.12）
