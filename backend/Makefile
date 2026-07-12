@@ -2,7 +2,7 @@
 SHELL := /bin/bash
 AWS_REGION ?= ap-northeast-1
 
-.PHONY: help install build validate deploy-dev deploy-prod local-db local-keycloak local-ollama local-ollama-pull local-ollama-stop local-ollama-logs local-all local-all-stop local-api test clean
+.PHONY: help install build validate deploy-dev deploy-prod local-db local-keycloak local-ollama local-ollama-pull local-ollama-stop local-ollama-logs local-ollama-native-check local-ollama-native-pull local-all local-all-stop local-api test clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -99,6 +99,28 @@ local-ollama-stop: ## Stop local Ollama
 
 local-ollama-logs: ## Show Ollama logs
 	docker compose logs -f ollama
+
+# ------------------------------------------------------------
+# ネイティブ (ホスト) Ollama を使う場合の代替ターゲット。
+# env.json の OLLAMA_HOST は既に host.docker.internal:11434 を指しているため、
+# アプリ側の設定変更は不要。ホストの 11434 番ポートを Docker 版 (ollama サービス)
+# とネイティブ版(Ollama.app / `ollama serve`) のどちらが握るかを切り替えるだけでよい。
+# 併用不可（ポート競合）のため、ネイティブに切り替える前に `make local-ollama-stop`
+# で Docker 版を停止すること。
+# ------------------------------------------------------------
+local-ollama-native-check: ## Check host-native Ollama is reachable on :11434
+	@if curl -sf http://localhost:11434/api/tags > /dev/null 2>&1; then \
+		echo "Native Ollama is reachable: http://localhost:11434"; \
+	else \
+		echo "Native Ollama is NOT reachable on http://localhost:11434" >&2; \
+		echo "  - Docker 版を使っていないか確認: make local-ollama-stop" >&2; \
+		echo "  - Ollama.app を起動するか、ターミナルで 'ollama serve' を実行してください" >&2; \
+		exit 1; \
+	fi
+
+local-ollama-native-pull: ## Pull Ollama model via host-installed ollama CLI (native mode)
+	ollama pull $${OLLAMA_MODEL:-llama3.2}
+	@echo "Model downloaded successfully (native)"
 
 local-all: local-db local-keycloak local-ollama ## Start all local services
 	@echo ""
