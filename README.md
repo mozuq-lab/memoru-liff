@@ -139,10 +139,19 @@ cd frontend && npm run dev
 `OLLAMA_HOST`（`env.json`）は `http://host.docker.internal:11434` を指しており、Docker 版 Ollama
 （`make local-ollama`）でもホストにネイティブインストールした Ollama（Ollama.app / `ollama serve`）
 でもアプリ側の設定変更なしに動作します。ホストの 11434 番ポートをどちらか一方が握る形になるため、
-併用はできません。ネイティブ版に切り替える場合:
+併用はできません。
+
+**最初からネイティブ版を使う場合**（Ollama.app 等をあらかじめ起動しておく）は、`make local-all` の代わりに
+以下を使うと Docker 版 Ollama を起動すらしないため手間がありません:
 
 ```bash
-make local-ollama-stop          # Docker 版を使っていれば先に停止（ポート競合を避ける）
+make local-all-native-ollama    # DynamoDB + Keycloak を起動し、ネイティブ Ollama の到達確認のみ行う
+```
+
+**Docker 版から後で切り替える場合**は、ポート競合を避けるため一度停止してから切り替えます:
+
+```bash
+make local-ollama-stop          # Docker 版を停止（ポート競合を避ける）
 # Ollama.app を起動するか、ターミナルで `ollama serve`
 make local-ollama-native-pull   # モデル取得（ホスト CLI 経由）
 make local-ollama-native-check  # :11434 への到達確認
@@ -172,7 +181,8 @@ cd backend && make local-all-stop
 cd backend
 
 # ローカルサービス
-make local-all            # 全サービス起動（DynamoDB + Keycloak + Ollama）
+make local-all             # 全サービス起動（DynamoDB + Keycloak + Ollama、Docker 版）
+make local-all-native-ollama  # 全サービス起動（Ollama はホストネイティブ版を利用）
 make local-all-stop       # 全サービス停止
 make local-api            # SAM Local API 起動（ポート 8080）
 make local-db             # DynamoDB Local のみ起動

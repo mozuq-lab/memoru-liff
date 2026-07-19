@@ -2,7 +2,7 @@
 SHELL := /bin/bash
 AWS_REGION ?= ap-northeast-1
 
-.PHONY: help install build validate deploy-dev deploy-prod local-db local-keycloak local-ollama local-ollama-pull local-ollama-stop local-ollama-logs local-ollama-native-check local-ollama-native-pull local-all local-all-stop local-api test clean
+.PHONY: help install build validate deploy-dev deploy-prod local-db local-keycloak local-ollama local-ollama-pull local-ollama-stop local-ollama-logs local-ollama-native-check local-ollama-native-pull local-all local-all-native-ollama local-all-stop local-api test clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -129,6 +129,16 @@ local-all: local-db local-keycloak local-ollama ## Start all local services
 	@echo "  DynamoDB Admin: http://localhost:8001"
 	@echo "  Keycloak:       http://localhost:8180"
 	@echo "  Ollama:         http://localhost:11434"
+	@echo ""
+	@echo "Next: run 'make local-api' in a separate terminal to start the API server"
+
+local-all-native-ollama: local-db local-keycloak local-ollama-native-check ## Start all local services, using host-native Ollama instead of Docker
+	@echo ""
+	@echo "All local services started (using host-native Ollama)"
+	@echo "  DynamoDB Local:  http://localhost:8000"
+	@echo "  DynamoDB Admin:  http://localhost:8001"
+	@echo "  Keycloak:        http://localhost:8180"
+	@echo "  Ollama (native): http://localhost:11434"
 	@echo ""
 	@echo "Next: run 'make local-api' in a separate terminal to start the API server"
 
