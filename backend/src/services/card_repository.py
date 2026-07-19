@@ -61,6 +61,34 @@ class OptimisticLockError(CardServiceError):
     pass
 
 
+class ItemSizeExceededError(CardServiceError):
+    """Raised when UpdateItem fails because the resulting item would exceed
+    DynamoDB's 400KB item size limit.
+
+    Medium-4 follow-up (レビュー指摘3): review_history の無制限追記バグの遺産で
+    既にアイテムが上限付近まで肥大化しているカードは、通常の list_append 追記が
+    ValidationException で拒否され、以後レビュー不能のままになってしまう。
+    apply_review_update はこの特定の ValidationException だけをこの専用例外に
+    変換し、呼び出し元（ReviewService）が review_history を緊急に切り詰めてから
+    追記を再試行できるようにする。
+    """
+
+    pass
+
+
+def _is_item_size_exceeded_error(error: ClientError) -> bool:
+    """ValidationException のうち「アイテムサイズ超過」を示すものだけを判別する。
+
+    ConditionExpression の構文誤りなど、無関係な ValidationException まで
+    ItemSizeExceededError に巻き込まないよう、エラーコードだけでなくメッセージ
+    文字列も確認する。DynamoDB の実際のメッセージ例:
+    "Item size to update has exceeded the maximum allowed size"（400KB 制限）。
+    """
+    message = error.response.get("Error", {}).get("Message", "")
+    lowered = message.lower()
+    return "item size" in lowered and "exceed" in lowered
+
+
 class CardRepository:
     """Card 永続化層: DynamoDB アクセスを担う。"""
 
@@ -95,10 +123,22 @@ class CardRepository:
         # 直接 boto3.client() を使うことで回避する。
         self._client = get_dynamodb_client()
 
-    def get_item(self, user_id: str, card_id: str) -> Optional[Dict[str, Any]]:
-        """カードの生 DynamoDB アイテムを取得する（存在しなければ None）。"""
+    def get_item(
+        self, user_id: str, card_id: str, consistent_read: bool = False
+    ) -> Optional[Dict[str, Any]]:
+        """カードの生 DynamoDB アイテムを取得する（存在しなければ None）。
+
+        Args:
+            consistent_read: True の場合 ConsistentRead（強い整合性読み取り）を
+                使う。レビュー指摘2: apply_review_update の 404/409 出し分け
+                （削除直後の実在確認）は結果整合性読み取りだと古いアイテムが
+                返り誤判定し得るため、その呼び出しでは True を渡すこと。
+        """
         try:
-            response = self.table.get_item(Key={"user_id": user_id, "card_id": card_id})
+            response = self.table.get_item(
+                Key={"user_id": user_id, "card_id": card_id},
+                ConsistentRead=consistent_read,
+            )
             return response.get("Item")
         except ClientError as e:
             raise CardServiceError(f"Failed to get card: {e}")
@@ -667,6 +707,12 @@ class CardRepository:
         挟まずに更新後の属性値（例: list_append 後の review_history 全体）を
         呼び出し元へ返せる。ReviewService の review_history 上限チェックで使用する。
 
+        レビュー指摘3: review_history が既に DynamoDB の 400KB アイテムサイズ上限
+        付近まで肥大化している場合、この UpdateItem 自体が ValidationException
+        （Item size 超過）で失敗し得る。ConditionalCheckFailedException とは別に
+        判別し、ItemSizeExceededError に変換する（ReviewService が review_history
+        の緊急切り詰め＋再試行を行えるようにするため）。
+
         Args:
             return_values: DynamoDB UpdateItem の ReturnValues パラメータ
                 （例: "UPDATED_NEW"）。指定時のみレスポンスの Attributes を返す。
@@ -679,6 +725,7 @@ class CardRepository:
             CardNotFoundError: カードが (read 後に) 削除されていた場合。
             OptimisticLockError: カードは存在するが ConditionExpression 失敗
                 （並行更新検出）時。
+            ItemSizeExceededError: アイテムサイズが DynamoDB の上限を超過した場合。
             CardServiceError: その他の DynamoDB エラー時。
         """
         try:
@@ -696,12 +743,20 @@ class CardRepository:
             response = self.table.update_item(**update_kwargs)
             return response.get("Attributes") if return_values else None
         except ClientError as e:
-            if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            error_code = e.response["Error"]["Code"]
+            if error_code == "ConditionalCheckFailedException":
                 # 【404 / 409 の出し分け】: 追加読み取りでカードの実在を確認する。
-                if self.get_item(user_id, card_id) is None:
+                # レビュー指摘2: 結果整合性読み取りだと削除直後に古いアイテムが
+                # 返り 404 を誤って 409 と判定し得るため、ここは ConsistentRead=True
+                # の強い整合性読み取りで実在を確認する。
+                if self.get_item(user_id, card_id, consistent_read=True) is None:
                     raise CardNotFoundError(f"Card not found: {card_id}") from e
                 raise OptimisticLockError(
                     "Optimistic lock failed: card was modified concurrently"
+                ) from e
+            if error_code == "ValidationException" and _is_item_size_exceeded_error(e):
+                raise ItemSizeExceededError(
+                    f"Card item exceeds DynamoDB size limit: {e}"
                 ) from e
             raise CardServiceError(f"Failed to apply review update: {e}")
 

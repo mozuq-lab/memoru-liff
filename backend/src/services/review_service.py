@@ -2,7 +2,7 @@
 
 import os
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from aws_lambda_powertools import Logger
 from botocore.exceptions import ClientError
@@ -22,6 +22,7 @@ from .card_repository import (
     CardNotFoundError,
     CardRepository,
     CardServiceError,
+    ItemSizeExceededError,
     OptimisticLockError,
 )
 from .card_service import CardService
@@ -481,48 +482,56 @@ class ReviewService:
         # Convert to DynamoDB-compatible dict (same format as add_review_history)
         entry_dict = add_review_history([], history_entry)[0]
 
+        # レビュー指摘3: この一式（追記 UpdateItem のパラメータ）は、下の
+        # ItemSizeExceededError ハンドラが修復後にそのまま 1 回だけ再試行する際にも
+        # 再利用するため、ローカル変数として先に組み立てておく。
+        append_update_expression = (
+            "SET next_review_at = :next_review, "
+            "#interval = :interval, "
+            "ease_factor = :ease_factor, "
+            "repetitions = :repetitions, "
+            "updated_at = :updated_at, "
+            "review_history = list_append(if_not_exists(review_history, :empty_list), :new_entry)"
+        )
+        # Optimistic lock (C-1): apply only if the card's SRS state still
+        # matches what we read before computing the new values. Prevents
+        # lost updates from concurrent submit_review calls (double-click /
+        # webhook redelivery) where review_history grows but repetitions /
+        # ease_factor would otherwise be overwritten from a stale base.
+        # Tolerate legacy items missing these attributes (#37 follow-up):
+        # Card.from_dynamodb_item back-fills defaults on read, but a real
+        # missing attribute in DynamoDB would fail a plain equality check
+        # and raise a spurious ConcurrentReviewError on a legitimate first
+        # review. attribute_not_exists(...) lets such items through; once
+        # written, subsequent updates are guarded normally.
+        append_condition_expression = build_srs_optimistic_lock_condition(
+            ":prev_ease",
+            ":prev_interval",
+            ":prev_reps",
+        )
+        append_expression_names = {"#interval": "interval"}
+        append_expression_values: Dict[str, Any] = {
+            ":next_review": result.next_review_at.isoformat(),
+            ":interval": result.interval,
+            ":ease_factor": str(result.ease_factor),
+            ":repetitions": result.repetitions,
+            ":updated_at": now.isoformat(),
+            ":empty_list": [],
+            ":new_entry": [entry_dict],
+            ":prev_ease": str(previous_ease_factor),
+            ":prev_interval": previous_interval,
+            ":prev_reps": previous_repetitions,
+        }
+
         try:
             # L-7: Repository 経由で楽観ロック付き SRS 更新を実行する。
             attributes = self._card_repo.apply_review_update(
                 user_id=user_id,
                 card_id=card_id,
-                update_expression=(
-                    "SET next_review_at = :next_review, "
-                    "#interval = :interval, "
-                    "ease_factor = :ease_factor, "
-                    "repetitions = :repetitions, "
-                    "updated_at = :updated_at, "
-                    "review_history = list_append(if_not_exists(review_history, :empty_list), :new_entry)"
-                ),
-                # Optimistic lock (C-1): apply only if the card's SRS state still
-                # matches what we read before computing the new values. Prevents
-                # lost updates from concurrent submit_review calls (double-click /
-                # webhook redelivery) where review_history grows but repetitions /
-                # ease_factor would otherwise be overwritten from a stale base.
-                # Tolerate legacy items missing these attributes (#37 follow-up):
-                # Card.from_dynamodb_item back-fills defaults on read, but a real
-                # missing attribute in DynamoDB would fail a plain equality check
-                # and raise a spurious ConcurrentReviewError on a legitimate first
-                # review. attribute_not_exists(...) lets such items through; once
-                # written, subsequent updates are guarded normally.
-                condition_expression=build_srs_optimistic_lock_condition(
-                    ":prev_ease",
-                    ":prev_interval",
-                    ":prev_reps",
-                ),
-                expression_names={"#interval": "interval"},
-                expression_values={
-                    ":next_review": result.next_review_at.isoformat(),
-                    ":interval": result.interval,
-                    ":ease_factor": str(result.ease_factor),
-                    ":repetitions": result.repetitions,
-                    ":updated_at": now.isoformat(),
-                    ":empty_list": [],
-                    ":new_entry": [entry_dict],
-                    ":prev_ease": str(previous_ease_factor),
-                    ":prev_interval": previous_interval,
-                    ":prev_reps": previous_repetitions,
-                },
+                update_expression=append_update_expression,
+                condition_expression=append_condition_expression,
+                expression_names=append_expression_names,
+                expression_values=append_expression_values,
                 # Medium-4: 追記後の review_history 全体を追加の get_item 無しで
                 # 取得し、上限超過チェックに使う。
                 return_values="UPDATED_NEW",
@@ -541,6 +550,24 @@ class ReviewService:
             # CardNotFoundError は CardServiceError のサブクラスのため、下の
             # except CardServiceError より先に置く必要がある。
             raise
+        except ItemSizeExceededError as e:
+            # レビュー指摘3: 無制限追記バグの遺産で既にアイテムが 400KB 上限付近
+            # まで肥大化しているカードは、この追記自体が拒否される。review_history
+            # を緊急に切り詰めてから追記を 1 回だけ再試行する。
+            logger.warning(
+                "Card item exceeds DynamoDB size limit; attempting "
+                "review_history repair before retrying",
+                extra={"user_id": user_id, "card_id": card_id},
+            )
+            attributes = self._repair_oversized_review_history_and_retry(
+                user_id=user_id,
+                card_id=card_id,
+                append_update_expression=append_update_expression,
+                append_condition_expression=append_condition_expression,
+                append_expression_names=append_expression_names,
+                append_expression_values=append_expression_values,
+                original_error=e,
+            )
         except CardServiceError as e:
             raise ReviewPersistenceError(f"Failed to update card review data: {e}") from e
 
@@ -551,6 +578,112 @@ class ReviewService:
         new_history = (attributes or {}).get("review_history")
         if new_history is not None and len(new_history) > MAX_REVIEW_HISTORY_ENTRIES:
             self._truncate_review_history(user_id, card_id, new_history)
+
+    def _repair_oversized_review_history_and_retry(
+        self,
+        user_id: str,
+        card_id: str,
+        append_update_expression: str,
+        append_condition_expression: str,
+        append_expression_names: Dict[str, str],
+        append_expression_values: Dict[str, Any],
+        original_error: Exception,
+    ) -> Optional[Dict[str, Any]]:
+        """400KB 上限付近まで肥大化した既存カードを修復し、追記を1回だけ再試行する。
+
+        レビュー指摘3: 従来 (Medium-4 初版) は list_append 成功後にしか切り詰め
+        (``_truncate_review_history``) が走らなかった。無制限追記バグの遺産で
+        既にアイテムが 400KB 付近まで肥大化しているカードは、追記自体が
+        ValidationException（Item size 超過）で拒否され、そのカードは以後
+        レビュー不能のまま固着してしまっていた。本メソッドはその修復パス:
+
+          1. ``ConsistentRead=True`` の get_item で現在のアイテムを取得する
+             （レビュー指摘2 と同様、結果整合性読み取りでの誤判定を避ける）。
+          2. review_history を ``MAX_REVIEW_HISTORY_ENTRIES - 1`` 件（新エントリの
+             追記余地を確保）に切り詰めて SET する。レビュー指摘1 と同様、
+             ``size(review_history) = 現在件数 AND 末尾エントリ内容一致`` を
+             ConditionExpression にして、この修復と別の並行更新が競合したら
+             安全にあきらめる（ABA 対策）。
+          3. 元の追記 UpdateItem 一式（``append_*``）を 1 回だけ再試行する。
+
+        修復・再試行のいずれかが失敗した場合は ``ReviewPersistenceError`` を送出し、
+        呼び出し元にレビュー投稿自体の失敗として扱わせる（無限リトライはしない）。
+
+        Args:
+            append_update_expression: 元の追記 UpdateItem の UpdateExpression。
+            append_condition_expression: 元の追記 UpdateItem の ConditionExpression。
+            append_expression_names: 元の追記 UpdateItem の ExpressionAttributeNames。
+            append_expression_values: 元の追記 UpdateItem の ExpressionAttributeValues。
+            original_error: 修復の引き金になった ItemSizeExceededError（例外連鎖用）。
+
+        Returns:
+            再試行が成功した場合の UpdateItem レスポンス Attributes
+            （``return_values="UPDATED_NEW"`` 相当）。
+
+        Raises:
+            ReviewPersistenceError: 修復または再試行が失敗した場合。
+        """
+        item = self._card_repo.get_item(user_id, card_id, consistent_read=True)
+        if item is None:
+            raise ReviewPersistenceError(
+                "Failed to update card review data: card not found during "
+                "oversized review_history repair"
+            ) from original_error
+
+        current_history = item.get("review_history", [])
+        if not current_history:
+            # review_history が空/欠落なのに ValidationException が起きるのは
+            # 想定外（他要因でアイテムが肥大化している可能性がある）。修復対象が
+            # 無いため再試行しても解決しないと判断し、そのまま失敗させる。
+            raise ReviewPersistenceError(
+                "Failed to update card review data: item exceeds DynamoDB size "
+                "limit but review_history is empty (repair not applicable)"
+            ) from original_error
+
+        keep_count = max(MAX_REVIEW_HISTORY_ENTRIES - 1, 0)
+        repaired_history = current_history[-keep_count:] if keep_count > 0 else []
+        last_index = len(current_history) - 1
+        last_entry = current_history[-1]
+
+        try:
+            self._card_repo.apply_review_update(
+                user_id=user_id,
+                card_id=card_id,
+                update_expression="SET review_history = :repaired_history",
+                # レビュー指摘1 と同様の ABA 対策: size 一致だけでなく末尾エントリの
+                # 内容一致も条件に加える。
+                condition_expression=(
+                    f"size(review_history) = :current_len AND "
+                    f"review_history[{last_index}] = :last_entry"
+                ),
+                expression_values={
+                    ":repaired_history": repaired_history,
+                    ":current_len": len(current_history),
+                    ":last_entry": last_entry,
+                },
+            )
+        except CardServiceError as e:
+            raise ReviewPersistenceError(
+                f"Failed to repair oversized review_history: {e}"
+            ) from e
+
+        try:
+            # 元の追記 UpdateItem を 1 回だけ再試行する。ease_factor/interval/
+            # repetitions は修復ステップで触れていないため、CAS 条件は引き続き
+            # 有効なはず（他の並行更新が割り込んでいなければ成功する）。
+            return self._card_repo.apply_review_update(
+                user_id=user_id,
+                card_id=card_id,
+                update_expression=append_update_expression,
+                condition_expression=append_condition_expression,
+                expression_names=append_expression_names,
+                expression_values=append_expression_values,
+                return_values="UPDATED_NEW",
+            )
+        except CardServiceError as e:
+            raise ReviewPersistenceError(
+                f"Failed to update card review data after repair retry: {e}"
+            ) from e
 
     def _truncate_review_history(
         self, user_id: str, card_id: str, current_history: List[Dict]
@@ -564,21 +697,34 @@ class ReviewService:
         安全にスキップする（強制上書きしない）。呼び出し元のレビュー結果は既に
         確定しているため、失敗はログのみで送出しない。
 
+        レビュー指摘1 (ABA 対策): size 一致だけでは、この読み取り (list_append の
+        ReturnValues) から書き込みまでの間に別処理が undo → 再レビューなどを行い
+        「内容は異なるが同じ長さ」の review_history に戻した場合、条件が素通りして
+        古いスナップショット (current_history) で上書きしてしまい、最新レビューの
+        履歴だけが失われる。末尾エントリ（reviewed_at を含む）の内容一致も条件に
+        加えることで、実質的に ABA を排除する。
+
         Args:
             user_id: The user's ID.
             card_id: The card's ID.
             current_history: list_append 直後に読めた review_history 全体（上限超過分を含む）。
         """
         truncated_history = current_history[-MAX_REVIEW_HISTORY_ENTRIES:]
+        last_index = len(current_history) - 1
+        last_entry = current_history[-1]
         try:
             self._card_repo.apply_review_update(
                 user_id=user_id,
                 card_id=card_id,
                 update_expression="SET review_history = :truncated_history",
-                condition_expression="size(review_history) = :current_len",
+                condition_expression=(
+                    f"size(review_history) = :current_len AND "
+                    f"review_history[{last_index}] = :last_entry"
+                ),
                 expression_values={
                     ":truncated_history": truncated_history,
                     ":current_len": len(current_history),
+                    ":last_entry": last_entry,
                 },
             )
         except CardServiceError as e:
