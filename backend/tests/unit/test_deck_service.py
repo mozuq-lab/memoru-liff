@@ -305,6 +305,121 @@ class TestDeleteDeck:
         assert "deck_index_key" not in card1["Item"]
         assert "deck_index_key" not in card2["Item"]
 
+    def test_delete_deck_skips_card_moved_to_another_deck_after_collection(
+        self, deck_service, dynamodb_tables, monkeypatch
+    ):
+        """Medium-5: 収集後に別デッキへ移動されたカードの deck_id は保護される。
+
+        【テスト目的】: _reset_cards_deck_id が対象カードを Query で収集した後、
+        UpdateItem を発行するまでの間に別リクエストがそのカードを別デッキへ
+        移動した場合、ConditionExpression (deck_id = :deleted_deck_id) により
+        更新がスキップされ、移動先の deck_id が誤って剥がされないことを検証する。
+        🔵 信頼性レベル: 青信号 - _reset_cards_deck_id に付与した ConditionExpression の直接検証。
+
+        Given: カードがデッキ A に属し、削除処理の収集クエリ完了直後に
+               デッキ B へ移動される (レースコンディション)
+        When: デッキ A を削除する
+        Then: カードの deck_id はデッキ B のまま保持される
+        """
+        deck_a = deck_service.create_deck(user_id="user-1", name="Deck A")
+        deck_b = deck_service.create_deck(user_id="user-1", name="Deck B")
+
+        # 【重要】: DeckService が内部で保持する cards_table (deck_service.cards_table)
+        # を直接パッチする。dynamodb_tables.Table(...) で改めて取得したオブジェクトは
+        # 同じテーブルを指していても別の Python オブジェクトになり、
+        # deck_service 内部の呼び出しには反映されない。
+        cards_table = deck_service.cards_table
+        cards_table.put_item(
+            Item={
+                "user_id": "user-1",
+                "card_id": "card-moved",
+                "front": "Q",
+                "back": "A",
+                "deck_id": deck_a.deck_id,
+                "deck_index_key": f"user-1#{deck_a.deck_id}",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        real_query = cards_table.query
+
+        def query_then_move(*args, **kwargs):
+            # 収集クエリ完了直後、reset の UpdateItem が発行される前に
+            # 別リクエストがカードを別デッキへ移動したことを模擬する。
+            response = real_query(*args, **kwargs)
+            cards_table.update_item(
+                Key={"user_id": "user-1", "card_id": "card-moved"},
+                UpdateExpression="SET deck_id = :new_deck, deck_index_key = :new_key",
+                ExpressionAttributeValues={
+                    ":new_deck": deck_b.deck_id,
+                    ":new_key": f"user-1#{deck_b.deck_id}",
+                },
+            )
+            return response
+
+        monkeypatch.setattr(cards_table, "query", query_then_move)
+
+        deck_service.delete_deck("user-1", deck_a.deck_id)
+
+        card = cards_table.get_item(
+            Key={"user_id": "user-1", "card_id": "card-moved"}
+        )["Item"]
+        assert card["deck_id"] == deck_b.deck_id
+        assert card["deck_index_key"] == f"user-1#{deck_b.deck_id}"
+
+    def test_delete_deck_does_not_recreate_deleted_card(
+        self, deck_service, dynamodb_tables, monkeypatch
+    ):
+        """Medium-5: 収集後に削除されたカードはゴーストとして再作成されない。
+
+        【テスト目的】: _reset_cards_deck_id の収集後にカード自体が削除された場合、
+        ConditionExpression なしの UpdateItem は upsert としてゴーストアイテムを
+        再作成してしまう (High-1 と同型の欠陥)。ConditionExpression
+        (deck_id = :deleted_deck_id) はアイテム不存在時も偽になるため、
+        ゴースト再作成が防止されることを検証する。
+        🔵 信頼性レベル: 青信号 - _reset_cards_deck_id に付与した ConditionExpression の直接検証。
+
+        Given: カードがデッキに属し、削除処理の収集クエリ完了直後に
+               カード自体が削除される (レースコンディション)
+        When: デッキを削除する
+        Then: 削除済みカードが再作成されない
+        """
+        deck = deck_service.create_deck(user_id="user-1", name="Deck")
+
+        # 【重要】: deck_service.cards_table を直接パッチする（上のテストと同じ理由）。
+        cards_table = deck_service.cards_table
+        cards_table.put_item(
+            Item={
+                "user_id": "user-1",
+                "card_id": "card-deleted",
+                "front": "Q",
+                "back": "A",
+                "deck_id": deck.deck_id,
+                "deck_index_key": f"user-1#{deck.deck_id}",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        real_query = cards_table.query
+
+        def query_then_delete(*args, **kwargs):
+            # 収集クエリ完了直後、reset の UpdateItem が発行される前に
+            # 別リクエストがカード自体を削除したことを模擬する。
+            response = real_query(*args, **kwargs)
+            cards_table.delete_item(
+                Key={"user_id": "user-1", "card_id": "card-deleted"}
+            )
+            return response
+
+        monkeypatch.setattr(cards_table, "query", query_then_delete)
+
+        deck_service.delete_deck("user-1", deck.deck_id)
+
+        response = cards_table.get_item(
+            Key={"user_id": "user-1", "card_id": "card-deleted"}
+        )
+        assert "Item" not in response
+
 
 class TestGetDeckCardCounts:
     """DeckService.get_deck_card_counts テスト."""

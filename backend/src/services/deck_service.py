@@ -524,14 +524,34 @@ class DeckService:
                     # deck_id と GSI 用派生キー deck_index_key を併せて REMOVE する。
                     # deck_index_key を残すとデッキ削除後も deck-cards-index に
                     # 投影され続けてしまうため (PR #47 [P2])。
+                    #
+                    # Medium-5: ConditionExpression "deck_id = :deleted_deck_id" を
+                    # 付与する。上の Query でカードを収集した後、この UpdateItem を
+                    # 発行するまでの間に別リクエストが (a) カードを別デッキへ移動、
+                    # または (b) カード自体を削除している可能性がある。条件を付けない
+                    # と (a) では移動先の deck_id を誤って剥がしてしまい、(b) では
+                    # UpdateItem が upsert として働きゴーストアイテムを再作成してしまう
+                    # (High-1 と同型の欠陥)。deck_id が収集時点の値のままの場合のみ
+                    # REMOVE することで両方を防ぐ。アイテム不存在時も deck_id 属性が
+                    # 存在しないため条件が偽になり、(b) も同時に防止される。
                     self.cards_table.update_item(
                         Key=key,
                         UpdateExpression="REMOVE deck_id, deck_index_key SET updated_at = :updated_at",
+                        ConditionExpression="deck_id = :deleted_deck_id",
                         ExpressionAttributeValues={
                             ":updated_at": now.isoformat(),
+                            ":deleted_deck_id": deck_id,
                         },
                     )
                 except ClientError as e:
+                    if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                        # 正常なスキップ: 収集後に別デッキへ移動された、または削除された
+                        # カード。どちらもこの reset を適用すべきでないため握りつぶす。
+                        logger.info(
+                            "Skipped deck_id reset: card was moved to another deck "
+                            f"or deleted after collection (card_id={key['card_id']})"
+                        )
+                        continue
                     logger.warning(
                         f"Failed to reset deck_id on card {key['card_id']}: {e}"
                     )

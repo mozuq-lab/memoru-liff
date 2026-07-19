@@ -334,6 +334,50 @@ class TestSubmitReview:
                 grade=4,
             )
 
+    def test_submit_review_deleted_after_read_no_ghost_item(self, review_service, monkeypatch):
+        """High-1: read 後に削除されたカードへの submit_review はゴーストを作らず 404 相当になる。
+
+        【テスト目的】: submit_review 内部の get_card (存在確認) から
+        _update_card_review_data の apply_review_update (実書き込み) までの間に
+        別リクエストがカードを削除した場合、ConditionExpression
+        attribute_exists(card_id) (build_srs_optimistic_lock_condition) により
+        CardNotFoundError が発生し、削除済みアイテムが UpdateItem によって
+        新規作成 (ゴースト化) されないことを検証する。
+        🔵 信頼性レベル: 青信号 - apply_review_update の追加存在確認ロジックの直接検証。
+
+        Given: get_card はカードが (読み取り時点で) 存在したことを模擬して返すが、
+               実際の DynamoDB にはそのカードが存在しない (＝ update 直前の削除と同義)
+        When: submit_review を呼び出す
+        Then: CardNotFoundError が発生し、ゴーストアイテムも作成されない
+        """
+        from models.card import Card
+        from services.card_service import CardNotFoundError as CardServiceCardNotFoundError
+
+        mock_card = Card(
+            user_id="test-user-id",
+            front="Q",
+            back="A",
+            created_at=datetime.now(timezone.utc),
+            next_review_at=datetime.now(timezone.utc),
+        )
+        monkeypatch.setattr(
+            review_service.card_service, "get_card", lambda uid, cid: mock_card
+        )
+
+        with pytest.raises(CardServiceCardNotFoundError):
+            review_service.submit_review(
+                user_id="test-user-id",
+                card_id="card-deleted-after-read",
+                grade=4,
+            )
+
+        # 【ゴースト再作成防止確認】: apply_review_update が upsert としてアイテムを
+        # 新規作成していないことを確認する。
+        response = review_service.cards_table.get_item(
+            Key={"user_id": "test-user-id", "card_id": "card-deleted-after-read"}
+        )
+        assert "Item" not in response
+
 
 class TestSubmitReviewDayBoundaryNormalization:
     """Tests for day boundary normalization in submit_review (TASK-0104).
@@ -1818,6 +1862,120 @@ class TestUpdateCardReviewDataListAppend:
 
         assert len(history) == 1
         assert history[0]["grade"] == 5
+
+
+class TestReviewHistoryCap:
+    """Medium-4: review_history の 100 件上限を submit_review の実書き込みにも適用するテスト。
+
+    従来は list_append を無条件で使用しており、review_history が DynamoDB
+    400KB アイテム上限に向けて際限なく成長し得た (add_review_history の
+    max_entries=100 による切り詰めは entry フォーマット変換にしか使われて
+    いなかった)。本クラスは _update_card_review_data が上限到達時に
+    切り詰め済み全リストを SET する経路へ切り替わることを検証する。
+    """
+
+    def test_submit_review_truncates_history_at_100_entries(
+        self, review_service, dynamodb_tables
+    ):
+        """review_history が既に 100 件のとき、最古のエントリが落ちて 101 件目にならない。"""
+        now = datetime.now(timezone.utc)
+        table = dynamodb_tables.Table("memoru-cards-test")
+
+        # 100 件のダミー review_history を用意する。grade に連番を仕込み、
+        # どのエントリが残る/落ちるかを検証できるようにする。
+        existing_history = [
+            {
+                "reviewed_at": (now - timedelta(days=100 - i)).isoformat(),
+                "grade": i,
+                "ease_factor_before": "2.5",
+                "ease_factor_after": "2.5",
+                "interval_before": 1,
+                "interval_after": 1,
+            }
+            for i in range(100)
+        ]
+        table.put_item(
+            Item={
+                "user_id": "test-user-id",
+                "card_id": "history-full-card",
+                "front": "Q",
+                "back": "A",
+                "next_review_at": now.isoformat(),
+                "interval": 1,
+                "ease_factor": "2.5",
+                "repetitions": 0,
+                "tags": [],
+                "created_at": now.isoformat(),
+                "review_history": existing_history,
+            }
+        )
+
+        review_service.submit_review(
+            user_id="test-user-id",
+            card_id="history-full-card",
+            grade=4,
+        )
+
+        response = table.get_item(
+            Key={"user_id": "test-user-id", "card_id": "history-full-card"}
+        )
+        history = response["Item"].get("review_history", [])
+
+        # 上限 100 件を維持し、101 件目にならないこと。
+        assert len(history) == 100
+        # 最古のエントリ (grade=0) が落ち、grade=1..99 が残った上で新エントリ
+        # (grade=4) が末尾に追加される。
+        assert int(history[0]["grade"]) == 1
+        assert int(history[-1]["grade"]) == 4
+
+    def test_submit_review_keeps_list_append_below_cap(
+        self, review_service, dynamodb_tables
+    ):
+        """上限未満のときは従来どおり list_append 経路が使われ、全件保持される。"""
+        now = datetime.now(timezone.utc)
+        table = dynamodb_tables.Table("memoru-cards-test")
+
+        existing_history = [
+            {
+                "reviewed_at": (now - timedelta(days=10 - i)).isoformat(),
+                "grade": i,
+                "ease_factor_before": "2.5",
+                "ease_factor_after": "2.5",
+                "interval_before": 1,
+                "interval_after": 1,
+            }
+            for i in range(10)
+        ]
+        table.put_item(
+            Item={
+                "user_id": "test-user-id",
+                "card_id": "history-partial-card",
+                "front": "Q",
+                "back": "A",
+                "next_review_at": now.isoformat(),
+                "interval": 1,
+                "ease_factor": "2.5",
+                "repetitions": 0,
+                "tags": [],
+                "created_at": now.isoformat(),
+                "review_history": existing_history,
+            }
+        )
+
+        review_service.submit_review(
+            user_id="test-user-id",
+            card_id="history-partial-card",
+            grade=5,
+        )
+
+        response = table.get_item(
+            Key={"user_id": "test-user-id", "card_id": "history-partial-card"}
+        )
+        history = response["Item"].get("review_history", [])
+
+        assert len(history) == 11
+        assert int(history[0]["grade"]) == 0  # 最古のエントリは落ちない
+        assert int(history[-1]["grade"]) == 5
 
 
 class TestRecordReviewLogging:

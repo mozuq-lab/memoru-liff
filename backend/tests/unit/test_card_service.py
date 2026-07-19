@@ -449,6 +449,48 @@ class TestCardServiceUpdate:
                 front="New Question",
             )
 
+    def test_update_card_deleted_after_read_raises_not_found(self, card_service, monkeypatch):
+        """High-1: read 後に削除されたカードへの update_item はゴーストを再作成せず 404 相当になる。
+
+        【テスト目的】: update_card 内部の get_card (存在確認) から repository の
+        update_item (実書き込み) までの間に別リクエストがカードを削除した場合、
+        ConditionExpression attribute_exists(card_id) により CardNotFoundError が
+        発生し、かつ削除済みアイテムが update_item によって新規作成 (ゴースト化) され
+        ないことを検証する。
+        🔵 信頼性レベル: 青信号 - card_repository.update_item に付与した
+        ConditionExpression の直接検証。
+
+        Given: get_card はカードが (読み取り時点で) 存在したことを模擬して返すが、
+               実際の DynamoDB にはそのカードが存在しない (＝ update 直前の削除と同義)
+        When: update_card を呼び出す
+        Then: CardNotFoundError が発生し、ゴーストアイテムも作成されない
+        """
+        from models.card import Card
+
+        mock_card = Card(
+            user_id="test-user-id",
+            front="Q",
+            back="A",
+            created_at=datetime.now(timezone.utc),
+            next_review_at=datetime.now(timezone.utc),
+        )
+        monkeypatch.setattr(card_service, "get_card", lambda uid, cid: mock_card)
+
+        with pytest.raises(CardNotFoundError):
+            card_service.update_card(
+                user_id="test-user-id",
+                card_id="card-deleted-after-read",
+                front="New Question",
+            )
+
+        # 【ゴースト再作成防止確認】: update_item が upsert としてアイテムを
+        # 新規作成していないことを確認する。
+        cards_table = card_service._repo.table
+        response = cards_table.get_item(
+            Key={"user_id": "test-user-id", "card_id": "card-deleted-after-read"}
+        )
+        assert "Item" not in response
+
 
 class TestCardServiceDelete:
     """Tests for CardService.delete_card method."""

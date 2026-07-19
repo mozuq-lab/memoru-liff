@@ -174,13 +174,26 @@ class CardRepository:
     ) -> None:
         """カードを update_item で更新する。
 
+        High-1: DynamoDB の UpdateItem は upsert のため、ConditionExpression が無いと
+        「CardService.get_card で読んだ後、この update_item を呼ぶまでの間」に
+        別リクエストがカードを削除した場合、欠損アイテム（ゴースト）を新規作成して
+        しまう。attribute_exists(card_id) を条件に付与し、その間に削除されていたら
+        ConditionalCheckFailedException を CardNotFoundError に変換して呼び出し元
+        （CardService.update_card）へ 404 相当として伝播させる。
+
         Args:
             error_message: ClientError を CardServiceError に変換する際のメッセージ接頭辞。
+
+        Raises:
+            CardNotFoundError: 更新対象のカードが (read 後に) 削除されていた場合。
+            CardServiceError: その他の DynamoDB エラー時。
         """
         try:
             update_kwargs: Dict[str, Any] = {
                 "Key": {"user_id": user_id, "card_id": card_id},
                 "UpdateExpression": update_expression,
+                # 【ゴースト再作成防止】: 更新対象のアイテムが存在する場合のみ更新する。
+                "ConditionExpression": "attribute_exists(card_id)",
             }
             if expression_values:
                 update_kwargs["ExpressionAttributeValues"] = expression_values
@@ -189,6 +202,8 @@ class CardRepository:
 
             self.table.update_item(**update_kwargs)
         except ClientError as e:
+            if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                raise CardNotFoundError(f"Card not found: {card_id}") from e
             raise CardServiceError(f"{error_message}: {e}")
 
     def delete_reviews_for_card(self, card_id: str, user_id: str) -> None:
@@ -631,7 +646,8 @@ class CardRepository:
         condition_expression: str,
         expression_values: Dict[str, Any],
         expression_names: Optional[Dict[str, str]] = None,
-    ) -> None:
+        return_values: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
         """楽観ロック付きで SRS 状態を update_item する（submit_review / undo 共通）。
 
         L-7: ReviewService に散在していた楽観ロック付き UpdateItem を集約する。
@@ -639,8 +655,30 @@ class CardRepository:
         DynamoDB 固有の知識を Repository 層へ寄せ、ReviewService は更新式の組み立てに
         専念できるようにする。
 
+        High-1: condition_expression は
+        ``attribute_exists(card_id) AND (SRS 値一致の CAS 条件...)`` の形を想定する
+        （build_srs_optimistic_lock_condition 参照）。単一の UpdateItem
+        ConditionExpression が失敗した場合、DynamoDB は AND のどちらの項が失敗したかを
+        教えてくれない（TransactWriteItems の CancellationReasons のような詳細が無い）
+        ため、追加で get_item を行い「カードが削除された（ゴースト再作成防止）」のか
+        「カードは存在するが CAS が競合した（並行更新）」のかを区別する。
+
+        Medium-4: return_values に "UPDATED_NEW" 等を指定すると、追加の get_item を
+        挟まずに更新後の属性値（例: list_append 後の review_history 全体）を
+        呼び出し元へ返せる。ReviewService の review_history 上限チェックで使用する。
+
+        Args:
+            return_values: DynamoDB UpdateItem の ReturnValues パラメータ
+                （例: "UPDATED_NEW"）。指定時のみレスポンスの Attributes を返す。
+
+        Returns:
+            return_values 指定時は UpdateItem レスポンスの Attributes（無ければ None）。
+            未指定時は常に None。
+
         Raises:
-            OptimisticLockError: ConditionExpression 失敗（並行更新検出）時。
+            CardNotFoundError: カードが (read 後に) 削除されていた場合。
+            OptimisticLockError: カードは存在するが ConditionExpression 失敗
+                （並行更新検出）時。
             CardServiceError: その他の DynamoDB エラー時。
         """
         try:
@@ -652,10 +690,16 @@ class CardRepository:
             }
             if expression_names:
                 update_kwargs["ExpressionAttributeNames"] = expression_names
+            if return_values:
+                update_kwargs["ReturnValues"] = return_values
 
-            self.table.update_item(**update_kwargs)
+            response = self.table.update_item(**update_kwargs)
+            return response.get("Attributes") if return_values else None
         except ClientError as e:
             if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                # 【404 / 409 の出し分け】: 追加読み取りでカードの実在を確認する。
+                if self.get_item(user_id, card_id) is None:
+                    raise CardNotFoundError(f"Card not found: {card_id}") from e
                 raise OptimisticLockError(
                     "Optimistic lock failed: card was modified concurrently"
                 ) from e

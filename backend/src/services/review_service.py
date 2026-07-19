@@ -18,7 +18,12 @@ from models.review import (
 )
 from utils.dynamodb_client import get_dynamodb_resource
 from .ai_service import ReviewSummary
-from .card_repository import CardRepository, CardServiceError, OptimisticLockError
+from .card_repository import (
+    CardNotFoundError,
+    CardRepository,
+    CardServiceError,
+    OptimisticLockError,
+)
 from .card_service import CardService
 from .review_repository import ReviewRepository
 from .srs import (
@@ -37,6 +42,10 @@ from .stats_service import (
 
 logger = Logger()
 
+# Medium-4: review_history の無制限追記による DynamoDB アイテムサイズ肥大化を防ぐための
+# 上限値。srs.add_review_history の max_entries デフォルト値と同期させること。
+MAX_REVIEW_HISTORY_ENTRIES = 100
+
 
 def build_srs_optimistic_lock_condition(
     ease_placeholder: str,
@@ -50,6 +59,14 @@ def build_srs_optimistic_lock_condition(
     attribute_not_exists(...) はレガシーアイテム（属性欠落 / #37 follow-up）を許容するためのもの。
     `#interval` は予約語回避のため呼び出し側で ExpressionAttributeNames を渡す前提。
 
+    High-1: 先頭に attribute_exists(card_id) を必須条件として付与する。これが無いと
+    DynamoDB の UpdateItem は upsert のため、read 後にカードが削除されていても
+    「属性が無い」= attribute_not_exists(...) が真になり CAS 条件全体が素通りして
+    ゴーストアイテムを新規作成してしまう。attribute_exists(card_id) を AND することで、
+    アイテム不存在時は必ず ConditionalCheckFailedException となり
+    （呼び出し元 CardRepository.apply_review_update が CardNotFoundError へ変換する）、
+    レガシーアイテム許容（attribute_not_exists の残り3条件）はそのまま維持する。
+
     Args:
         ease_placeholder: ease_factor 比較値のプレースホルダ（例: ":prev_ease"）。
         interval_placeholder: interval 比較値のプレースホルダ。
@@ -60,6 +77,7 @@ def build_srs_optimistic_lock_condition(
         ConditionExpression 文字列。
     """
     parts = [
+        "attribute_exists(card_id)",
         f"(attribute_not_exists(ease_factor) OR ease_factor = {ease_placeholder})",
         f"(attribute_not_exists(#interval) OR #interval = {interval_placeholder})",
         f"(attribute_not_exists(repetitions) OR repetitions = {reps_placeholder})",
@@ -380,6 +398,12 @@ class ReviewService:
             raise ConcurrentReviewError(
                 "Undo conflict: the card was modified concurrently. Please retry."
             ) from e
+        except CardNotFoundError:
+            # High-1: undo 対象のカードが read 後に削除された場合はそのまま
+            # CardNotFoundError を伝播させる（呼び出し元が 404 にマップする）。
+            # CardNotFoundError は CardServiceError のサブクラスのため、下の
+            # except CardServiceError より先に置く必要がある。
+            raise
         except CardServiceError as e:
             raise ReviewPersistenceError(f"Failed to undo review: {e}") from e
 
@@ -419,6 +443,16 @@ class ReviewService:
         history entry in a single UpdateItem call, eliminating the previous
         read-then-write pattern that was susceptible to race conditions.
 
+        Medium-4: ``list_append`` は無制限に追記されるため、review_history が
+        DynamoDB 400KB アイテム上限に向けて際限なく成長し得た。この UpdateItem は
+        ``ReturnValues="UPDATED_NEW"`` で追記後の review_history 全体を追加の
+        get_item 無しで受け取り、上限 (``MAX_REVIEW_HISTORY_ENTRIES``) を超えていた
+        場合のみ ``_truncate_review_history`` で古いエントリを切り詰める
+        best-effort な後処理を行う。事前の読み取りを挟まないのは、本メソッドの
+        直前に別の並行処理が get_item を横取りするテスト（例:
+        undo 側の並行更新検出テスト）と干渉しないようにするため、かつ通常時の
+        書き込みコストを従来どおり最小に保つため。
+
         Args:
             user_id: The user's ID.
             card_id: The card's ID.
@@ -449,7 +483,7 @@ class ReviewService:
 
         try:
             # L-7: Repository 経由で楽観ロック付き SRS 更新を実行する。
-            self._card_repo.apply_review_update(
+            attributes = self._card_repo.apply_review_update(
                 user_id=user_id,
                 card_id=card_id,
                 update_expression=(
@@ -489,6 +523,9 @@ class ReviewService:
                     ":prev_interval": previous_interval,
                     ":prev_reps": previous_repetitions,
                 },
+                # Medium-4: 追記後の review_history 全体を追加の get_item 無しで
+                # 取得し、上限超過チェックに使う。
+                return_values="UPDATED_NEW",
             )
         except OptimisticLockError as e:
             logger.warning(
@@ -498,8 +535,60 @@ class ReviewService:
             raise ConcurrentReviewError(
                 "Review update conflict: the card was modified concurrently. Please retry."
             ) from e
+        except CardNotFoundError:
+            # High-1: レビュー対象のカードが read 後に削除された場合はそのまま
+            # CardNotFoundError を伝播させる（呼び出し元が 404 にマップする）。
+            # CardNotFoundError は CardServiceError のサブクラスのため、下の
+            # except CardServiceError より先に置く必要がある。
+            raise
         except CardServiceError as e:
             raise ReviewPersistenceError(f"Failed to update card review data: {e}") from e
+
+        # Medium-4: 上限を超えていた場合のみ、古いエントリを切り詰める best-effort な
+        # 後処理を行う。レビュー自体は既に確定しているため、ここでの失敗（並行更新との
+        # 競合等）は例外を送出せずログのみに留める（次回 submit_review 時に再度
+        # 切り詰めが試みられるため、無制限成長は防がれる）。
+        new_history = (attributes or {}).get("review_history")
+        if new_history is not None and len(new_history) > MAX_REVIEW_HISTORY_ENTRIES:
+            self._truncate_review_history(user_id, card_id, new_history)
+
+    def _truncate_review_history(
+        self, user_id: str, card_id: str, current_history: List[Dict]
+    ) -> None:
+        """review_history が上限を超えた場合に古いエントリを切り詰める (Medium-4)。
+
+        list_append 直後の ReturnValues で得た現在の全リストを受け取り、末尾
+        MAX_REVIEW_HISTORY_ENTRIES 件だけを残して SET し直す。直前に自分自身が
+        書き込んだ長さを ConditionExpression (size(review_history) = :current_len)
+        で確認することで、この後処理と別の並行更新（submit/undo）が競合した場合は
+        安全にスキップする（強制上書きしない）。呼び出し元のレビュー結果は既に
+        確定しているため、失敗はログのみで送出しない。
+
+        Args:
+            user_id: The user's ID.
+            card_id: The card's ID.
+            current_history: list_append 直後に読めた review_history 全体（上限超過分を含む）。
+        """
+        truncated_history = current_history[-MAX_REVIEW_HISTORY_ENTRIES:]
+        try:
+            self._card_repo.apply_review_update(
+                user_id=user_id,
+                card_id=card_id,
+                update_expression="SET review_history = :truncated_history",
+                condition_expression="size(review_history) = :current_len",
+                expression_values={
+                    ":truncated_history": truncated_history,
+                    ":current_len": len(current_history),
+                },
+            )
+        except CardServiceError as e:
+            # OptimisticLockError / CardNotFoundError も CardServiceError のサブクラス。
+            # どちらも「今回は切り詰めをスキップする」で十分（次回のレビューで再試行される）。
+            logger.warning(
+                "Failed to truncate review_history after cap was exceeded "
+                "(will retry on next review)",
+                extra={"user_id": user_id, "card_id": card_id, "error": str(e)},
+            )
 
     def _record_review(
         self,
