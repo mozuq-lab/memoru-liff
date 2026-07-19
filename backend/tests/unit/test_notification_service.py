@@ -212,6 +212,62 @@ class TestNotificationService:
         for call_args in user_service.update_last_notified_date.call_args_list:
             assert call_args.args == ("user-1", "2024-01-05")
 
+    def test_medium1_no_duplicate_notification_at_local_midnight_boundary(
+        self, notification_service, mock_services
+    ):
+        """Medium-1 再発回帰テスト（PR レビュー指摘）: notification_time がローカル日付境界
+
+        （例: 00:00）にある場合でも送信は 1 回のみ。
+
+        notification_time='00:00', timezone='Asia/Tokyo' のユーザーに対し、
+        UTC 2024-01-04T14:55:00Z（JST 23:55、前日側から ±5分マッチ）実行と
+        UTC 2024-01-04T15:00:00Z（JST 翌日 00:00、ちょうど一致）実行の両方が
+        should_notify=True になる。get_local_date_str（= 現在時刻のローカル日付）を
+        そのまま claim キーにすると "2024-01-04" と "2024-01-05" に分かれて二重送信するが、
+        get_claim_date_str は occurrence（= 2024-01-05 の 00:00）ベースで両方とも
+        "2024-01-05" に揃えるため、2 回目は claim に失敗し送信は 1 回に抑制される。
+        """
+        user_service, card_service, line_service = mock_services
+
+        user = User(
+            user_id="user-1",
+            line_user_id="U1234567890abcdef1234567890abcdef",
+            settings={"notification_time": "00:00", "timezone": "Asia/Tokyo"},
+            created_at=datetime.now(timezone.utc),
+        )
+        user_service.get_linked_users.return_value = [user]
+        card_service.get_due_card_count.return_value = 5
+        line_service.push_message.return_value = True
+
+        # DynamoDB の ConditionExpression（attribute_not_exists OR <> :date）の挙動を模擬:
+        # 同一 (user_id, date_str) で 2 回目以降は False を返す
+        claimed_dates: dict = {}
+
+        def fake_update_last_notified_date(user_id, date_str):
+            if claimed_dates.get(user_id) == date_str:
+                return False
+            claimed_dates[user_id] = date_str
+            return True
+
+        user_service.update_last_notified_date.side_effect = fake_update_last_notified_date
+
+        # 1回目: UTC 2024-01-04T14:55:00Z = JST 2024-01-04 23:55（notification_time 00:00 と差分5分 → 一致）
+        run1_time = datetime(2024, 1, 4, 14, 55, 0, tzinfo=timezone.utc)
+        result1 = notification_service.process_notifications(run1_time)
+
+        # 2回目: UTC 2024-01-04T15:00:00Z = JST 2024-01-05 00:00（notification_time 00:00 と差分0分 → 一致）
+        run2_time = datetime(2024, 1, 4, 15, 0, 0, tzinfo=timezone.utc)
+        result2 = notification_service.process_notifications(run2_time)
+
+        # 両実行とも claim キーは occurrence の日付 "2024-01-05" に揃うため、2回目は claim 失敗
+        assert result1.sent == 1
+        assert result2.sent == 0
+        assert result2.skipped == 1
+        assert line_service.push_message.call_count == 1
+        assert user_service.update_last_notified_date.call_count == 2
+        for call_args in user_service.update_last_notified_date.call_args_list:
+            assert call_args.args == ("user-1", "2024-01-05")
+
     def test_process_notifications_already_notified_today(
         self, notification_service, mock_services
     ):
