@@ -164,6 +164,54 @@ class TestNotificationService:
             "user-1", "2024-01-05"
         )
 
+    def test_medium1_no_duplicate_notification_across_utc_date_boundary(
+        self, notification_service, mock_services
+    ):
+        """Medium-1 回帰テスト: UTC 日付境界をまたぐ 2 回実行でも送信は 1 回のみ。
+
+        JST 09:00 通知設定（デフォルト）のユーザーに対し、23:55 UTC（前日）実行と
+        翌 00:00 UTC 実行の両方が ±5分マッチで should_notify=True になるが、
+        冪等性キー（claim 日付）がユーザーのローカル日付（Asia/Tokyo）ベースになった
+        ことで両実行とも同じ日付 "2024-01-05" として claim される。
+        2回目は ConditionExpression 相当のチェックで claim に失敗し、送信は 1 回に抑制される。
+        """
+        user_service, card_service, line_service = mock_services
+
+        user = self._create_user("user-1")
+        user_service.get_linked_users.return_value = [user]
+        card_service.get_due_card_count.return_value = 5
+        line_service.push_message.return_value = True
+
+        # DynamoDB の ConditionExpression（attribute_not_exists OR <> :date）の挙動を模擬:
+        # 同一 (user_id, date_str) で 2 回目以降は False を返す
+        claimed_dates: dict = {}
+
+        def fake_update_last_notified_date(user_id, date_str):
+            if claimed_dates.get(user_id) == date_str:
+                return False
+            claimed_dates[user_id] = date_str
+            return True
+
+        user_service.update_last_notified_date.side_effect = fake_update_last_notified_date
+
+        # 1回目: UTC 前日 23:55 = JST 翌日 08:55（notification_time 09:00 と差分5分 → 一致）
+        run1_time = datetime(2024, 1, 4, 23, 55, 0, tzinfo=timezone.utc)
+        result1 = notification_service.process_notifications(run1_time)
+
+        # 2回目: UTC 当日 00:00 = JST 当日 09:00（notification_time 09:00 と差分0分 → 一致）
+        run2_time = datetime(2024, 1, 5, 0, 0, 0, tzinfo=timezone.utc)
+        result2 = notification_service.process_notifications(run2_time)
+
+        # 両実行の claim キーはユーザーのローカル日付 "2024-01-05" で共通 → 2回目は claim 失敗
+        assert result1.sent == 1
+        assert result2.sent == 0
+        assert result2.skipped == 1
+        assert line_service.push_message.call_count == 1
+        assert user_service.update_last_notified_date.call_count == 2
+        user_service.update_last_notified_date.assert_any_call("user-1", "2024-01-05")
+        for call_args in user_service.update_last_notified_date.call_args_list:
+            assert call_args.args == ("user-1", "2024-01-05")
+
     def test_process_notifications_already_notified_today(
         self, notification_service, mock_services
     ):

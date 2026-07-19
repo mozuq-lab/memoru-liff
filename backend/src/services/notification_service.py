@@ -46,6 +46,46 @@ class NotificationService:
         self.card_service = card_service or CardService()
         self.line_service = line_service or LineService()
 
+    def _resolve_timezone(self, user) -> ZoneInfo:
+        """
+        【機能概要】: ユーザーの settings からタイムゾーンを解決する
+        【実装方針】: should_notify と get_local_date_str で同一のタイムゾーン解決ロジックを
+        共有するために切り出したヘルパー。無効なタイムゾーン名は Asia/Tokyo にフォールバックする。
+        🔵 REQ-V2-041: タイムゾーン考慮（既存実装からの抽出、ロジック変更なし）
+        Args:
+            user: User オブジェクト（settings に timezone を持つ）
+        Returns:
+            ZoneInfo: 解決されたタイムゾーンオブジェクト
+        """
+        # 【タイムゾーン取得】: settings 辞書から timezone を取得。なければ Asia/Tokyo をデフォルトとして使用 🔵
+        tz_name = user.settings.get("timezone", "Asia/Tokyo") if user.settings else "Asia/Tokyo"
+
+        # 【タイムゾーン変換準備】: ZoneInfo でタイムゾーンオブジェクトを生成。無効な名前は Asia/Tokyo にフォールバック 🟡
+        try:
+            return ZoneInfo(tz_name)
+        except (ZoneInfoNotFoundError, Exception):
+            # 【エラーハンドリング】: 無効なタイムゾーン名の場合は Asia/Tokyo にフォールバックして処理を継続 🟡
+            logger.warning(f"Invalid timezone '{tz_name}', falling back to Asia/Tokyo")
+            return ZoneInfo("Asia/Tokyo")
+
+    def get_local_date_str(self, user, current_utc: datetime) -> str:
+        """
+        【機能概要】: ユーザーのタイムゾーンにおけるローカル日付文字列 (YYYY-MM-DD) を取得する
+        【Medium-1 修正】: 冪等性キー（last_notified_date の claim に使う日付）を UTC 日付ではなく
+        ユーザーのローカル日付にすることで、UTC 日付境界をまたぐ 2 実行
+        （例: JST 09:00 通知設定ユーザーに対する 23:55 UTC 実行と 00:00 UTC 実行）で
+        claim キーが異なる値になり二重送信されてしまう不具合を防ぐ。
+        should_notify と同じタイムゾーン解決ロジック（_resolve_timezone）を再利用する。
+        🔵 Medium-1: 同じローカル日付に LINE 通知が 2 回送られる不具合の修正
+        Args:
+            user: User オブジェクト（settings に timezone を持つ）
+            current_utc: 現在の UTC 日時（timezone-aware）
+        Returns:
+            str: ユーザーのローカル日付 (YYYY-MM-DD 形式)
+        """
+        user_tz = self._resolve_timezone(user)
+        return current_utc.astimezone(user_tz).strftime("%Y-%m-%d")
+
     def should_notify(self, user, current_utc: datetime) -> bool:
         """
         【機能概要】: ユーザーのローカル時刻が notification_time と一致するかを判定する
@@ -58,16 +98,8 @@ class NotificationService:
         Returns:
             bool: ローカル時刻が notification_time の ±5分以内なら True
         """
-        # 【タイムゾーン取得】: settings 辞書から timezone を取得。なければ Asia/Tokyo をデフォルトとして使用 🔵
-        tz_name = user.settings.get("timezone", "Asia/Tokyo") if user.settings else "Asia/Tokyo"
-
-        # 【タイムゾーン変換準備】: ZoneInfo でタイムゾーンオブジェクトを生成。無効な名前は Asia/Tokyo にフォールバック 🟡
-        try:
-            user_tz = ZoneInfo(tz_name)
-        except (ZoneInfoNotFoundError, Exception):
-            # 【エラーハンドリング】: 無効なタイムゾーン名の場合は Asia/Tokyo にフォールバックして処理を継続 🟡
-            logger.warning(f"Invalid timezone '{tz_name}', falling back to Asia/Tokyo")
-            user_tz = ZoneInfo("Asia/Tokyo")
+        # 【タイムゾーン解決】: should_notify と get_local_date_str で共通のヘルパーを使用 🔵
+        user_tz = self._resolve_timezone(user)
 
         # 【UTC→ローカル変換】: ユーザーのローカル時刻を計算する 🔵
         local_time = current_utc.astimezone(user_tz)
@@ -111,9 +143,11 @@ class NotificationService:
             NotificationResult with processing statistics.
         """
         result = NotificationResult()
-        today_str = current_time.strftime("%Y-%m-%d")
+        # 【ログ用の日付】: 実行ログ表示用の UTC 日付。冪等性キー（claim）にはユーザーごとの
+        # ローカル日付を使うため、この値はログ出力にのみ使用する 🔵
+        utc_date_str = current_time.strftime("%Y-%m-%d")
 
-        logger.info(f"Starting notification processing for {today_str}")
+        logger.info(f"Starting notification processing for {utc_date_str}")
 
         # Get all LINE-linked users
         try:
@@ -138,8 +172,14 @@ class NotificationService:
                     result.skipped += 1
                     continue
 
-                # Check if already notified today
-                if user.last_notified_date == today_str:
+                # 【Medium-1 修正】: 冪等性キーはユーザーのローカル日付を使用する。
+                # UTC 日付をそのまま使うと、UTC 日付境界をまたぐ実行
+                # （例: JST 09:00 通知設定ユーザーに対する 23:55 UTC 実行と 00:00 UTC 実行）で
+                # 別々の claim キーとなり、同じローカル日付に 2 回通知が送られてしまう。
+                local_date_str = self.get_local_date_str(user, current_time)
+
+                # Check if already notified today (in user's local timezone)
+                if user.last_notified_date == local_date_str:
                     logger.debug(f"User {user.user_id} already notified today")
                     result.skipped += 1
                     continue
@@ -169,8 +209,9 @@ class NotificationService:
                 # update_last_notified_date は ConditionExpression 付きで、当日分が未設定の場合のみ
                 # True を返す。並行実行（スケジューラ二重起動等）では先に claim した実行だけが
                 # push に進み、二重通知を根本から防ぐ。
+                # 【Medium-1 修正】: claim キーはユーザーのローカル日付（local_date_str）を使用する。
                 claimed = self.user_service.update_last_notified_date(
-                    user.user_id, today_str
+                    user.user_id, local_date_str
                 )
                 if not claimed:
                     # 別実行が先に claim 済み（= 当日分は既に処理されている）→ スキップ
