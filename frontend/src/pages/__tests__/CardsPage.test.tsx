@@ -224,6 +224,19 @@ describe('CardsPage', () => {
 
       expect(screen.queryByTestId('start-review-button')).not.toBeInTheDocument();
     });
+
+    it('Medium-9: deck_id 指定時は復習開始ボタンのリンクに deck_id が引き継がれる', () => {
+      // 【背景】: CardsPage の復習開始ボタンが常に to="/review" 固定だったため、
+      //   デッキ別カード一覧（?deck_id=...）から復習を開始するとデッキ絞り込みが
+      //   消えてしまう不具合（Medium-9）の回帰テスト。
+      mockCardsContext.dueCards = mockCards;
+      renderCardsPage(undefined, 'deck_id=deck-abc-123&tab=due');
+
+      expect(screen.getByTestId('start-review-button')).toHaveAttribute(
+        'href',
+        '/review?deck_id=deck-abc-123',
+      );
+    });
   });
 
   describe('成功メッセージ', () => {

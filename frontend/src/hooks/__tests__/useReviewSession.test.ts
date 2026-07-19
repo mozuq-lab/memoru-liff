@@ -287,4 +287,75 @@ describe("useReviewSession", () => {
 
     expect(signals[0].aborted).toBe(true);
   });
+
+  describe("High-4: handleUndo の再入ガード", () => {
+    it("Undo 実行中に別行の Undo を発火しても無視され、状態が破損しない", async () => {
+      // 【背景】: handleUndo に再入ガードがなく、regradeCardIndex / undoingIndex は
+      //   単一値の state のため、2 行を連続クリックすると片方の再採点機会が失われ、
+      //   reviewedCount も二重減算される不具合（High-4）の回帰テスト。
+      mockGetDueCards.mockResolvedValueOnce(
+        makeResponse([makeCard("card-a", "カードA"), makeCard("card-b", "カードB")]),
+      );
+      mockSubmitReview.mockResolvedValue({
+        updated: { due_date: "2026-07-08" },
+      });
+
+      const { result } = renderHook(() => useReviewSession("deck-a", cancel));
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false);
+      });
+
+      // 2枚とも採点してセッションを完了させる（reviewResults に2件作る）
+      await act(async () => {
+        await result.current.handleGrade(5);
+      });
+      await act(async () => {
+        await result.current.handleGrade(5);
+      });
+      expect(result.current.isComplete).toBe(true);
+      expect(result.current.reviewedCount).toBe(2);
+
+      // 1行目の Undo を発火（未解決のまま保持する）
+      const undoReview = reviewsApi.undoReview as ReturnType<typeof vi.fn>;
+      let resolveFirstUndo!: () => void;
+      undoReview.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveFirstUndo = resolve;
+          }),
+      );
+
+      let firstUndoPromise!: Promise<void>;
+      act(() => {
+        firstUndoPromise = result.current.handleUndo(0);
+      });
+      await waitFor(() => {
+        expect(result.current.isUndoing).toBe(true);
+        expect(result.current.undoingIndex).toBe(0);
+      });
+
+      // 1行目が未解決のうちに 2行目の Undo を発火 → 再入ガードで無視されるべき
+      await act(async () => {
+        await result.current.handleUndo(1);
+      });
+
+      // 2行目の Undo は無視され、undoReview は1回しか呼ばれていない
+      expect(undoReview).toHaveBeenCalledTimes(1);
+      // 1行目の Undo がまだ未解決のため reviewedCount はまだ減算されていない
+      expect(result.current.reviewedCount).toBe(2);
+      // undoingIndex は依然として 0（1行目）のまま（2行目に奪われていない）
+      expect(result.current.undoingIndex).toBe(0);
+
+      // 1行目の Undo を解決させる
+      await act(async () => {
+        resolveFirstUndo();
+        await firstUndoPromise;
+      });
+
+      // 1行目分のみ減算される（二重減算されない）
+      expect(result.current.reviewedCount).toBe(1);
+      expect(result.current.isUndoing).toBe(false);
+      expect(result.current.regradeCardIndex).toBe(0);
+    });
+  });
 });

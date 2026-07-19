@@ -39,7 +39,9 @@ export const ReviewComplete = ({
               result={result}
               index={index}
               onUndo={onUndo}
+              // High-4: スピナー表示は自行のみ、disabled は Undo 実行中は全行に適用する
               isUndoing={isUndoing && undoingIndex === index}
+              disabled={isUndoing}
             />
           ))}
         </div>

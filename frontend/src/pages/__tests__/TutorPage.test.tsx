@@ -1,9 +1,14 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { TutorPage } from "../TutorPage";
 import type { LearningMode } from "@/types";
+
+// jsdom は scrollIntoView 未実装のため、chat ビューのオートスクロール effect 用にスタブ化する
+beforeAll(() => {
+  Element.prototype.scrollIntoView = vi.fn();
+});
 
 // useTutorContext を制御可能なモックに差し替え
 const mockStartSession = vi.fn();
@@ -115,5 +120,106 @@ describe("TutorPage (F-2: 再試行)", () => {
       expect(mockClearError).toHaveBeenCalled();
     });
     expect(mockStartSession).not.toHaveBeenCalled();
+  });
+});
+
+describe("TutorPage (High-3: デッキ切替時に別デッキの会話を表示しない)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockTutorState = {
+      session: null,
+      messages: [],
+      isLoading: false,
+      error: null,
+      isLimitReached: false,
+      isTimedOut: false,
+      isInsufficientReviewData: false,
+      isEmptyDeck: false,
+    };
+  });
+
+  it("Context に残る session.deck_id がルートの deckId と一致しない場合、chat ではなく mode-select を表示する", async () => {
+    // 【背景】: TutorProvider は最上位にあるため、デッキ1のセッションが
+    //   残った状態でデッキ2の /tutor/deck-2 を開くと、一致確認なしでは
+    //   デッキ1の会話が表示され、送信メッセージがデッキ1の session_id へ
+    //   送られてしまう問題（High-3）の回帰テスト。
+    mockResumeSession.mockResolvedValue(false); // deck-2 にアクティブセッションはない
+    mockTutorState = {
+      ...mockTutorState,
+      session: {
+        session_id: "tutor_deck1_session",
+        deck_id: "deck-1",
+        mode: "free_talk",
+        status: "active",
+        messages: [],
+        message_count: 1,
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+        ended_at: null,
+      },
+      messages: [
+        {
+          role: "assistant",
+          content: "デッキ1の会話内容",
+          related_cards: [],
+          timestamp: "2026-01-01T00:00:00Z",
+        },
+      ],
+    };
+
+    render(
+      <MemoryRouter initialEntries={["/tutor/deck-2"]}>
+        <Routes>
+          <Route path="/tutor/:deckId" element={<TutorPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    // mode-select 画面が表示される（ModeSelector の見出し）
+    expect(await screen.findByText("学習モードを選択")).toBeInTheDocument();
+    // デッキ1の会話やチャット専用の「終了」ボタンは表示されない
+    expect(screen.queryByText("デッキ1の会話内容")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "終了" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("session.deck_id がルートの deckId と一致する場合は chat を表示する", async () => {
+    mockResumeSession.mockResolvedValue(false);
+    mockTutorState = {
+      ...mockTutorState,
+      session: {
+        session_id: "tutor_deck1_session",
+        deck_id: "deck-1",
+        mode: "free_talk",
+        status: "active",
+        messages: [],
+        message_count: 1,
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+        ended_at: null,
+      },
+      messages: [
+        {
+          role: "assistant",
+          content: "デッキ1の会話内容",
+          related_cards: [],
+          timestamp: "2026-01-01T00:00:00Z",
+        },
+      ],
+    };
+
+    render(
+      <MemoryRouter initialEntries={["/tutor/deck-1"]}>
+        <Routes>
+          <Route path="/tutor/:deckId" element={<TutorPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(
+      await screen.findByRole("button", { name: "終了" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("デッキ1の会話内容")).toBeInTheDocument();
   });
 });

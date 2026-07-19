@@ -67,8 +67,18 @@ export const TutorPage = () => {
   }, [messages]);
 
   const [pendingModeSwitch, setPendingModeSwitch] = useState(false);
+  // High-3: session が現在ルートの deckId と一致する場合のみ chat ビューを表示する。
+  //   TutorProvider は App.tsx で最上位にあるため、デッキ A のセッションが残ったまま
+  //   /tutor/B を開くと、一致確認なしでは A の会話が表示され、sendMessage が
+  //   A の session_id へ送信されてしまう。deck_id が一致しない場合は
+  //   view の値（"chat" 含む）に関わらず mode-select にフォールバックする。
+  const sessionMatchesDeck = Boolean(session) && session?.deck_id === deckId;
   const activeView: PageView =
-    session && view === "mode-select" && !pendingModeSwitch ? "chat" : view;
+    view === "history"
+      ? "history"
+      : sessionMatchesDeck && !pendingModeSwitch
+        ? "chat"
+        : "mode-select";
 
   // L-27/M-27: ハンドラは useCallback でメモ化し、async の例外は内部で握って
   // Promise を握りつぶさない（Context 側で catch 済みだが二重防御）。
@@ -126,8 +136,9 @@ export const TutorPage = () => {
   }, []);
 
   const handleBackFromHistory = useCallback(() => {
-    setView(session ? "chat" : "mode-select");
-  }, [session]);
+    // High-3: 履歴から戻る際も session の deck_id が現在ルートと一致する場合のみ chat へ戻す
+    setView(session && session.deck_id === deckId ? "chat" : "mode-select");
+  }, [session, deckId]);
 
   if (!deckId) {
     return (

@@ -223,7 +223,9 @@ export const CardsPage = () => {
         {/* 復習開始ボタン */}
         {activeTab === "due" && displayCards.length > 0 && (
           <Link
-            to="/review"
+            // Medium-9: deck_id 指定時はデッキ絞り込みを維持したまま復習を開始する
+            // 🟡 黄信号: DecksPage.tsx の `/review?deck_id=${deck.deck_id}` パターンに合わせる
+            to={deckId ? `/review?deck_id=${encodeURIComponent(deckId)}` : "/review"}
             className="block w-full py-3 mb-4 bg-blue-600 text-white text-center rounded-lg hover:bg-blue-700 active:bg-blue-800 min-h-[44px] transition-colors font-medium"
             data-testid="start-review-button"
           >
