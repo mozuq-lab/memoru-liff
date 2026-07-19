@@ -164,7 +164,7 @@ def test_link_line_event_exists_with_correct_path(api_events):
 
 
 def test_total_http_api_event_count(api_events):
-    """TC-042-04: 整合性 - ApiFunction の HttpApi イベント総数が 31 個
+    """TC-042-04: 整合性 - ApiFunction の HttpApi イベント総数が 30 個
 
     期待イベント:
     1. GetUser          - GET /users/me
@@ -179,28 +179,30 @@ def test_total_http_api_event_count(api_events):
     10. GetDueCards     - GET /cards/due
     11. SubmitReview    - POST /reviews/{cardId}
     12. UndoReview      - POST /reviews/{cardId}/undo
-    13. GetReviewStats  - GET /reviews/stats
-    14. GenerateCards   - POST /cards/generate
-    15. RefineCard      - POST /cards/refine
-    16. ListDecks       - GET /decks
-    17. CreateDeck      - POST /decks
-    18. UpdateDeck      - PUT /decks/{deckId}
-    19. DeleteDeck      - DELETE /decks/{deckId}
-    20. GetStats        - GET /stats
-    21. GetWeakCards    - GET /stats/weak-cards
-    22. GetForecast     - GET /stats/forecast
-    23. ListBrowserProfiles  - GET /browser-profiles
-    24. CreateBrowserProfile - POST /browser-profiles
-    25. DeleteBrowserProfile - DELETE /browser-profiles/{profileId}
-    26. CreateTutorSession  - POST /tutor/sessions
-    27. SendTutorMessage    - POST /tutor/sessions/{sessionId}/messages
-    28. EndTutorSession     - DELETE /tutor/sessions/{sessionId}
-    29. ListTutorSessions   - GET /tutor/sessions
-    30. GetTutorSession     - GET /tutor/sessions/{sessionId}
-    31. GetAiJob            - GET /ai-jobs/{jobId} (ai-async-jobs: ジョブポーリング)
+    13. GenerateCards   - POST /cards/generate
+    14. RefineCard      - POST /cards/refine
+    15. ListDecks       - GET /decks
+    16. CreateDeck      - POST /decks
+    17. UpdateDeck      - PUT /decks/{deckId}
+    18. DeleteDeck      - DELETE /decks/{deckId}
+    19. GetStats        - GET /stats
+    20. GetWeakCards    - GET /stats/weak-cards
+    21. GetForecast     - GET /stats/forecast
+    22. ListBrowserProfiles  - GET /browser-profiles
+    23. CreateBrowserProfile - POST /browser-profiles
+    24. DeleteBrowserProfile - DELETE /browser-profiles/{profileId}
+    25. CreateTutorSession  - POST /tutor/sessions
+    26. SendTutorMessage    - POST /tutor/sessions/{sessionId}/messages
+    27. EndTutorSession     - DELETE /tutor/sessions/{sessionId}
+    28. ListTutorSessions   - GET /tutor/sessions
+    29. GetTutorSession     - GET /tutor/sessions/{sessionId}
+    30. GetAiJob            - GET /ai-jobs/{jobId} (ai-async-jobs: ジョブポーリング)
+
+    注: GetReviewStats (GET /reviews/stats) はハンドラ未実装の死にルートだったため
+    Medium-3 対応で削除済み（フロントは GetStats (/stats) を使用）。
     """
-    assert len(api_events) == 31, (
-        f"期待: 31 イベント、実際: {len(api_events)} イベント\n"
+    assert len(api_events) == 30, (
+        f"期待: 30 イベント、実際: {len(api_events)} イベント\n"
         f"現在のイベント: {list(api_events.keys())}"
     )
 
@@ -283,7 +285,6 @@ def test_sam_paths_match_handler_routes(api_events, handler_routes):
         ("GetDueCards", "/cards/due", "GET"),
         ("SubmitReview", "/reviews/{cardId}", "POST"),
         ("UndoReview", "/reviews/{cardId}/undo", "POST"),
-        ("GetReviewStats", "/reviews/stats", "GET"),
         ("GenerateCards", "/cards/generate", "POST"),
         ("ListDecks", "/decks", "GET"),
         ("CreateDeck", "/decks", "POST"),
@@ -292,7 +293,7 @@ def test_sam_paths_match_handler_routes(api_events, handler_routes):
     ],
 )
 def test_event_path_and_method(api_events, event_name, expected_path, expected_method):
-    """TC-042-07: 整合性 - 全 18 エンドポイントのパスとメソッドが期待通りであること"""
+    """TC-042-07: 整合性 - 全 17 エンドポイントのパスとメソッドが期待通りであること"""
     assert event_name in api_events, (
         f"イベント '{event_name}' が SAM テンプレートに存在しません。"
         f" 現在のイベント: {list(api_events.keys())}"
@@ -316,7 +317,7 @@ def test_event_path_and_method(api_events, event_name, expected_path, expected_m
 def test_no_duplicate_event_names(sam_template):
     """TC-042-09: 品質 - イベント名の重複がないこと
 
-    YAML で重複キーは後勝ちになるため、イベント数が期待通りの 31 個かで検証する。
+    YAML で重複キーは後勝ちになるため、イベント数が期待通りの 30 個かで検証する。
     """
     events = sam_template["Resources"]["ApiFunction"]["Properties"]["Events"]
     http_api_events = {
@@ -324,8 +325,8 @@ def test_no_duplicate_event_names(sam_template):
         if ev.get("Type") == "HttpApi"
     }
     # YAML で重複キーは後勝ちになるため、パース後にイベント数が期待通りかで検証
-    assert len(http_api_events) == 31, (
-        f"期待: 31 イベント, 実際: {len(http_api_events)} イベント\n"
+    assert len(http_api_events) == 30, (
+        f"期待: 30 イベント, 実際: {len(http_api_events)} イベント\n"
         f"イベント: {list(http_api_events.keys())}"
     )
 
@@ -354,21 +355,32 @@ def test_get_user_and_update_user_coexist(api_events):
 
 
 # ---------------------------------------------------------------------------
-# TC-042-32: EDGE-002-04 - GET /reviews/stats と POST /reviews/{cardId} の共存
+# TC-042-32: EDGE-002-04 (更新) - 死にルート GetReviewStats の削除と
+# POST /reviews/{cardId} の存続
 # ---------------------------------------------------------------------------
 
 
-def test_review_stats_and_submit_review_coexist(api_events):
-    """TC-042-32: EDGE-002-04 - GET /reviews/stats と POST /reviews/{cardId} が共存すること"""
-    # GetReviewStats
-    assert api_events["GetReviewStats"]["Properties"]["Path"] == "/reviews/stats"
-    assert api_events["GetReviewStats"]["Properties"]["Method"] == "GET"
+def test_review_stats_route_removed_and_submit_review_still_exists(api_events):
+    """TC-042-32: EDGE-002-04 (更新) - GetReviewStats (GET /reviews/stats) は
+    ハンドラ未実装の死にルート（常に 404）だったため Medium-3 対応で削除済み
+    （フロントは GetStats (/stats) を使用しており実利用なし）。
+    再度追加されていないこと、および SubmitReview (POST /reviews/{cardId}) が
+    引き続き存在することを回帰テストとして検証する。
+    """
+    assert "GetReviewStats" not in api_events, (
+        "GetReviewStats はハンドラ未実装の死にルートのため削除済みであること。"
+        " 再追加する場合は対応するハンドラも実装すること。"
+    )
     # SubmitReview
     assert api_events["SubmitReview"]["Properties"]["Path"] == "/reviews/{cardId}", (
         f"SubmitReview のパスが '/reviews/{{cardId}}' であること。"
         f" 実際: '{api_events['SubmitReview']['Properties']['Path']}'"
     )
     assert api_events["SubmitReview"]["Properties"]["Method"] == "POST"
+    # 統計取得は GetStats (/stats) 経由であること
+    assert "GetStats" in api_events, "GetStats (/stats) が SAM テンプレートに存在すること"
+    assert api_events["GetStats"]["Properties"]["Path"] == "/stats"
+    assert api_events["GetStats"]["Properties"]["Method"] == "GET"
 
 
 # ---------------------------------------------------------------------------

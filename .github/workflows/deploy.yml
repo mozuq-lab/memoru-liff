@@ -99,14 +99,36 @@ jobs:
 
   deploy-backend:
     name: Deploy Backend
-    needs: [test-backend, test-frontend]
+    # フロントエンドのデプロイ完了後にバックエンドをデプロイする（CI はこの順序を強制する）。
+    # docs/deployment-guide-prod.md 3.5: 逆順（旧フロント + 新バックエンド）だと、
+    # 旧フロントが 202 の {job_id, ...} を成功レスポンスと誤解釈し UI が静かに壊れるため不可。
+    # 新フロント + 旧バックエンドは互換（デュアル対応）のため安全 → フロント先行必須。
+    # 注意: if にステータスチェック関数を含めない場合、needs には暗黙の success() 判定が
+    # 適用される（deploy-frontend が失敗/スキップなら本 job もスキップされる、安全側）。
+    # needs.deploy-frontend.result == 'success' の明示チェックは意図の明文化のための冗長な
+    # 二重ガード。deploy-frontend と if の実行条件（イベント種別・environment の解決方法）が
+    # 同一であることを確認済み。
+    needs: [test-backend, test-frontend, deploy-frontend]
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && needs.deploy-frontend.result == 'success'
     environment: ${{ github.event.inputs.environment || 'dev' }}
     defaults:
       run:
         working-directory: backend
     steps:
+      # 多層防御: environment=prod の手動デプロイを main ブランチに限定する。
+      # 本来の防御主体は GitHub Environment (prod) 側の Deployment branch policy
+      # （Settings → Environments → prod → Deployment branches and tags を
+      # "Selected branches" = main に設定）であり、そちらを必ず設定すること
+      # (docs/deployment-guide-prod.md 参照)。ここでのチェックはワークフロー定義自体が
+      # 未マージのブランチ上で改変され得るため、あくまで補助的な多層防御に過ぎない。
+      - name: Guard prod deploy to main branch
+        if: (github.event.inputs.environment || 'dev') == 'prod' && github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::environment=prod への手動デプロイは main ブランチからのみ許可されています（現在の ref: ${{ github.ref }}）。"
+          echo "::error::main ブランチで workflow_dispatch を再実行してください。"
+          exit 1
+
       - uses: actions/checkout@v4
 
       - name: Configure AWS credentials
@@ -162,6 +184,13 @@ jobs:
             echo "::error::GitHub Environment Variables に LIFF_ORIGIN を登録してください。詳細は docs/deployment-guide-prod.md を参照。"
             exit 1
           fi
+          if [ "$ENVIRONMENT" = "prod" ] && [ "$USE_STRANDS" != "true" ]; then
+            echo "::error::USE_STRANDS が prod で \"true\" ではありません（現在の値: ${USE_STRANDS:-<未設定>}）。"
+            echo "::error::Tutor 機能は SessionManager 経由のマルチターン会話を使うため USE_STRANDS=true が必須です。"
+            echo "::error::false のままだと Tutor ジョブが failed になり、ポーリング時に 503 (ai_unavailable) を返します。"
+            echo "::error::GitHub Environment Variables に USE_STRANDS=true を登録してください。詳細は docs/deployment-guide-prod.md を参照。"
+            exit 1
+          fi
           if [ -z "$LINE_CHANNEL_ID" ]; then
             echo "::warning::LINE_CHANNEL_ID が未設定です。template.yaml の既定値(空)を使用します。"
           fi
@@ -189,6 +218,19 @@ jobs:
       run:
         working-directory: frontend
     steps:
+      # 多層防御: environment=prod の手動デプロイを main ブランチに限定する。
+      # 本来の防御主体は GitHub Environment (prod) 側の Deployment branch policy
+      # （Settings → Environments → prod → Deployment branches and tags を
+      # "Selected branches" = main に設定）であり、そちらを必ず設定すること
+      # (docs/deployment-guide-prod.md 参照)。ここでのチェックはワークフロー定義自体が
+      # 未マージのブランチ上で改変され得るため、あくまで補助的な多層防御に過ぎない。
+      - name: Guard prod deploy to main branch
+        if: (github.event.inputs.environment || 'dev') == 'prod' && github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::environment=prod への手動デプロイは main ブランチからのみ許可されています（現在の ref: ${{ github.ref }}）。"
+          echo "::error::main ブランチで workflow_dispatch を再実行してください。"
+          exit 1
+
       - uses: actions/checkout@v4
 
       - name: Configure AWS credentials
@@ -206,6 +248,50 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # フロントの必須環境変数を検証する（deploy-backend の「Deploy to AWS」ステップの
+      # fail-fast と対称の方針）。Vite は空値でもビルドが成功してしまうため、未設定・
+      # プレースホルダのまま壊れた成果物を S3 へ公開してしまう事故を防ぐ。
+      - name: Validate frontend environment variables
+        env:
+          VITE_API_BASE_URL: ${{ vars.API_URL }}
+          VITE_LIFF_ID: ${{ vars.LIFF_ID }}
+          VITE_OIDC_AUTHORITY: ${{ vars.OIDC_AUTHORITY }}
+          VITE_OIDC_CLIENT_ID: ${{ vars.OIDC_CLIENT_ID }}
+        run: |
+          MISSING=""
+          [ -z "$VITE_API_BASE_URL" ]   && MISSING="$MISSING VITE_API_BASE_URL(API_URL)"
+          [ -z "$VITE_LIFF_ID" ]        && MISSING="$MISSING VITE_LIFF_ID(LIFF_ID)"
+          [ -z "$VITE_OIDC_AUTHORITY" ] && MISSING="$MISSING VITE_OIDC_AUTHORITY(OIDC_AUTHORITY)"
+          [ -z "$VITE_OIDC_CLIENT_ID" ] && MISSING="$MISSING VITE_OIDC_CLIENT_ID(OIDC_CLIENT_ID)"
+          if [ -n "$MISSING" ]; then
+            echo "::error::必須の GitHub Environment Variables が未設定です:$MISSING"
+            echo "::error::設定方法は docs/deployment-guide-prod.md を参照してください。"
+            exit 1
+          fi
+          case "$VITE_API_BASE_URL" in
+            https://*) ;;
+            *)
+              echo "::error::VITE_API_BASE_URL(API_URL) は https:// で始まる URL である必要があります: $VITE_API_BASE_URL"
+              exit 1
+              ;;
+          esac
+          case "$VITE_OIDC_AUTHORITY" in
+            https://*) ;;
+            *)
+              echo "::error::VITE_OIDC_AUTHORITY(OIDC_AUTHORITY) は https:// で始まる URL である必要があります: $VITE_OIDC_AUTHORITY"
+              exit 1
+              ;;
+          esac
+          PLACEHOLDER_PATTERN='example\.com|placeholder|your-domain|changeme|replace|xxx|todo|dummy'
+          for PAIR in "VITE_API_BASE_URL=$VITE_API_BASE_URL" "VITE_LIFF_ID=$VITE_LIFF_ID" "VITE_OIDC_AUTHORITY=$VITE_OIDC_AUTHORITY" "VITE_OIDC_CLIENT_ID=$VITE_OIDC_CLIENT_ID"; do
+            VALUE="${PAIR#*=}"
+            if echo "$VALUE" | grep -qiE "$PLACEHOLDER_PATTERN"; then
+              echo "::error::${PAIR%%=*} にプレースホルダー値が含まれています: $VALUE"
+              echo "::error::実環境値を GitHub Environment Variables に設定してください。詳細は docs/deployment-guide-prod.md を参照。"
+              exit 1
+            fi
+          done
 
       - name: Build
         run: npm run build

@@ -145,6 +145,21 @@ Rules:
           for "make deploy-prod" or the LIFF_ORIGIN GitHub Environment Variable
           for deploy.yml. See docs/deployment-guide-prod.md.
 
+  # prod では UseStrands=true を必須にする。Tutor 機能 (TutorService) は SessionManager
+  # 経由のマルチターン会話を使うため、false のままだと start_session / send_message の
+  # submit は 202 を返すもののジョブが failed になり、ポーリング時に 503
+  # (code=ai_unavailable) として表面化する（UseStrands パラメータの NOTE 参照）。
+  ProdRequiresUseStrands:
+    RuleCondition: !Equals [!Ref Environment, prod]
+    Assertions:
+      - Assert: !Equals [!Ref UseStrands, "true"]
+        AssertDescription: >-
+          UseStrands must be "true" for prod deployments (AI Tutor requires the
+          Strands Agents SDK / SessionManager; otherwise tutor jobs fail and
+          polling returns 503 ai_unavailable). Set the USE_STRANDS environment
+          variable to "true" for "make deploy-prod" or the USE_STRANDS GitHub
+          Environment Variable for deploy.yml. See docs/deployment-guide-prod.md.
+
 Conditions:
   IsProd: !Equals [!Ref Environment, prod]
   IsNotProd: !Not [!Equals [!Ref Environment, prod]]
@@ -719,12 +734,6 @@ Resources:
             ApiId: !Ref HttpApi
             Path: /reviews/{cardId}/undo
             Method: POST
-        GetReviewStats:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref HttpApi
-            Path: /reviews/stats
-            Method: GET
         # AI Generation endpoint
         GenerateCards:
           Type: HttpApi
@@ -1428,8 +1437,10 @@ Resources:
         Application: memoru
 
   #============================================================
-  # DLQ 滞留アラーム (設計レビュー SM-4: 通知先 SNS の配線は follow-up。
-  # アラーム状態はコンソール / ダッシュボードで可視化される)
+  # DLQ 滞留アラーム (設計レビュー SM-4: 通知先 SNS への配線を実施済み。
+  # AlertSNSTopic は Condition: IsProd のため、DLQ アラーム自体は
+  # Condition なし (dev/prod 両方デプロイ) でも AlarmActions は IsProd の
+  # ときのみ Topic を参照し、それ以外は AWS::NoValue で無配線にする)
   #============================================================
 
   AiJobDLQAlarm:
@@ -1448,6 +1459,7 @@ Resources:
       Threshold: 0
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
+      AlarmActions: !If [IsProd, [!Ref AlertSNSTopic], !Ref AWS::NoValue]
 
   AiJobHeavyDLQAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -1465,6 +1477,7 @@ Resources:
       Threshold: 0
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
+      AlarmActions: !If [IsProd, [!Ref AlertSNSTopic], !Ref AWS::NoValue]
 
   DuePushJobDLQAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -1482,6 +1495,7 @@ Resources:
       Threshold: 0
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
+      AlarmActions: !If [IsProd, [!Ref AlertSNSTopic], !Ref AWS::NoValue]
 
   UrlGenerateWorkerDLQAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -1499,6 +1513,7 @@ Resources:
       Threshold: 0
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
+      AlarmActions: !If [IsProd, [!Ref AlertSNSTopic], !Ref AWS::NoValue]
 
   #============================================================
   # CloudWatch Logs - LogGroups with Retention
