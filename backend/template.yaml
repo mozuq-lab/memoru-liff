@@ -131,6 +131,22 @@ Parameters:
     Default: ""
     Description: AgentCore Memory ID for tutor session management
 
+  # NOTE (signup-allowlist): PreSignupInvokePermission の SourceArn に使う。
+  # CDK CognitoStack が所有する UserPool の ARN をデプロイ時に注入する
+  # (Makefile: COGNITO_USER_POOL_ARN / deploy.yml: vars.COGNITO_USER_POOL_ARN)。
+  # prod では Rules セクション (ProdRequiresCognitoUserPoolArn) で必須化しており、
+  # 未指定のままだと changeset 作成前に fail-fast する。
+  CognitoUserPoolArn:
+    Type: String
+    Default: ""
+    Description: >-
+      Cognito UserPool ARN that invokes PreSignupFunction (used to scope the
+      Lambda invoke permission's SourceArn and prevent confused-deputy calls).
+      Required for prod deployments (asserted by the
+      ProdRequiresCognitoUserPoolArn rule); optional for dev/staging where the
+      PreSignUp trigger is not wired up. See
+      docs/design/signup-allowlist/architecture.md.
+
 Rules:
   # prod では LiffOrigin の指定を必須にする。未指定のままだと CORS AllowOrigins に
   # 本番 LIFF フロントの Origin が含まれず、ブラウザから全 API が呼べなくなるため、
@@ -160,12 +176,30 @@ Rules:
           variable to "true" for "make deploy-prod" or the USE_STRANDS GitHub
           Environment Variable for deploy.yml. See docs/deployment-guide-prod.md.
 
+  # prod では CognitoUserPoolArn の指定を必須にする。未指定のままだと
+  # PreSignupInvokePermission が作成されず（Condition: HasCognitoUserPoolArn）、
+  # PreSignupFunction が UserPool から呼び出せないため、changeset 作成前に
+  # アサーションで fail-fast する（signup-allowlist 設計レビュー A-3）。
+  ProdRequiresCognitoUserPoolArn:
+    RuleCondition: !Equals [!Ref Environment, prod]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref CognitoUserPoolArn, ""]]
+        AssertDescription: >-
+          CognitoUserPoolArn is required for prod deployments (the Cognito
+          UserPool ARN that invokes PreSignupFunction). Set the
+          COGNITO_USER_POOL_ARN environment variable for "make deploy-prod" or
+          the COGNITO_USER_POOL_ARN GitHub Environment Variable for
+          deploy.yml. See docs/deployment-guide-prod.md.
+
 Conditions:
   IsProd: !Equals [!Ref Environment, prod]
   IsNotProd: !Not [!Equals [!Ref Environment, prod]]
   HasTutorModelId: !Not [!Equals [!Ref TutorModelId, ""]]
   UseAgentCore: !Equals [!Ref TutorSessionBackend, "agentcore"]
   HasLiffOrigin: !Not [!Equals [!Ref LiffOrigin, ""]]
+  # signup-allowlist: 未指定なら PreSignupInvokePermission を作成しない
+  # (dev/staging では PreSignUp トリガーを配線しない運用を許容する)。
+  HasCognitoUserPoolArn: !Not [!Equals [!Ref CognitoUserPoolArn, ""]]
 
 Resources:
   #============================================================
@@ -510,6 +544,37 @@ Resources:
       SSESpecification:
         SSEEnabled: true
         SSEType: KMS
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: memoru
+
+  # サインアップ許可リスト (signup-allowlist)。PreSignupFunction が approved/pending
+  # を判定するために参照する。approved は永続、pending のみ ttl (30日) で自動削除
+  # (設計 docs/design/signup-allowlist/architecture.md #1)。
+  SignupAllowlistTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub memoru-signup-allowlist-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: identifier
+          AttributeType: S
+      KeySchema:
+        - AttributeName: identifier
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+      DeletionProtectionEnabled: !If [IsProd, true, false]
       Tags:
         - Key: Environment
           Value: !Ref Environment
@@ -1516,6 +1581,63 @@ Resources:
       AlarmActions: !If [IsProd, [!Ref AlertSNSTopic], !Ref AWS::NoValue]
 
   #============================================================
+  # signup-allowlist: PreSignUp トリガー (Cognito)
+  #============================================================
+
+  # PreSignUp Lambda — サインアップの入口 (メールセルフサインアップ / LINE federation /
+  # AdminCreateUser) を SignupAllowlistTable で一元的に遮断する。
+  # 設計: docs/design/signup-allowlist/architecture.md。
+  # Timeout 5s: Cognito のトリガー応答待ちは最大 5 秒 (変更不可・計 3 回再試行)。
+  # boto3 側も services/allowlist_service.py で botocore Config により
+  # connect/read タイムアウトを短く絞り、劣化時も 5 秒以内に例外送出が完了するよう
+  # にしている（Cognito 側リトライで pending 書き込みが再実行されても
+  # ConditionExpression により冪等）。
+  # ReservedConcurrentExecutions 10: SignUp フラッド（Cognito の UserCreation クォータ
+  # 50 RPS）が本体 API Lambda と共有の同時実行プールを食い潰すのを防ぐ隔離
+  # （本関数自身がスロットリングされてもフェイルクローズなので副作用はない）。
+  PreSignupFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub memoru-presignup-${Environment}
+      CodeUri: src/
+      Handler: auth.pre_signup.handler
+      Description: Cognito PreSignUp trigger enforcing the signup allowlist
+      Timeout: 5
+      ReservedConcurrentExecutions: 10
+      Policies:
+        # 対象テーブルへの GetItem/PutItem のみの最小権限 (DynamoDBCrudPolicy は
+        # 使わない。既存 DuePushJobFunction の最小権限方針と同型)。
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+              Resource: !GetAtt SignupAllowlistTable.Arn
+      Environment:
+        Variables:
+          # Globals.Function.Environment.Variables の既存キー (USERS_TABLE 等) も
+          # 継承されるが、本関数のコードは ALLOWLIST_TABLE しか参照しないため
+          # 実害はない。
+          ALLOWLIST_TABLE: !Ref SignupAllowlistTable
+      Tags:
+        Environment: !Ref Environment
+        Application: memoru
+
+  # PreSignupFunction を Cognito UserPool から呼び出すための Invoke 許可。
+  # SourceArn を UserPool ARN に限定し confused deputy を防ぐ。Invoke 許可は
+  # SAM 側で一元管理する (CDK CognitoStack 側では skipPermissions: true で
+  # addPermission を恒久的に no-op 化する。設計 architecture.md #2 参照)。
+  PreSignupInvokePermission:
+    Type: AWS::Lambda::Permission
+    Condition: HasCognitoUserPoolArn
+    Properties:
+      FunctionName: !Ref PreSignupFunction
+      Action: lambda:InvokeFunction
+      Principal: cognito-idp.amazonaws.com
+      SourceArn: !Ref CognitoUserPoolArn
+
+  #============================================================
   # CloudWatch Logs - LogGroups with Retention
   #============================================================
 
@@ -1566,6 +1688,13 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub "/aws/lambda/${AiJobWorkerFunction}"
+      RetentionInDays: !If [IsProd, 90, 14]
+
+  # PreSignup Function LogGroup (signup-allowlist)
+  PreSignupFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${PreSignupFunction}"
       RetentionInDays: !If [IsProd, 90, 14]
 
   #============================================================
@@ -1875,6 +2004,13 @@ Outputs:
     Value: !GetAtt AdviceFunction.Arn
     Export:
       Name: !Sub memoru-${Environment}-advice-function-arn
+
+  # signup-allowlist: CDK CognitoStack が preSignUpLambdaArn として参照する
+  PreSignupFunctionArn:
+    Description: PreSignup Lambda function ARN (signup-allowlist)
+    Value: !GetAtt PreSignupFunction.Arn
+    Export:
+      Name: !Sub memoru-${Environment}-presignup-function-arn
 
   # Monitoring (Production Only)
   AlertSNSTopicArn:

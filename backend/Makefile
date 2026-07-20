@@ -2,7 +2,7 @@
 SHELL := /bin/bash
 AWS_REGION ?= ap-northeast-1
 
-.PHONY: help install build validate deploy-dev deploy-prod local-db local-keycloak local-ollama local-ollama-pull local-ollama-stop local-ollama-logs local-ollama-native-check local-ollama-native-pull local-all local-all-native-ollama local-all-stop local-api test clean
+.PHONY: help install build validate deploy-dev deploy-prod local-db local-keycloak local-ollama local-ollama-pull local-ollama-stop local-ollama-logs local-ollama-native-check local-ollama-native-pull local-all local-all-native-ollama local-all-stop local-api test clean allowlist-add allowlist-list allowlist-approve allowlist-remove verify-presignup
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -27,6 +27,10 @@ validate: ## Validate SAM template
 #                  CORS AllowOrigins に注入する。prod は必須（未設定なら fail-fast。
 #                  template.yaml の Rules でも二重にガード）。dev/staging は任意
 #                  （未設定なら localhost 系のみ許可）。
+#   COGNITO_USER_POOL_ARN  PreSignUp トリガーの Invoke Permission (SourceArn) に必要な
+#                  Cognito UserPool ARN。prod は必須（未設定なら fail-fast。
+#                  template.yaml の Rules でも二重にガード）。dev/staging は任意
+#                  （未設定なら Invoke Permission は作成されない＝トリガー未配線）。
 # 任意（未設定なら template.yaml の既定値を使用。空文字は渡さない）:
 #   LINE_CHANNEL_ID, USE_STRANDS, TUTOR_SESSION_BACKEND,
 #   AGENTCORE_MEMORY_ID, BEDROCK_MODEL_ID
@@ -50,11 +54,19 @@ define build_param_overrides
 		echo "詳細: docs/deployment-guide-prod.md" >&2; \
 		exit 1; \
 	fi; \
+	if [ "$(1)" = "prod" ] && [ -z "$$COGNITO_USER_POOL_ARN" ]; then \
+		echo "ERROR: COGNITO_USER_POOL_ARN が未設定です（prod では必須）。" >&2; \
+		echo "  PreSignUp トリガーの Invoke Permission (SourceArn) に必要です。" >&2; \
+		echo "  例: export COGNITO_USER_POOL_ARN=arn:aws:cognito-idp:ap-northeast-1:123456789012:userpool/ap-northeast-1_xxxxxxxxx" >&2; \
+		echo "詳細: docs/deployment-guide-prod.md" >&2; \
+		exit 1; \
+	fi; \
 	if [ -z "$$LINE_CHANNEL_ID" ]; then \
 		echo "WARNING: LINE_CHANNEL_ID が未設定です。template.yaml の既定値(空)を使用します（LINE ID トークン検証は無効）。" >&2; \
 	fi; \
 	OVERRIDES="Environment=$(1) OidcIssuer=$$OIDC_ISSUER OidcAudience=$$OIDC_AUDIENCE"; \
 	[ -n "$$LIFF_ORIGIN" ]           && OVERRIDES="$$OVERRIDES LiffOrigin=$$LIFF_ORIGIN"; \
+	[ -n "$$COGNITO_USER_POOL_ARN" ] && OVERRIDES="$$OVERRIDES CognitoUserPoolArn=$$COGNITO_USER_POOL_ARN"; \
 	[ -n "$$LINE_CHANNEL_ID" ]       && OVERRIDES="$$OVERRIDES LineChannelId=$$LINE_CHANNEL_ID"; \
 	[ -n "$$USE_STRANDS" ]           && OVERRIDES="$$OVERRIDES UseStrands=$$USE_STRANDS"; \
 	[ -n "$$TUTOR_SESSION_BACKEND" ] && OVERRIDES="$$OVERRIDES TutorSessionBackend=$$TUTOR_SESSION_BACKEND"; \
@@ -70,7 +82,7 @@ deploy-staging: build ## Deploy to staging environment (requires OIDC_ISSUER, OI
 	@$(call build_param_overrides,staging); \
 	sam deploy --config-env staging --parameter-overrides "$$OVERRIDES"
 
-deploy-prod: build ## Deploy to production environment (requires OIDC_ISSUER, OIDC_AUDIENCE, LIFF_ORIGIN)
+deploy-prod: build ## Deploy to production environment (requires OIDC_ISSUER, OIDC_AUDIENCE, LIFF_ORIGIN, COGNITO_USER_POOL_ARN)
 	@$(call build_param_overrides,prod); \
 	sam deploy --config-env prod --parameter-overrides "$$OVERRIDES"
 
@@ -192,3 +204,167 @@ scan-users: ## Scan users table (local)
 
 scan-cards: ## Scan cards table (local)
 	aws dynamodb scan --table-name memoru-cards-dev --endpoint-url http://localhost:8000
+
+# ------------------------------------------------------------
+# サインアップ許可リスト運用 CLI (make allowlist-* / make verify-presignup)
+# design: docs/design/signup-allowlist/architecture.md 「4. 運用 CLI」節を参照。
+#
+# 対象は実 AWS（--endpoint-url は指定しない）。認証はスイッチロール済みプロファイル
+# 前提（例: AWS_PROFILE=xxx make allowlist-list ENV=prod）。リージョンは既存の
+# AWS_REGION 変数に従う。テーブル名は memoru-signup-allowlist-$ENV。
+#
+# 値の受け渡し方針: ENV / ID / NOTE / COGNITO_USER_POOL_ARN はコマンドラインで
+# 渡された Make 変数をシェル環境変数としてレシピに渡し、レシピ内では Make の
+# テキスト展開（$(ID) 等）を一切経由させず、シェル側で "$$ID" のように参照する。
+# 理由: Make の変数展開はレシピ文字列に対する単純なテキスト置換のため、値中の
+# ダブルクォートが失われたり（例: NOTE='友人 "A"' が展開後に 友人 A になる）、
+# 値に $(...) を含むと（環境変数経由なら無害な文字列のはずが）意図せぬ形で
+# コマンド置換の材料になりうる。環境変数として渡せば、シェルが変数値をクォート内
+# でリテラルとして扱うため、この種の破損・注入を避けられる。
+#
+# ただし単純に `export ENV ID NOTE COGNITO_USER_POOL_ARN` とするだけでは不十分
+# （過去に採用し、レビューで指摘された不具合）: コマンドライン変数（make VAR=...）
+# は再帰展開変数として保持されるため、export が子プロセス環境を構築する際に
+# Make が値を再展開し、値中の単一の `$` が「Make 変数参照の開始」とみなされて
+# 消費されてしまう（例: NOTE='cost $5' が cost に化ける。$ は RFC 5322 の atext に
+# 含まれ email の local-part として正当な文字であり、これは正しさの問題）。
+# そこで `$(value VAR)` で未展開の生値を取り出し、即時展開変数（:=）として
+# ALLOWLIST_RAW_* に固定してから export する。$(value ...) は変数の中身を展開せず
+# 生のテキストとして返し、`:=` はその時点の値をそのまま代入する（右辺を再展開
+# しない）ため、値中の $ はリテラルのまま保持され、それを export しても再展開は
+# 発生しない（fake-aws シムで実測確認済み。ID='user$tag@example.com',
+# NOTE='cost $5, home=$HOME' がリテラルのまま子プロセスに渡ることを確認）。
+# なお、値がコマンドラインではなく環境変数経由で渡された場合
+# （例: `NOTE='cost $5' make allowlist-add ...`）も $(value NOTE) は生値を返すため
+# 同様に機能する（実測確認済み）。
+#
+# identifier 正規化: ID が "idp#" で始まればそのまま使用し、それ以外は全角/半角問わず
+# 空白を除去して小文字化した上で "email#" を前置する（LINE の identifier は必ず
+# allowlist-list の出力からコピーすること。手入力しない）。email 側は前後に限らず
+# 混入した空白も除去する（services 側の _normalize_email の trim+小文字化と対称）。
+# 正規化・タイムスタンプ生成・NOTE 有無判定はすべて python3 -c 側で
+# os.environ["ID"] / os.environ.get("NOTE") を読んで行う（Make 変数を経由しない）。
+# python3 -c のコード文字列自体には Make 変数はもちろん `$` 文字を一切含めない
+# （$$ エスケープが不要な状態にすることで、Make のテキスト展開の影響を受けないことを
+# 保証する）。
+#
+# NOTE / ID の JSON 埋め込み: ID や NOTE にシングルクォートが含まれる値（例:
+# NOTE="friend's account"）を、そのままシングルクォートで囲んだ --item / --key /
+# --expression-attribute-values の JSON リテラルに埋め込むとシェル構文エラーになる。
+# そのため python3 の json.dumps で JSON リテラル化した上で、シェル変数に代入してから
+# ダブルクォート展開 ("$$VAR") で aws コマンドへ渡す（この形式ならシェル変数の中身に
+# 任意の文字が含まれていても再解釈されず安全に1引数として渡る）。
+#
+# 使い方:
+#   make allowlist-add     ENV=prod ID=friend@example.com NOTE="大学の友人"
+#   make allowlist-list    ENV=prod
+#   make allowlist-approve ENV=prod ID='idp#line_u1234...' NOTE="..."
+#   make allowlist-remove  ENV=prod ID=friend@example.com
+#   make verify-presignup  ENV=prod COGNITO_USER_POOL_ARN=arn:aws:cognito-idp:...
+# ------------------------------------------------------------
+ALLOWLIST_RAW_ENV := $(value ENV)
+ALLOWLIST_RAW_ID := $(value ID)
+ALLOWLIST_RAW_NOTE := $(value NOTE)
+ALLOWLIST_RAW_POOL_ARN := $(value COGNITO_USER_POOL_ARN)
+export ALLOWLIST_RAW_ENV ALLOWLIST_RAW_ID ALLOWLIST_RAW_NOTE ALLOWLIST_RAW_POOL_ARN
+
+allowlist-add: ## Add an approved entry to the signup allowlist (ENV, ID required; NOTE optional)
+	@if [ -z "$$ALLOWLIST_RAW_ENV" ]; then \
+		echo "ERROR: ENV が未設定です（例: ENV=prod）。" >&2; \
+		exit 1; \
+	fi
+	@if [ -z "$$ALLOWLIST_RAW_ID" ]; then \
+		echo "ERROR: ID が未設定です（例: ID=friend@example.com または ID='idp#line_u1234...'）。" >&2; \
+		exit 1; \
+	fi
+	@ITEM_JSON=$$(python3 -c "import json, os; from datetime import datetime, timezone; ident = os.environ['ALLOWLIST_RAW_ID']; norm = ident if ident.startswith('idp#') else 'email#' + ''.join(ident.split()).lower(); now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'); print(json.dumps({'identifier': {'S': norm}, 'status': {'S': 'approved'}, 'note': {'S': os.environ.get('ALLOWLIST_RAW_NOTE', '')}, 'created_at': {'S': now}, 'updated_at': {'S': now}}))"); \
+	TABLE="memoru-signup-allowlist-$$ALLOWLIST_RAW_ENV"; \
+	aws dynamodb put-item \
+		--region "$(AWS_REGION)" \
+		--table-name "$$TABLE" \
+		--item "$$ITEM_JSON" \
+		--condition-expression "attribute_not_exists(identifier)" \
+	|| { echo "ERROR: 既に登録済みです（pending からの承認は allowlist-approve を使用してください）。" >&2; exit 1; }
+
+allowlist-list: ## List all entries in the signup allowlist (ENV required)
+	@if [ -z "$$ALLOWLIST_RAW_ENV" ]; then \
+		echo "ERROR: ENV が未設定です（例: ENV=prod）。" >&2; \
+		exit 1; \
+	fi
+	@TABLE="memoru-signup-allowlist-$$ALLOWLIST_RAW_ENV"; \
+	aws dynamodb scan \
+		--region "$(AWS_REGION)" \
+		--table-name "$$TABLE" \
+		--query 'Items[*].{identifier:identifier.S,status:status.S,note:note.S,display_name:display_name.S,created_at:created_at.S}' \
+		--output table
+
+allowlist-approve: ## Approve a pending signup allowlist entry, ttl を解除 (ENV, ID required; NOTE optional)
+	@if [ -z "$$ALLOWLIST_RAW_ENV" ]; then \
+		echo "ERROR: ENV が未設定です（例: ENV=prod）。" >&2; \
+		exit 1; \
+	fi
+	@if [ -z "$$ALLOWLIST_RAW_ID" ]; then \
+		echo "ERROR: ID が未設定です（例: ID='idp#line_u1234...'。allowlist-list の出力からコピーする）。" >&2; \
+		exit 1; \
+	fi
+	@KEY_JSON=$$(python3 -c "import json, os; ident = os.environ['ALLOWLIST_RAW_ID']; norm = ident if ident.startswith('idp#') else 'email#' + ''.join(ident.split()).lower(); print(json.dumps({'identifier': {'S': norm}}))"); \
+	VALUES_JSON=$$(python3 -c "import json, os; from datetime import datetime, timezone; now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'); values = {':approved': {'S': 'approved'}, ':pending': {'S': 'pending'}, ':now': {'S': now}}; note = os.environ.get('ALLOWLIST_RAW_NOTE'); values.update({':note': {'S': note}} if note else {}); print(json.dumps(values))"); \
+	TABLE="memoru-signup-allowlist-$$ALLOWLIST_RAW_ENV"; \
+	if [ -n "$$ALLOWLIST_RAW_NOTE" ]; then \
+		UPDATE_EXPR='SET #s = :approved, updated_at = :now, note = :note REMOVE #t'; \
+	else \
+		UPDATE_EXPR='SET #s = :approved, updated_at = :now REMOVE #t'; \
+	fi; \
+	aws dynamodb update-item \
+		--region "$(AWS_REGION)" \
+		--table-name "$$TABLE" \
+		--key "$$KEY_JSON" \
+		--update-expression "$$UPDATE_EXPR" \
+		--expression-attribute-names '{"#s": "status", "#t": "ttl"}' \
+		--expression-attribute-values "$$VALUES_JSON" \
+		--condition-expression "attribute_exists(identifier) AND #s = :pending" \
+	|| { echo "ERROR: 該当する pending がありません（ID の誤り、または既に approved 済みの可能性があります。allowlist-list で確認してください）。" >&2; exit 1; }
+
+allowlist-remove: ## Remove an entry from the signup allowlist (ENV, ID required; 既存アカウントは削除されない)
+	@if [ -z "$$ALLOWLIST_RAW_ENV" ]; then \
+		echo "ERROR: ENV が未設定です（例: ENV=prod）。" >&2; \
+		exit 1; \
+	fi
+	@if [ -z "$$ALLOWLIST_RAW_ID" ]; then \
+		echo "ERROR: ID が未設定です（例: ID=friend@example.com または ID='idp#line_u1234...'）。" >&2; \
+		exit 1; \
+	fi
+	@KEY_JSON=$$(python3 -c "import json, os; ident = os.environ['ALLOWLIST_RAW_ID']; norm = ident if ident.startswith('idp#') else 'email#' + ''.join(ident.split()).lower(); print(json.dumps({'identifier': {'S': norm}}))"); \
+	TABLE="memoru-signup-allowlist-$$ALLOWLIST_RAW_ENV"; \
+	aws dynamodb delete-item \
+		--region "$(AWS_REGION)" \
+		--table-name "$$TABLE" \
+		--key "$$KEY_JSON"
+
+verify-presignup: ## Verify Cognito PreSignUp trigger wiring / detect drift (ENV, COGNITO_USER_POOL_ARN required)
+	@if [ -z "$$ALLOWLIST_RAW_ENV" ]; then \
+		echo "ERROR: ENV が未設定です（例: ENV=prod）。" >&2; \
+		exit 1; \
+	fi
+	@if [ -z "$$ALLOWLIST_RAW_POOL_ARN" ]; then \
+		echo "ERROR: COGNITO_USER_POOL_ARN が未設定です。" >&2; \
+		echo "  例: export COGNITO_USER_POOL_ARN=arn:aws:cognito-idp:ap-northeast-1:123456789012:userpool/ap-northeast-1_xxxxxxxxx" >&2; \
+		exit 1; \
+	fi
+	@POOL_ID="$${ALLOWLIST_RAW_POOL_ARN##*/}"; \
+	CONFIGURED=$$(aws cognito-idp describe-user-pool \
+			--region "$(AWS_REGION)" \
+			--user-pool-id "$$POOL_ID" \
+			--query 'UserPool.LambdaConfig.PreSignUp' --output text); \
+	EXPECTED=$$(aws lambda get-function-configuration \
+			--region "$(AWS_REGION)" \
+			--function-name "memoru-presignup-$$ALLOWLIST_RAW_ENV" \
+			--query 'FunctionArn' --output text); \
+	if [ -n "$$CONFIGURED" ] && [ "$$CONFIGURED" != "None" ] && [ "$$CONFIGURED" = "$$EXPECTED" ]; then \
+		echo "OK: PreSignUp トリガー配線済み ($$CONFIGURED)"; \
+	else \
+		echo "ERROR: PreSignUp トリガーが未配線、またはドリフトしています（フェイルオープンの可能性）。" >&2; \
+		echo "  UserPool.LambdaConfig.PreSignUp = $$CONFIGURED" >&2; \
+		echo "  memoru-presignup-$$ALLOWLIST_RAW_ENV の FunctionArn = $$EXPECTED" >&2; \
+		exit 1; \
+	fi

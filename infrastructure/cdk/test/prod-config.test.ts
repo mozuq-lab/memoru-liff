@@ -19,6 +19,8 @@ function validEnv(): NodeJS.ProcessEnv {
     LINE_LOGIN_CHANNEL_SECRET_NAME: 'memoru-prod-line-channel-secret',
     MEMORU_PROD_API_ENDPOINT:
       'https://abcd1234.execute-api.ap-northeast-1.amazonaws.com',
+    MEMORU_PROD_PRESIGNUP_LAMBDA_ARN:
+      'arn:aws:lambda:ap-northeast-1:999988887777:function:memoru-presignup-prod',
   };
 }
 
@@ -37,6 +39,9 @@ describe('resolveProdConfig', () => {
       );
       expect(cfg.apiEndpoint).toBe(
         'https://abcd1234.execute-api.ap-northeast-1.amazonaws.com',
+      );
+      expect(cfg.preSignUpLambdaArn).toBe(
+        'arn:aws:lambda:ap-northeast-1:999988887777:function:memoru-presignup-prod',
       );
     });
 
@@ -123,6 +128,7 @@ describe('resolveProdConfig', () => {
       expect(message).toContain('MEMORU_PROD_CALLBACK_URLS');
       expect(message).toContain('MEMORU_PROD_LOGOUT_URLS');
       expect(message).toContain('MEMORU_PROD_API_ENDPOINT');
+      expect(message).toContain('MEMORU_PROD_PRESIGNUP_LAMBDA_ARN');
     });
 
     test('空文字列は未設定として扱う', () => {
@@ -192,6 +198,68 @@ describe('resolveProdConfig', () => {
       env.MEMORU_PROD_LIFF_CERT_ARN =
         'arn:aws:acm:ap-northeast-1:999988887777:certificate/cccc-dddd';
       expect(() => resolveProdConfig(env)).toThrow(/MEMORU_PROD_LIFF_CERT_ARN/);
+    });
+  });
+
+  describe('PreSignUp トリガー Lambda ARN', () => {
+    test('未設定なら不足として列挙される', () => {
+      const env = validEnv();
+      delete env.MEMORU_PROD_PRESIGNUP_LAMBDA_ARN;
+      expect(() => resolveProdConfig(env)).toThrow(
+        /MEMORU_PROD_PRESIGNUP_LAMBDA_ARN/,
+      );
+    });
+
+    test('空文字列は未設定として扱う', () => {
+      const env = validEnv();
+      env.MEMORU_PROD_PRESIGNUP_LAMBDA_ARN = '   ';
+      expect(() => resolveProdConfig(env)).toThrow(
+        /MEMORU_PROD_PRESIGNUP_LAMBDA_ARN/,
+      );
+    });
+
+    test('プレースホルダを含む値は拒否される', () => {
+      const env = validEnv();
+      env.MEMORU_PROD_PRESIGNUP_LAMBDA_ARN =
+        'arn:aws:lambda:ap-northeast-1:123456789012:function:placeholder';
+      expect(() => resolveProdConfig(env)).toThrow(
+        /プレースホルダ[\s\S]*MEMORU_PROD_PRESIGNUP_LAMBDA_ARN/,
+      );
+    });
+
+    test('Lambda ARN 形式でない値は拒否される', () => {
+      const env = validEnv();
+      env.MEMORU_PROD_PRESIGNUP_LAMBDA_ARN =
+        'arn:aws:acm:ap-northeast-1:999988887777:certificate/aaaa-bbbb';
+      expect(() => resolveProdConfig(env)).toThrow(
+        /MEMORU_PROD_PRESIGNUP_LAMBDA_ARN/,
+      );
+    });
+
+    test('リージョンが ap-northeast-1 でない Lambda ARN は拒否される', () => {
+      const env = validEnv();
+      env.MEMORU_PROD_PRESIGNUP_LAMBDA_ARN =
+        'arn:aws:lambda:us-east-1:999988887777:function:memoru-presignup-prod';
+      expect(() => resolveProdConfig(env)).toThrow(
+        /MEMORU_PROD_PRESIGNUP_LAMBDA_ARN/,
+      );
+    });
+
+    test('BOOTSTRAP-NO-TRIGGER センチネルは許容され preSignUpLambdaArn が undefined になる', () => {
+      const env = validEnv();
+      env.MEMORU_PROD_PRESIGNUP_LAMBDA_ARN = 'BOOTSTRAP-NO-TRIGGER';
+      const cfg = resolveProdConfig(env);
+      expect(cfg.preSignUpLambdaArn).toBeUndefined();
+    });
+
+    test('正しい Lambda ARN が通る', () => {
+      const env = validEnv();
+      env.MEMORU_PROD_PRESIGNUP_LAMBDA_ARN =
+        'arn:aws:lambda:ap-northeast-1:999988887777:function:memoru-presignup-prod';
+      const cfg = resolveProdConfig(env);
+      expect(cfg.preSignUpLambdaArn).toBe(
+        'arn:aws:lambda:ap-northeast-1:999988887777:function:memoru-presignup-prod',
+      );
     });
   });
 });

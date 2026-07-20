@@ -1,5 +1,5 @@
 import * as cdk from 'aws-cdk-lib';
-import { Template } from 'aws-cdk-lib/assertions';
+import { Annotations, Match, Template } from 'aws-cdk-lib/assertions';
 import { CognitoStack, type CognitoStackProps } from '../lib/cognito-stack';
 
 const devProps: CognitoStackProps = {
@@ -336,6 +336,74 @@ describe('CognitoStack', () => {
         };
         const template = Template.fromStack(createStack(propsWithEmptyLine));
         template.resourceCountIs('AWS::Cognito::UserPoolIdentityProvider', 0);
+      });
+    });
+  });
+
+  describe('PreSignUp トリガー（サインアップ許可リスト）', () => {
+    const presignupLambdaArn =
+      'arn:aws:lambda:ap-northeast-1:999988887777:function:memoru-presignup-dev';
+
+    test('preSignUpLambdaArn 指定時に LambdaConfig.PreSignUp が設定される', () => {
+      const propsWithPreSignUp: CognitoStackProps = {
+        ...devProps,
+        preSignUpLambdaArn: presignupLambdaArn,
+      };
+      const template = Template.fromStack(createStack(propsWithPreSignUp));
+      template.hasResourceProperties('AWS::Cognito::UserPool', {
+        LambdaConfig: {
+          PreSignUp: presignupLambdaArn,
+        },
+      });
+    });
+
+    test('preSignUpLambdaArn 指定時に Lambda Permission は CDK 側で作成されない（SAM 側で一元管理）', () => {
+      const propsWithPreSignUp: CognitoStackProps = {
+        ...devProps,
+        preSignUpLambdaArn: presignupLambdaArn,
+      };
+      const template = Template.fromStack(createStack(propsWithPreSignUp));
+      template.resourceCountIs('AWS::Lambda::Permission', 0);
+    });
+
+    test('未指定時は LambdaConfig が設定されない', () => {
+      const template = Template.fromStack(createStack(devProps));
+      const userPools = template.findResources('AWS::Cognito::UserPool');
+      const userPool = Object.values(userPools)[0] as {
+        Properties: Record<string, unknown>;
+      };
+      expect(userPool.Properties.LambdaConfig).toBeUndefined();
+    });
+
+    describe('未配線時の警告（prod のみ）', () => {
+      test('prod + preSignUpLambdaArn 未指定で Annotations warning が出る', () => {
+        const stack = createStack(prodProps);
+        Template.fromStack(stack);
+        Annotations.fromStack(stack).hasWarning(
+          '*',
+          Match.stringLikeRegexp('PreSignUp トリガー'),
+        );
+      });
+
+      test('prod + preSignUpLambdaArn 指定時は warning が出ない', () => {
+        const stack = createStack({
+          ...prodProps,
+          preSignUpLambdaArn: presignupLambdaArn,
+        });
+        Template.fromStack(stack);
+        Annotations.fromStack(stack).hasNoWarning(
+          '*',
+          Match.stringLikeRegexp('PreSignUp トリガー'),
+        );
+      });
+
+      test('dev + preSignUpLambdaArn 未指定では warning が出ない', () => {
+        const stack = createStack(devProps);
+        Template.fromStack(stack);
+        Annotations.fromStack(stack).hasNoWarning(
+          '*',
+          Match.stringLikeRegexp('PreSignUp トリガー'),
+        );
       });
     });
   });

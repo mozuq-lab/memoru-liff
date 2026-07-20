@@ -64,6 +64,9 @@ if (!stage || stage === 'dev') {
       lineLoginChannelSecret: process.env.LINE_LOGIN_CHANNEL_SECRET_NAME
         ? undefined
         : process.env.LINE_LOGIN_CHANNEL_SECRET,
+      // サインアップ許可リスト: PreSignUp トリガー Lambda（SAM backend が所有）の ARN。
+      // dev は任意（未設定ならトリガーなし＝現状維持）。
+      preSignUpLambdaArn: process.env.MEMORU_DEV_PRESIGNUP_LAMBDA_ARN,
     }),
 
     new KeycloakStack(app, 'MemoruKeycloakDev', {
@@ -116,6 +119,10 @@ if (stage === 'prod') {
       lineLoginChannelId: prod.lineLoginChannelId,
       // prod は Secrets Manager 必須 (CognitoStack 側で平文を弾く)
       lineLoginChannelSecretName: prod.lineLoginChannelSecretName,
+      // サインアップ許可リスト: PreSignUp トリガー Lambda（SAM backend が所有）の ARN。
+      // resolveProdConfig() が MEMORU_PROD_PRESIGNUP_LAMBDA_ARN の必須化・センチネル
+      // (BOOTSTRAP-NO-TRIGGER) 許容・ARN 形式検証を行う。
+      preSignUpLambdaArn: prod.preSignUpLambdaArn,
     }),
 
     new KeycloakStack(app, 'MemoruKeycloakProd', {
