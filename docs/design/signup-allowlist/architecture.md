@@ -257,11 +257,13 @@ make verify-presignup  ENV=prod COGNITO_USER_POOL_ARN=arn:aws:cognito-idp:...  #
 - 実体は `aws dynamodb put-item / scan / update-item / delete-item` の薄いラッパー。
   テーブル名 `memoru-signup-allowlist-$ENV` を組み立て、メールは小文字化して `email#` を付与、
   `idp#` 始まりはそのまま使う。ID/NOTE は Make のテキスト展開（`$(ID)` 等）を経由させず、
-  `export ENV ID NOTE COGNITO_USER_POOL_ARN` でシェル環境変数としてレシピに渡した上で
-  `"$$ID"` のようにシェル側で参照する。Make の変数展開は単純なテキスト置換のため、
-  値中のダブルクォートが失われたり（`NOTE='友人 "A"'` → `友人 A`）、値に含まれる
-  `$(...)` がコマンド置換として実行されたりする問題があり、環境変数経由に統一することで
-  無害化している。
+  シェル環境変数として渡した上で `"$$ID"` のようにシェル側で参照する（値中のダブルクォート
+  消失や `$(...)` のコマンド置換実行を防止）。ただし単純な `export ENV ID NOTE
+  COGNITO_USER_POOL_ARN` では不十分で、コマンドライン変数（`make VAR=...`）は再帰展開のため
+  export 時に値中の `$` が Make 変数参照として消費されてしまう（`NOTE='cost $5'` → `cost `。
+  `$` は email local-part として正当な文字であり正しさの問題）。そのため `$(value VAR)` で
+  未展開の生値を取り出し、即時変数 `ALLOWLIST_RAW_*` に固定してから export し、レシピは
+  `"$$ALLOWLIST_RAW_ID"` 等を参照する。
 - `allowlist-add` は `ConditionExpression: attribute_not_exists(identifier)` で誤上書きを防止
   （既存があればエラー表示。pending からの昇格は `allowlist-approve` を使う）。
 - `allowlist-approve` は `ConditionExpression: attribute_exists(identifier) AND #s = :pending` を
