@@ -545,3 +545,87 @@ describe('F-3: CardsContext 古いリクエストの結果破棄', () => {
     expect(result.current.error).toBeNull();
   });
 });
+
+/**
+ * High-2: Abort 後に Loading が永久残留する不具合の回帰テスト
+ * 【背景】: fetchCards/fetchDueCards の finally が `!options?.signal?.aborted` を
+ *   条件に含んでいたため、フェッチ中に画面遷移して unmount 時のクリーンアップが
+ *   abort すると isCardsLoading/isDueCardsLoading が true のまま残留していた。
+ *   CardsProvider は最上位にあるため、SPA 内の操作では回復不能だった。
+ */
+describe('High-2: CardsContext Abort 後の Loading 残留防止', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(cardsApi.getDueCount).mockResolvedValue(0);
+  });
+
+  it('fetchCards がフェッチ中に abort されても isCardsLoading が false に戻ること', async () => {
+    let rejectFn!: (reason?: unknown) => void;
+    vi.mocked(cardsApi.getCards).mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectFn = reject;
+        }),
+    );
+
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <CardsProvider>{children}</CardsProvider>
+    );
+    const { result } = renderHook(() => useCardsContext(), { wrapper });
+
+    const controller = new AbortController();
+    let fetchPromise!: Promise<void>;
+    act(() => {
+      fetchPromise = result.current.fetchCards('deck-x', { signal: controller.signal });
+    });
+
+    await waitFor(() => {
+      expect(result.current.isCardsLoading).toBe(true);
+    });
+
+    // 【中断シミュレート】: unmount 時のクリーンアップ (controller.abort()) により
+    //   fetch 自体が AbortError で reject する状況を再現する
+    await act(async () => {
+      controller.abort();
+      rejectFn(new DOMException('Aborted', 'AbortError'));
+      await fetchPromise;
+    });
+
+    // 【検証】: abort 済みでも最新リクエストなら isCardsLoading は false に戻る
+    expect(result.current.isCardsLoading).toBe(false);
+  });
+
+  it('fetchDueCards がフェッチ中に abort されても isDueCardsLoading が false に戻ること', async () => {
+    let rejectFn!: (reason?: unknown) => void;
+    vi.mocked(cardsApi.getDueCards).mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectFn = reject;
+        }),
+    );
+
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <CardsProvider>{children}</CardsProvider>
+    );
+    const { result } = renderHook(() => useCardsContext(), { wrapper });
+
+    const controller = new AbortController();
+    let fetchPromise!: Promise<void>;
+    act(() => {
+      fetchPromise = result.current.fetchDueCards('deck-x', { signal: controller.signal });
+    });
+
+    await waitFor(() => {
+      expect(result.current.isDueCardsLoading).toBe(true);
+    });
+
+    await act(async () => {
+      controller.abort();
+      rejectFn(new DOMException('Aborted', 'AbortError'));
+      await fetchPromise;
+    });
+
+    // 【検証】: abort 済みでも最新リクエストなら isDueCardsLoading は false に戻る
+    expect(result.current.isDueCardsLoading).toBe(false);
+  });
+});

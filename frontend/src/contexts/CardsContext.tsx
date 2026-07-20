@@ -87,8 +87,14 @@ export const CardsProvider = ({ children }: CardsProviderProps) => {
       // 【W-30修正】: 型安全なエラーラッピング
       setError(toError(err));
     } finally {
-      // F-3: 最新リクエストかつ未中断のときのみローディング解除
-      if (!options?.signal?.aborted && requestId === cardsRequestIdRef.current) {
+      // High-2: abort されても最新リクエストであれば必ずローディングを解除する。
+      //   ここで aborted を理由に解除をスキップすると、フェッチ中に画面遷移して
+      //   unmount 時のクリーンアップが abort した場合に isCardsLoading が
+      //   true のまま残留し、CardsProvider が最上位にあるため SPA 内では
+      //   回復できなくなる（フルリロードのみ）。requestId ガードにより、
+      //   後続リクエストが既に走っている場合の誤解除は起きない
+      //  （新リクエスト開始時に ref が更新されるため）。
+      if (requestId === cardsRequestIdRef.current) {
         setIsCardsLoading(false);
       }
     }
@@ -120,8 +126,9 @@ export const CardsProvider = ({ children }: CardsProviderProps) => {
       // 【W-30修正】: 型安全なエラーラッピング
       setError(toError(err));
     } finally {
-      // F-3: 最新リクエストかつ未中断のときのみローディング解除
-      if (!options?.signal?.aborted && requestId === dueCardsRequestIdRef.current) {
+      // High-2: abort されても最新リクエストであれば必ずローディングを解除する
+      //   （fetchCards と同じ理由。詳細は fetchCards 側のコメント参照）。
+      if (requestId === dueCardsRequestIdRef.current) {
         setIsDueCardsLoading(false);
       }
     }

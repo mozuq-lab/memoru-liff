@@ -396,6 +396,10 @@ export const useReviewSession = (
    */
   const handleUndo = useCallback(
     async (index: number) => {
+      // High-4: 再入ガード — Undo 実行中に別行の Undo が発火しても無視する。
+      //   ガードなしだと regradeCardIndex / undoingIndex（単一値）が競合し、
+      //   片方の再採点機会が失われたり reviewedCount が二重減算されたりする。
+      if (isUndoing) return;
       const result = reviewResults[index];
       setIsUndoing(true);
       setUndoingIndex(index);
@@ -435,7 +439,7 @@ export const useReviewSession = (
         }
       }
     },
-    [reviewResults],
+    [reviewResults, isUndoing],
   );
 
   const handleFlip = useCallback(() => {

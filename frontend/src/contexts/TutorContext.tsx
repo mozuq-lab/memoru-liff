@@ -222,6 +222,17 @@ export const TutorProvider = ({ children }: TutorProviderProps) => {
           resetTimeoutTimer();
           return true;
         }
+        // High-3: 指定デッキにアクティブセッションが見つからなかった場合、
+        //   別デッキの session/messages が state に残っていればクリアする。
+        //   これをしないと、デッキ A のセッションが残ったまま resumeSession(B) が
+        //   false を返した際に古い会話が表示され続け、sendMessage が A の
+        //   session_id へ送信されてしまう（TutorProvider は最上位で state が永続するため）。
+        if (session && session.deck_id !== deckId) {
+          setSession(null);
+          setMessages([]);
+          setIsLimitReached(false);
+          clearTimeoutTimer();
+        }
         return false;
       } catch {
         return false;
@@ -229,7 +240,7 @@ export const TutorProvider = ({ children }: TutorProviderProps) => {
         setIsLoading(false);
       }
     },
-    [resetTimeoutTimer],
+    [session, resetTimeoutTimer, clearTimeoutTimer],
   );
 
   const value = useMemo(

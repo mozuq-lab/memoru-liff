@@ -609,3 +609,189 @@ class TestShouldNotifyErrorCases:
         # 【結果検証】: 例外が発生せず、Asia/Tokyo フォールバックで True が返ること
         # 【期待値確認】: Asia/Tokyo でフォールバックし UTC 00:00 = JST 09:00 → notification_time 09:00 と一致
         assert result is True  # 【確認内容】: 無効 TZ は Asia/Tokyo にフォールバックし判定継続のため True 🟡
+
+
+# ===========================================================================
+# Medium-1: get_local_date_str のテスト（冪等性キーのローカル日付化）
+# ===========================================================================
+
+
+class TestGetLocalDateStr:
+    """
+    Medium-1: 冪等性キー（claim に渡す日付）をユーザーのローカル日付にする修正の単体テスト。
+
+    従来は due_push_handler.py の current_time.strftime('%Y-%m-%d')（UTC 日付）を
+    そのまま claim キーに使っていたため、UTC 日付境界をまたぐ実行で異なるキーとなり
+    二重通知が発生していた。get_local_date_str はユーザーのタイムゾーンでの
+    ローカル日付を返すことでこれを防ぐ。
+    """
+
+    def test_get_local_date_str_utc_date_boundary_crossing_same_local_date(
+        self, notification_service
+    ):
+        """
+        【テスト目的】: UTC 日付境界をまたぐ 2 時刻でも、JST では同一ローカル日付になることを確認する
+        【テスト内容】: UTC 前日 23:55 と UTC 当日 00:00 はどちらも JST では 2024-01-05 になる
+        🔵 Medium-1: 冪等性キーの日付境界バグの回帰確認
+        """
+        user = _make_user("test-medium1-a", timezone_str="Asia/Tokyo", notification_time="09:00")
+
+        # UTC 2024-01-04 23:55 = JST 2024-01-05 08:55
+        before_boundary = datetime(2024, 1, 4, 23, 55, 0, tzinfo=timezone.utc)
+        # UTC 2024-01-05 00:00 = JST 2024-01-05 09:00
+        after_boundary = datetime(2024, 1, 5, 0, 0, 0, tzinfo=timezone.utc)
+
+        date_before = notification_service.get_local_date_str(user, before_boundary)
+        date_after = notification_service.get_local_date_str(user, after_boundary)
+
+        # 【結果検証】: UTC 日付は 01-04 と 01-05 で異なるが、ローカル日付はどちらも 01-05 で一致する
+        assert date_before == "2024-01-05"
+        assert date_after == "2024-01-05"
+        assert date_before == date_after
+
+    def test_get_local_date_str_matches_should_notify_timezone(self, notification_service):
+        """
+        【テスト目的】: get_local_date_str が should_notify と同じタイムゾーン変換を使うことを確認する
+        【テスト内容】: America/New_York (UTC-5 冬季) で UTC 14:00 → ローカル日付が同日になること
+        🔵 Medium-1: should_notify とタイムゾーン解決ロジックを共有する設計の確認
+        """
+        user = _make_user("test-medium1-b", timezone_str="America/New_York", notification_time="09:00")
+
+        current_utc = datetime(2024, 1, 1, 14, 0, 0, tzinfo=timezone.utc)  # EST 09:00 同日
+
+        result = notification_service.get_local_date_str(user, current_utc)
+
+        assert result == "2024-01-01"
+
+    def test_get_local_date_str_default_timezone_when_missing(self, notification_service):
+        """
+        【テスト目的】: settings に timezone キーがない場合、Asia/Tokyo にフォールバックすることを確認する
+        🟡 REQ-V2-112: デフォルトタイムゾーン Asia/Tokyo（should_notify と同じ挙動）
+        """
+        user = User(
+            user_id="test-medium1-c",
+            line_user_id="U1234567890abcdef1234567890abcdef",
+            settings={"notification_time": "09:00"},  # timezone キーなし
+            created_at=datetime.now(timezone.utc),
+        )
+
+        # UTC 前日 23:55 → Asia/Tokyo デフォルトで翌日 08:55
+        current_utc = datetime(2024, 1, 4, 23, 55, 0, tzinfo=timezone.utc)
+
+        result = notification_service.get_local_date_str(user, current_utc)
+
+        assert result == "2024-01-05"
+
+    def test_get_local_date_str_invalid_timezone_falls_back_to_default(
+        self, notification_service
+    ):
+        """
+        【テスト目的】: 無効なタイムゾーン名でも例外を発生させず Asia/Tokyo にフォールバックすることを確認する
+        🟡 should_notify の TC-008 と同様のフォールバック挙動
+        """
+        user = User(
+            user_id="test-medium1-d",
+            line_user_id="U1234567890abcdef1234567890abcdef",
+            settings={
+                "timezone": "Invalid/Timezone",
+                "notification_time": "09:00",
+            },
+            created_at=datetime.now(timezone.utc),
+        )
+
+        current_utc = datetime(2024, 1, 4, 23, 55, 0, tzinfo=timezone.utc)
+
+        result = notification_service.get_local_date_str(user, current_utc)
+
+        assert result == "2024-01-05"
+
+
+# ===========================================================================
+# PR レビュー指摘の回帰テスト: get_claim_date_str
+# （ローカル日付境界付近の notification_time で claim キーが割れて二重送信する不具合）
+# ===========================================================================
+
+
+class TestGetClaimDateStr:
+    """
+    PR レビュー指摘: notification_time がローカル日付境界付近（00:00, 23:58 等）にある場合、
+    get_local_date_str（= 現在時刻のローカル日付）を claim キーに使うと、隣接する 2 回の
+    実行がどちらも ±5分マッチしつつ異なる暦日の claim キーになり二重送信が再発する。
+
+    get_claim_date_str は should_notify と同じ 720分閾値の日付境界補正を使って
+    「マッチする notification_time の occurrence」が属する暦日を返すことで、
+    隣接する 2 回の実行が同じ claim キーになるようにする。
+    """
+
+    def test_local_midnight_boundary_both_executions_share_claim_date(
+        self, notification_service
+    ):
+        """
+        【テスト目的】: notification_time='00:00' の場合、23:55 ローカル実行と
+        翌日 00:00 ローカル実行の claim 日付が一致することを確認する
+        【テスト内容】:
+          - UTC 2024-01-04T14:55:00Z = JST 2024-01-04 23:55（notification_time 00:00 と差分5分）
+          - UTC 2024-01-04T15:00:00Z = JST 2024-01-05 00:00（notification_time 00:00 と差分0分）
+          いずれも should_notify=True になるが、マッチ相手の occurrence は
+          どちらも「2024-01-05 の 00:00」であるため claim 日付は "2024-01-05" で一致するべき
+        🔵 PR レビュー指摘: ローカル日付境界での二重送信の回帰確認
+        """
+        user = _make_user("test-claim-a", timezone_str="Asia/Tokyo", notification_time="00:00")
+
+        before_midnight = datetime(2024, 1, 4, 14, 55, 0, tzinfo=timezone.utc)
+        at_midnight = datetime(2024, 1, 4, 15, 0, 0, tzinfo=timezone.utc)
+
+        # 【前提確認】: 両時刻とも should_notify が True になること（境界ケースの前提）
+        assert notification_service.should_notify(user, before_midnight) is True
+        assert notification_service.should_notify(user, at_midnight) is True
+
+        claim_before = notification_service.get_claim_date_str(user, before_midnight)
+        claim_at = notification_service.get_claim_date_str(user, at_midnight)
+
+        assert claim_before == "2024-01-05"
+        assert claim_at == "2024-01-05"
+        assert claim_before == claim_at
+
+    def test_late_night_notification_time_00_02_local_claims_previous_day(
+        self, notification_service
+    ):
+        """
+        【テスト目的】: notification_time='23:58' で 00:02 ローカル実行時、claim 日付が
+        「実行時刻のローカル日付」ではなく「マッチした occurrence（前日 23:58）の日付」に
+        なる（delta < -720 側の occurrence 補正）ことを確認する
+        【テスト内容】: America/New_York (UTC-5 冬季) で UTC 05:02 → EST 00:02。
+          notification_time 23:58 との単純差分は 1436分 > 720 → 4分に補正され should_notify=True。
+          マッチ相手の occurrence は「前日 23:58」なので claim 日付は前日になるべき
+        🔵 PR レビュー指摘: notification_time が 23 時台後半の場合の前日側 occurrence 補正
+        """
+        user = _make_user(
+            "test-claim-b", timezone_str="America/New_York", notification_time="23:58"
+        )
+
+        # UTC 2024-01-01 05:02 = EST 2024-01-01 00:02（冬季 UTC-5）
+        current_utc = datetime(2024, 1, 1, 5, 2, 0, tzinfo=timezone.utc)
+
+        # 【前提確認】: should_notify が True になること（TC-014 と同型の境界ケース）
+        assert notification_service.should_notify(user, current_utc) is True
+
+        result = notification_service.get_claim_date_str(user, current_utc)
+
+        # 【結果検証】: 実行時刻自体のローカル日付は 2024-01-01 だが、
+        # マッチした occurrence（前日 23:58）の日付である 2023-12-31 が claim 日付になる
+        assert result == "2023-12-31"
+
+    def test_default_09_00_case_matches_local_date(self, notification_service):
+        """
+        【テスト目的】: notification_time='09:00' のような通常ケースでは occurrence 補正が
+        発生せず、claim 日付が現在時刻のローカル日付とそのまま一致することを確認する
+        （回帰: 既存の 09:00 JST 系テストが引き続き成立することの単体レベルでの裏付け）
+        """
+        user = _make_user("test-claim-c", timezone_str="Asia/Tokyo", notification_time="09:00")
+
+        current_utc = datetime(2024, 1, 5, 0, 0, 0, tzinfo=timezone.utc)  # JST 2024-01-05 09:00
+
+        result = notification_service.get_claim_date_str(user, current_utc)
+        local_date = notification_service.get_local_date_str(user, current_utc)
+
+        assert result == "2024-01-05"
+        assert result == local_date

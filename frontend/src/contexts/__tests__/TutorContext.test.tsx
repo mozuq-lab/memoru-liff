@@ -79,6 +79,10 @@ function TestConsumer() {
       />
       <button data-testid="send" onClick={() => ctx.sendMessage("テスト")} />
       <button data-testid="end" onClick={() => ctx.endSession()} />
+      <button
+        data-testid="resume-other-deck"
+        onClick={() => ctx.resumeSession("deck_456")}
+      />
     </div>
   );
 }
@@ -322,6 +326,42 @@ describe("TutorContext", () => {
       await waitFor(() => {
         expect(screen.getByTestId("session-id").textContent).toBe("none");
       });
+    });
+  });
+
+  describe("resumeSession (High-3: デッキ不一致時の既存セッションクリア)", () => {
+    it("別デッキにアクティブセッションが見つからない場合、残っていた session/messages をクリアする", async () => {
+      // 【背景】: デッキ A (deck_123) のセッションが Context に残ったまま
+      //   別デッキ (deck_456) を開いた際、resumeSession が該当デッキの
+      //   アクティブセッションを見つけられなかった場合は古い state を
+      //   クリアしないと、A の会話が表示され続け sendMessage が A の
+      //   session_id へ送信されてしまう（High-3 の回帰テスト）。
+      const session = makeSession(); // deck_id: "deck_123"
+      mockStartSession.mockResolvedValue(session);
+      mockListSessions.mockResolvedValue({ sessions: [], total: 0 });
+
+      renderWithProvider();
+      await act(async () => {
+        screen.getByTestId("start").click();
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId("session-id").textContent).toBe(
+          "tutor_test-session",
+        );
+      });
+
+      // deck_456 に対する resumeSession は既存セッションを見つけられない
+      await act(async () => {
+        screen.getByTestId("resume-other-deck").click();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("session-id").textContent).toBe("none");
+      });
+      expect(
+        JSON.parse(screen.getByTestId("messages").textContent ?? "[]"),
+      ).toEqual([]);
+      expect(mockListSessions).toHaveBeenCalledWith("active", "deck_456");
     });
   });
 

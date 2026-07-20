@@ -20,6 +20,56 @@ const renderReviewCompleteWithResults = (reviewedCount: number, results: Session
   );
 };
 
+describe('High-4: Undo 実行中の全行 disabled 化', () => {
+  // 【背景】: ReviewComplete が各行に `isUndoing={isUndoing && undoingIndex === index}`
+  //   のみを渡していたため、disabled は自行にしか効かず、Undo 実行中でも
+  //   他の行の再採点ボタンをクリックできてしまっていた（High-4）の回帰テスト。
+  const results: SessionCardResult[] = [
+    { cardId: 'c1', front: '問題1', grade: 4, type: 'graded', nextReviewDate: '2026-03-01' },
+    { cardId: 'c2', front: '問題2', grade: 3, type: 'graded', nextReviewDate: '2026-03-02' },
+  ];
+
+  it('Undo 実行中は自行以外もボタンが disabled になり、スピナーは自行のみ表示される', () => {
+    render(
+      <MemoryRouter>
+        <ReviewComplete
+          reviewedCount={2}
+          results={results}
+          onUndo={() => {}}
+          isUndoing={true}
+          undoingIndex={0}
+        />
+      </MemoryRouter>,
+    );
+
+    const undoButtons = screen.getAllByRole('button', { name: /再採点する/ });
+    expect(undoButtons).toHaveLength(2);
+    // 【検証】: Undo 実行中は自行以外も disabled になっていること
+    undoButtons.forEach((button) => {
+      expect(button).toBeDisabled();
+    });
+  });
+
+  it('Undo 未実行時は全ボタンが有効である', () => {
+    render(
+      <MemoryRouter>
+        <ReviewComplete
+          reviewedCount={2}
+          results={results}
+          onUndo={() => {}}
+          isUndoing={false}
+          undoingIndex={null}
+        />
+      </MemoryRouter>,
+    );
+
+    const undoButtons = screen.getAllByRole('button', { name: /再採点する/ });
+    undoButtons.forEach((button) => {
+      expect(button).not.toBeDisabled();
+    });
+  });
+});
+
 describe('ReviewComplete', () => {
   describe('完了メッセージ', () => {
     it('復習完了メッセージが表示される', () => {

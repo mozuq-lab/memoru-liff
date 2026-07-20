@@ -4,7 +4,14 @@ interface ReviewResultItemProps {
   result: SessionCardResult;
   index: number;
   onUndo?: (index: number) => void;
+  /** 自行の Undo がスピナー表示中か（対象行の見た目のみを制御） */
   isUndoing?: boolean;
+  /**
+   * High-4: Undo ボタンを無効化するか。
+   * いずれかの行で Undo 実行中は全行を disabled にし、並行クリックによる
+   * regradeCardIndex / undoingIndex（単一値 state）の競合を防ぐ。
+   */
+  disabled?: boolean;
 }
 
 const GRADE_DISPLAY_CONFIGS: Record<number, { label: string; bgClass: string; textClass: string }> = {
@@ -21,6 +28,7 @@ export const ReviewResultItem = ({
   index,
   onUndo,
   isUndoing = false,
+  disabled = false,
 }: ReviewResultItemProps) => {
   const gradeConfig = result.grade !== undefined ? GRADE_DISPLAY_CONFIGS[result.grade] : null;
 
@@ -79,10 +87,10 @@ export const ReviewResultItem = ({
           <button
             type="button"
             onClick={() => onUndo(index)}
-            disabled={isUndoing}
+            disabled={disabled}
             aria-label={`${result.front} を再採点する`}
             className={`min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg text-sm text-gray-500 hover:bg-gray-100 active:bg-gray-200 transition-colors ${
-              isUndoing ? 'opacity-50 cursor-not-allowed' : ''
+              disabled ? 'opacity-50 cursor-not-allowed' : ''
             }`}
           >
             {isUndoing ? (

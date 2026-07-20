@@ -12,6 +12,7 @@ from services.review_service import (
     InvalidGradeError,
     NoReviewHistoryError,
     ConcurrentReviewError,
+    ReviewPersistenceError,
 )
 from services.card_service import CardNotFoundError
 
@@ -333,6 +334,101 @@ class TestSubmitReview:
                 card_id="test-card-id",
                 grade=4,
             )
+
+    def test_submit_review_deleted_after_read_no_ghost_item(self, review_service, monkeypatch):
+        """High-1: read 後に削除されたカードへの submit_review はゴーストを作らず 404 相当になる。
+
+        【テスト目的】: submit_review 内部の get_card (存在確認) から
+        _update_card_review_data の apply_review_update (実書き込み) までの間に
+        別リクエストがカードを削除した場合、ConditionExpression
+        attribute_exists(card_id) (build_srs_optimistic_lock_condition) により
+        CardNotFoundError が発生し、削除済みアイテムが UpdateItem によって
+        新規作成 (ゴースト化) されないことを検証する。
+        🔵 信頼性レベル: 青信号 - apply_review_update の追加存在確認ロジックの直接検証。
+
+        Given: get_card はカードが (読み取り時点で) 存在したことを模擬して返すが、
+               実際の DynamoDB にはそのカードが存在しない (＝ update 直前の削除と同義)
+        When: submit_review を呼び出す
+        Then: CardNotFoundError が発生し、ゴーストアイテムも作成されない
+        """
+        from models.card import Card
+        from services.card_service import CardNotFoundError as CardServiceCardNotFoundError
+
+        mock_card = Card(
+            user_id="test-user-id",
+            front="Q",
+            back="A",
+            created_at=datetime.now(timezone.utc),
+            next_review_at=datetime.now(timezone.utc),
+        )
+        monkeypatch.setattr(
+            review_service.card_service, "get_card", lambda uid, cid: mock_card
+        )
+
+        with pytest.raises(CardServiceCardNotFoundError):
+            review_service.submit_review(
+                user_id="test-user-id",
+                card_id="card-deleted-after-read",
+                grade=4,
+            )
+
+        # 【ゴースト再作成防止確認】: apply_review_update が upsert としてアイテムを
+        # 新規作成していないことを確認する。
+        response = review_service.cards_table.get_item(
+            Key={"user_id": "test-user-id", "card_id": "card-deleted-after-read"}
+        )
+        assert "Item" not in response
+
+    def test_submit_review_existence_check_uses_consistent_read(
+        self, review_service, monkeypatch
+    ):
+        """レビュー指摘2: 404/409 出し分けの実在確認 get_item は ConsistentRead=True で呼ぶ。
+
+        apply_review_update が ConditionalCheckFailedException 時に行う「カードが
+        削除されたのか (404) / CAS が競合しただけなのか (409)」の実在確認が結果
+        整合性読み取りだと、削除直後に古いアイテムが返って 404 を誤って 409 と
+        判定しうる。Moto は整合性の遅延自体を再現できないため、ここでは
+        ConsistentRead=True が実際に get_item へ渡っていることをパラメータ伝搬
+        レベルで検証する。
+        🔵 信頼性レベル: 青信号 - CardRepository.get_item の consistent_read 引数と
+        apply_review_update からの呼び出しの直接検証。
+        """
+        from models.card import Card
+
+        mock_card = Card(
+            user_id="test-user-id",
+            front="Q",
+            back="A",
+            created_at=datetime.now(timezone.utc),
+            next_review_at=datetime.now(timezone.utc),
+        )
+        monkeypatch.setattr(
+            review_service.card_service, "get_card", lambda uid, cid: mock_card
+        )
+
+        # 【重要】: review_service.cards_table (== review_service._card_repo.table)
+        # を直接スパイする。dynamodb_tables.Table(...) で改めて取得したオブジェクト
+        # は同じテーブルを指していても別の Python オブジェクトになり、
+        # review_service 内部の呼び出しを観測できない。
+        real_get_item = review_service.cards_table.get_item
+        captured_kwargs = []
+
+        def spy_get_item(*args, **kwargs):
+            captured_kwargs.append(kwargs)
+            return real_get_item(*args, **kwargs)
+
+        monkeypatch.setattr(review_service.cards_table, "get_item", spy_get_item)
+
+        with pytest.raises(CardNotFoundError):
+            review_service.submit_review(
+                user_id="test-user-id",
+                card_id="card-deleted-after-read-consistent",
+                grade=4,
+            )
+
+        assert any(
+            kwargs.get("ConsistentRead") is True for kwargs in captured_kwargs
+        ), f"Expected a ConsistentRead=True get_item call, got: {captured_kwargs}"
 
 
 class TestSubmitReviewDayBoundaryNormalization:
@@ -1818,6 +1914,345 @@ class TestUpdateCardReviewDataListAppend:
 
         assert len(history) == 1
         assert history[0]["grade"] == 5
+
+
+class TestReviewHistoryCap:
+    """Medium-4: review_history の 100 件上限を submit_review の実書き込みにも適用するテスト。
+
+    従来は list_append を無条件で使用しており、review_history が DynamoDB
+    400KB アイテム上限に向けて際限なく成長し得た (add_review_history の
+    max_entries=100 による切り詰めは entry フォーマット変換にしか使われて
+    いなかった)。本クラスは _update_card_review_data が上限到達時に
+    切り詰め済み全リストを SET する経路へ切り替わることを検証する。
+    """
+
+    def test_submit_review_truncates_history_at_100_entries(
+        self, review_service, dynamodb_tables
+    ):
+        """review_history が既に 100 件のとき、最古のエントリが落ちて 101 件目にならない。"""
+        now = datetime.now(timezone.utc)
+        table = dynamodb_tables.Table("memoru-cards-test")
+
+        # 100 件のダミー review_history を用意する。grade に連番を仕込み、
+        # どのエントリが残る/落ちるかを検証できるようにする。
+        existing_history = [
+            {
+                "reviewed_at": (now - timedelta(days=100 - i)).isoformat(),
+                "grade": i,
+                "ease_factor_before": "2.5",
+                "ease_factor_after": "2.5",
+                "interval_before": 1,
+                "interval_after": 1,
+            }
+            for i in range(100)
+        ]
+        table.put_item(
+            Item={
+                "user_id": "test-user-id",
+                "card_id": "history-full-card",
+                "front": "Q",
+                "back": "A",
+                "next_review_at": now.isoformat(),
+                "interval": 1,
+                "ease_factor": "2.5",
+                "repetitions": 0,
+                "tags": [],
+                "created_at": now.isoformat(),
+                "review_history": existing_history,
+            }
+        )
+
+        review_service.submit_review(
+            user_id="test-user-id",
+            card_id="history-full-card",
+            grade=4,
+        )
+
+        response = table.get_item(
+            Key={"user_id": "test-user-id", "card_id": "history-full-card"}
+        )
+        history = response["Item"].get("review_history", [])
+
+        # 上限 100 件を維持し、101 件目にならないこと。
+        assert len(history) == 100
+        # 最古のエントリ (grade=0) が落ち、grade=1..99 が残った上で新エントリ
+        # (grade=4) が末尾に追加される。
+        assert int(history[0]["grade"]) == 1
+        assert int(history[-1]["grade"]) == 4
+
+    def test_submit_review_keeps_list_append_below_cap(
+        self, review_service, dynamodb_tables
+    ):
+        """上限未満のときは従来どおり list_append 経路が使われ、全件保持される。"""
+        now = datetime.now(timezone.utc)
+        table = dynamodb_tables.Table("memoru-cards-test")
+
+        existing_history = [
+            {
+                "reviewed_at": (now - timedelta(days=10 - i)).isoformat(),
+                "grade": i,
+                "ease_factor_before": "2.5",
+                "ease_factor_after": "2.5",
+                "interval_before": 1,
+                "interval_after": 1,
+            }
+            for i in range(10)
+        ]
+        table.put_item(
+            Item={
+                "user_id": "test-user-id",
+                "card_id": "history-partial-card",
+                "front": "Q",
+                "back": "A",
+                "next_review_at": now.isoformat(),
+                "interval": 1,
+                "ease_factor": "2.5",
+                "repetitions": 0,
+                "tags": [],
+                "created_at": now.isoformat(),
+                "review_history": existing_history,
+            }
+        )
+
+        review_service.submit_review(
+            user_id="test-user-id",
+            card_id="history-partial-card",
+            grade=5,
+        )
+
+        response = table.get_item(
+            Key={"user_id": "test-user-id", "card_id": "history-partial-card"}
+        )
+        history = response["Item"].get("review_history", [])
+
+        assert len(history) == 11
+        assert int(history[0]["grade"]) == 0  # 最古のエントリは落ちない
+        assert int(history[-1]["grade"]) == 5
+
+    def test_truncate_review_history_skips_on_aba_content_mismatch(
+        self, review_service, dynamodb_tables, monkeypatch
+    ):
+        """レビュー指摘1 (ABA): 切り詰め直前に同じ長さ・異なる内容へ差し替えられた場合はスキップされる。
+
+        size(review_history) だけを条件にすると、切り詰め対象を読み取ってから
+        書き込むまでの間に別処理が (例: undo → 再レビュー) 「内容は異なるが同じ
+        長さ」の review_history に差し替えた場合、条件が素通りして古いスナップ
+        ショットで上書きしてしまい、差し替え後の最新レビューが消えてしまう
+        (ABA problem)。末尾エントリの内容一致も条件に含めることで、これを検出して
+        スキップできることを検証する。
+        """
+        now = datetime.now(timezone.utc)
+        table = dynamodb_tables.Table("memoru-cards-test")
+
+        existing_history = [
+            {
+                "reviewed_at": (now - timedelta(days=100 - i)).isoformat(),
+                "grade": i,
+                "ease_factor_before": "2.5",
+                "ease_factor_after": "2.5",
+                "interval_before": 1,
+                "interval_after": 1,
+            }
+            for i in range(100)
+        ]
+        table.put_item(
+            Item={
+                "user_id": "test-user-id",
+                "card_id": "history-aba-card",
+                "front": "Q",
+                "back": "A",
+                "next_review_at": now.isoformat(),
+                "interval": 1,
+                "ease_factor": "2.5",
+                "repetitions": 0,
+                "tags": [],
+                "created_at": now.isoformat(),
+                "review_history": existing_history,
+            }
+        )
+
+        # 【重要】: review_service が実際に使う CardRepository インスタンス
+        # (review_service._card_repo) のメソッドをパッチする。
+        real_apply_review_update = review_service._card_repo.apply_review_update
+        call_count = {"n": 0}
+
+        def apply_review_update_with_race(*args, **kwargs):
+            call_count["n"] += 1
+            if call_count["n"] == 2:
+                # 切り詰め用の2回目呼び出し (_truncate_review_history) の直前に、
+                # 別プロセスが同じ長さ (101件)・異なる内容 (末尾エントリの grade
+                # が異なる) の review_history へ差し替えたことを模擬する
+                # (例: undo → 再レビュー)。
+                swapped_history = existing_history + [
+                    {
+                        "reviewed_at": (now + timedelta(minutes=5)).isoformat(),
+                        "grade": 9,
+                        "ease_factor_before": "2.5",
+                        "ease_factor_after": "2.5",
+                        "interval_before": 1,
+                        "interval_after": 1,
+                    }
+                ]
+                table.update_item(
+                    Key={"user_id": "test-user-id", "card_id": "history-aba-card"},
+                    UpdateExpression="SET review_history = :swapped",
+                    ExpressionAttributeValues={":swapped": swapped_history},
+                )
+            return real_apply_review_update(*args, **kwargs)
+
+        monkeypatch.setattr(
+            review_service._card_repo,
+            "apply_review_update",
+            apply_review_update_with_race,
+        )
+
+        # submit_review 自体は成功する（切り詰めは best-effort であり、失敗しても
+        # レビュー投稿自体は成功として扱われる）。
+        review_service.submit_review(
+            user_id="test-user-id",
+            card_id="history-aba-card",
+            grade=4,
+        )
+
+        response = table.get_item(
+            Key={"user_id": "test-user-id", "card_id": "history-aba-card"}
+        )
+        history = response["Item"].get("review_history", [])
+
+        # 切り詰めがスキップされ、差し替え後の内容 (末尾 grade=9、101件) がそのまま
+        # 残ること。ABA 対策が無ければ、古いスナップショット (末尾 grade=4 を
+        # 100件に切り詰めたもの) で上書きされ、grade=9 のエントリが消えてしまう。
+        assert len(history) == 101
+        assert int(history[-1]["grade"]) == 9
+
+
+class TestReviewHistoryRepair:
+    """レビュー指摘3: 400KB 上限付近まで肥大化した既存カードの修復パスのテスト。
+
+    従来 (Medium-4 初版) は list_append 成功後にしか切り詰めが走らず、無制限
+    追記バグの遺産で既にアイテムが 400KB 付近まで肥大化しているカードは、追記
+    自体が ValidationException (Item size 超過) で拒否され、以後レビュー不能の
+    まま固着していた。本クラスは _repair_oversized_review_history_and_retry
+    による緊急切り詰め + 1 回再試行の修復経路を検証する。
+    """
+
+    def test_submit_review_repairs_oversized_history_and_retries(
+        self, review_service, dynamodb_tables, monkeypatch
+    ):
+        """list_append が Item size 超過の ValidationException になった場合、
+        review_history を緊急に切り詰めてから追記を1回だけ再試行し、成功すること。
+
+        Moto は実際の 400KB 制限を再現しないため、モンキーパッチで該当
+        ClientError を注入して修復経路を検証する。
+        """
+        from botocore.exceptions import ClientError
+
+        now = datetime.now(timezone.utc)
+        table = dynamodb_tables.Table("memoru-cards-test")
+
+        # 肥大化した review_history を模したダミーの既存データ
+        # (Moto は実サイズ制限を再現しないため、件数自体は任意)。
+        existing_history = [
+            {
+                "reviewed_at": (now - timedelta(days=50 - i)).isoformat(),
+                "grade": i % 6,
+                "ease_factor_before": "2.5",
+                "ease_factor_after": "2.5",
+                "interval_before": 1,
+                "interval_after": 1,
+            }
+            for i in range(50)
+        ]
+        table.put_item(
+            Item={
+                "user_id": "test-user-id",
+                "card_id": "oversized-card",
+                "front": "Q",
+                "back": "A",
+                "next_review_at": now.isoformat(),
+                "interval": 1,
+                "ease_factor": "2.5",
+                "repetitions": 0,
+                "tags": [],
+                "created_at": now.isoformat(),
+                "review_history": existing_history,
+            }
+        )
+
+        # 【重要】: review_service.cards_table (== review_service._card_repo.table)
+        # を直接パッチする。dynamodb_tables.Table(...) で改めて取得したオブジェクト
+        # は同じテーブルを指していても別の Python オブジェクトになり、
+        # review_service 内部の呼び出しには反映されない。
+        real_update_item = review_service.cards_table.update_item
+        call_count = {"n": 0}
+        validation_error = ClientError(
+            {
+                "Error": {
+                    "Code": "ValidationException",
+                    "Message": "Item size to update has exceeded the maximum allowed size",
+                }
+            },
+            "UpdateItem",
+        )
+
+        def update_item_first_call_fails(*args, **kwargs):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                # 元の追記 UpdateItem (1 回目) だけを Item size 超過で失敗させる。
+                raise validation_error
+            return real_update_item(*args, **kwargs)
+
+        monkeypatch.setattr(
+            review_service.cards_table, "update_item", update_item_first_call_fails
+        )
+
+        response = review_service.submit_review(
+            user_id="test-user-id",
+            card_id="oversized-card",
+            grade=4,
+        )
+
+        assert response.card_id == "oversized-card"
+
+        result = table.get_item(
+            Key={"user_id": "test-user-id", "card_id": "oversized-card"}
+        )
+        history = result["Item"].get("review_history", [])
+
+        # 修復: 元が 50 件しかないため MAX-1=99 件保持は素通り (全 50 件保持)
+        # され、新エントリ 1 件を加えて 51 件になる。
+        assert len(history) == 51
+        assert int(history[-1]["grade"]) == 4
+
+    def test_submit_review_other_validation_exception_not_treated_as_size_limit(
+        self, review_service, sample_card, monkeypatch
+    ):
+        """式の誤り等、無関係な ValidationException は ItemSizeExceededError に
+        巻き込まれず、修復パスへ入らずに通常どおり ReviewPersistenceError になる。
+        """
+        from botocore.exceptions import ClientError
+
+        other_validation_error = ClientError(
+            {
+                "Error": {
+                    "Code": "ValidationException",
+                    "Message": "Invalid ConditionExpression: Syntax error",
+                }
+            },
+            "UpdateItem",
+        )
+
+        def always_fail(*args, **kwargs):
+            raise other_validation_error
+
+        monkeypatch.setattr(review_service.cards_table, "update_item", always_fail)
+
+        with pytest.raises(ReviewPersistenceError):
+            review_service.submit_review(
+                user_id="test-user-id",
+                card_id="test-card-id",
+                grade=4,
+            )
 
 
 class TestRecordReviewLogging:
