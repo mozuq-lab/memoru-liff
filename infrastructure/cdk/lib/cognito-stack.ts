@@ -1,5 +1,6 @@
 import * as cdk from 'aws-cdk-lib';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import type { Construct } from 'constructs';
 import { Environment, exportName, isProdEnv, resourceName } from './naming';
@@ -25,6 +26,8 @@ export interface CognitoStackProps extends cdk.StackProps {
    * 参照を使うこと。後方互換のため残しているが、prod では使用禁止。
    */
   lineLoginChannelSecret?: string;
+  /** PreSignUp トリガー Lambda の ARN（SAM backend が所有）。未指定なら配線しない */
+  preSignUpLambdaArn?: string;
 }
 
 export class CognitoStack extends cdk.Stack {
@@ -61,6 +64,36 @@ export class CognitoStack extends cdk.Stack {
       deletionProtection: isProd,
       removalPolicy: isProd ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     });
+
+    // サインアップ許可リスト: PreSignUp トリガー（SAM backend が所有する Lambda を
+    // ARN 参照で配線するだけ。未指定なら配線しない＝現状維持）
+    if (props.preSignUpLambdaArn) {
+      this.userPool.addTrigger(
+        cognito.UserPoolOperation.PRE_SIGN_UP,
+        lambda.Function.fromFunctionAttributes(this, 'PreSignupFn', {
+          functionArn: props.preSignUpLambdaArn,
+          // Invoke 許可は SAM 側 (PreSignupInvokePermission) で一元管理する。
+          // skipPermissions で CDK 側の addPermission を恒久的に no-op 化し、
+          // 将来スタックに env（実アカウント）を指定した場合に Permission が
+          // 二重生成される挙動変化と、env 未指定時の UnclearLambdaEnvironment
+          // 警告の両方を回避する。
+          sameEnvironment: false,
+          skipPermissions: true,
+        }),
+      );
+    } else if (isProd) {
+      // prod で PreSignUp トリガー未配線＝サインアップ（メールセルフサインアップ /
+      // LINE 初回ログイン）が無条件に開いたままになる。console.warn は非 TTY の
+      // `cdk synth`（CI 等）で出力が失われるため、synth 結果に確実に残る
+      // Annotations の warning を使う（keycloak-stack.ts の M-40 と同じ流儀）。
+      // dev では初回ブートストラップ等で未配線が通常運用のため警告しない。
+      cdk.Annotations.of(this).addWarning(
+        'prod の UserPool に PreSignUp トリガー（サインアップ許可リスト）が未配線です。'
+          + ' サインアップ（メールセルフサインアップ / LINE 初回ログイン）が無条件に開いた'
+          + 'ままになっています。SAM backend デプロイ後、preSignUpLambdaArn を指定して'
+          + '再デプロイしてください（初回ブートストラップ時を除く）。',
+      );
+    }
 
     // ============================================================
     // Cognito User Pool Domain (Prefix-based)
