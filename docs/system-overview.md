@@ -95,6 +95,11 @@ graph TB
 
 ## 3. 認証フロー
 
+> **サインアップは招待制**: Cognito の PreSignUp トリガー（`memoru-presignup-{env}`）が
+> DynamoDB 許可リスト（`memoru-signup-allowlist-{env}`）で判定し、未許可のアカウント作成を
+> 拒否する（メールは事前登録制、LINE は初回試行を pending 記録 → 承認後に再ログイン）。
+> 設計: [docs/design/signup-allowlist/architecture.md](./design/signup-allowlist/architecture.md)。
+
 ### 3.1 ログイン（OIDC + PKCE）
 
 ```mermaid
@@ -490,6 +495,7 @@ erDiagram
 | `memoru-processed-events-{env}` | PK: webhook_event_id | Webhook 冪等 + URL カード一時保存（TTL: `expires_at`） |
 | `memoru-ai-jobs-{env}` | PK: job_id | AI 非同期ジョブ（ai-async-jobs）の状態・結果（TTL: `ttl` 24h） |
 | `memoru-rate-limits-{env}` | PK: pk | AI 系エンドポイントのユーザー単位レート制限カウンタ（TTL: `ttl`・ローカルは無効） |
+| `memoru-signup-allowlist-{env}` | PK: identifier | サインアップ許可リスト（`email#<addr>` / `idp#<userName>`。approved は永続、pending のみ TTL: `ttl` 30日。ローカルには作成しない） |
 
 ### GSI（グローバルセカンダリインデックス）
 
@@ -652,8 +658,10 @@ memoru-liff/
 │   │   ├── api/
 │   │   │   ├── handler.py             # ルーター + 独立ハンドラ (grade_ai / advice / url_generate)
 │   │   │   └── handlers/              # 機能別ルート定義 (cards/decks/stats/tutor/...)
+│   │   ├── auth/pre_signup.py         # Cognito PreSignUp トリガー（サインアップ許可リスト）
 │   │   ├── models/                    # Pydantic モデル (card/deck/stats/tutor/url_generate 等)
 │   │   ├── services/
+│   │   │   ├── allowlist_service.py   # サインアップ許可リスト判定（pre_signup から利用）
 │   │   │   ├── user_service.py        # ユーザー CRUD（LINELINK# ロックで連携排他）
 │   │   │   ├── card_service.py        # カード CRUD（上限管理）
 │   │   │   ├── review_service.py      # レビュー処理 + SRS 更新

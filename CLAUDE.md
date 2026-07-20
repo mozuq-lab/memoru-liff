@@ -25,12 +25,14 @@ LINE ベースの暗記カードアプリケーション。SRS (Spaced Repetitio
 
 ### 認証
 - OIDC + PKCE（Keycloak / Cognito 切り替え対応）
+- サインアップは招待制: Cognito PreSignUp トリガー + DynamoDB 許可リスト（運用は `make allowlist-*` / `make verify-presignup`。設計: `docs/design/signup-allowlist/`）
 
 ## ディレクトリ構成
 
 ```
 backend/src/
 ├── api/           # Lambda ハンドラー (APIGatewayHttpResolver)
+├── auth/          # Cognito トリガー（PreSignUp サインアップ許可リスト）
 ├── models/        # Pydantic モデル
 ├── services/      # ビジネスロジック層
 ├── utils/         # ユーティリティ
