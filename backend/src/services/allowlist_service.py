@@ -93,9 +93,14 @@ def get_status(identifier: str) -> Optional[str]:
     Raises:
         ClientError: DynamoDB 呼び出しに失敗した場合（フェイルクローズ。呼び出し側で
             そのまま送出する）。
+
+    Note:
+        許可判定はアクセス制御に使われるため ``ConsistentRead=True`` で強整合性読み取り
+        を行う（既定の結果整合性のままだと ``allowlist-remove`` 直後に古い approved が
+        返り、削除済み識別子の登録を許可しうる）。
     """
     table = _get_table()
-    response = table.get_item(Key={"identifier": identifier})
+    response = table.get_item(Key={"identifier": identifier}, ConsistentRead=True)
     item = response.get("Item")
     if not item:
         return None

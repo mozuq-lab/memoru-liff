@@ -113,6 +113,9 @@
 - 専用 LogGroup: `RetentionInDays: !If [IsProd, 90, 14]`（既存規約と同一）
 - 環境変数: `ALLOWLIST_TABLE`（テーブル名）
 - IAM: 対象テーブルへの `dynamodb:GetItem` / `dynamodb:PutItem` のみ（最小権限）
+- 許可判定（`get_status` の `GetItem`）は `ConsistentRead=True`（強整合性読み取り）を指定する。
+  GetItem は既定では結果整合性のため、指定しない場合 `allowlist-remove` 直後に古い approved
+  が返り、削除済み識別子の登録を許可しうる（アクセス制御判定のため強整合性が必要）。
 - ログ: 構造化ログで `triggerSource` / 判定結果（allowed / rejected / pending_recorded）を必ず
   出力する。**許可リスト変更操作（データプレーン）は CloudTrail に残らないため、判定側の
   このログが実質唯一の証跡**となる。
@@ -252,8 +255,13 @@ make verify-presignup  ENV=prod COGNITO_USER_POOL_ARN=arn:aws:cognito-idp:...  #
 ```
 
 - 実体は `aws dynamodb put-item / scan / update-item / delete-item` の薄いラッパー。
-  テーブル名 `memoru-signup-allowlist-$(ENV)` を組み立て、メールは小文字化して `email#` を付与、
-  `idp#` 始まりはそのまま使う。レシピ内の `$(ID)` 展開は必ずクォートする（`#` を含む値のため）。
+  テーブル名 `memoru-signup-allowlist-$ENV` を組み立て、メールは小文字化して `email#` を付与、
+  `idp#` 始まりはそのまま使う。ID/NOTE は Make のテキスト展開（`$(ID)` 等）を経由させず、
+  `export ENV ID NOTE COGNITO_USER_POOL_ARN` でシェル環境変数としてレシピに渡した上で
+  `"$$ID"` のようにシェル側で参照する。Make の変数展開は単純なテキスト置換のため、
+  値中のダブルクォートが失われたり（`NOTE='友人 "A"'` → `友人 A`）、値に含まれる
+  `$(...)` がコマンド置換として実行されたりする問題があり、環境変数経由に統一することで
+  無害化している。
 - `allowlist-add` は `ConditionExpression: attribute_not_exists(identifier)` で誤上書きを防止
   （既存があればエラー表示。pending からの昇格は `allowlist-approve` を使う）。
 - `allowlist-approve` は `ConditionExpression: attribute_exists(identifier) AND #s = :pending` を

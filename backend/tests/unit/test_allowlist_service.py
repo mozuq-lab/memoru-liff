@@ -1,7 +1,7 @@
 """Unit tests for services/allowlist_service.py (signup-allowlist)."""
 
 import os
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import boto3
 import pytest
@@ -63,6 +63,22 @@ class TestGetStatus:
             with pytest.raises(ClientError):
                 get_status("email#a@example.com")
             allowlist_service._resource = None
+
+    def test_uses_consistent_read(self):
+        """許可判定（アクセス制御）は結果整合性の GetItem では allowlist-remove 直後に
+        古い approved を返しかねないため、ConsistentRead=True を必ず指定する
+        （PR #86 レビュー指摘）。"""
+        mock_table = MagicMock()
+        mock_table.get_item.return_value = {
+            "Item": {"identifier": "email#a@example.com", "status": STATUS_APPROVED}
+        }
+        with patch.object(allowlist_service, "_get_table", return_value=mock_table):
+            status = get_status("email#a@example.com")
+
+        assert status == STATUS_APPROVED
+        mock_table.get_item.assert_called_once_with(
+            Key={"identifier": "email#a@example.com"}, ConsistentRead=True
+        )
 
 
 class TestRecordPending:
