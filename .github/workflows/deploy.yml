@@ -165,6 +165,11 @@ jobs:
           # 注入する。prod では必須（未設定なら下記スクリプトで fail-fast。template.yaml
           # の Rules でも二重にガード）。
           LIFF_ORIGIN: ${{ vars.LIFF_ORIGIN }}
+          # PreSignUp トリガーの Invoke Permission (SourceArn) に必要な Cognito UserPool
+          # ARN。prod では必須（未設定なら下記スクリプトで fail-fast。template.yaml の
+          # Rules でも二重にガード）。dev/staging は任意（未設定なら Invoke Permission は
+          # 作成されない＝トリガー未配線）。
+          COGNITO_USER_POOL_ARN: ${{ vars.COGNITO_USER_POOL_ARN }}
           LINE_CHANNEL_ID: ${{ vars.LINE_CHANNEL_ID }}
           USE_STRANDS: ${{ vars.USE_STRANDS }}
           TUTOR_SESSION_BACKEND: ${{ vars.TUTOR_SESSION_BACKEND }}
@@ -184,6 +189,12 @@ jobs:
             echo "::error::GitHub Environment Variables に LIFF_ORIGIN を登録してください。詳細は docs/deployment-guide-prod.md を参照。"
             exit 1
           fi
+          if [ "$ENVIRONMENT" = "prod" ] && [ -z "$COGNITO_USER_POOL_ARN" ]; then
+            echo "::error::COGNITO_USER_POOL_ARN が未設定です（prod では必須）。"
+            echo "::error::PreSignUp トリガーの Invoke Permission (SourceArn) に必要です（例: arn:aws:cognito-idp:ap-northeast-1:123456789012:userpool/ap-northeast-1_xxxxxxxxx）。"
+            echo "::error::GitHub Environment Variables に COGNITO_USER_POOL_ARN を登録してください。詳細は docs/deployment-guide-prod.md を参照。"
+            exit 1
+          fi
           if [ "$ENVIRONMENT" = "prod" ] && [ "$USE_STRANDS" != "true" ]; then
             echo "::error::USE_STRANDS が prod で \"true\" ではありません（現在の値: ${USE_STRANDS:-<未設定>}）。"
             echo "::error::Tutor 機能は SessionManager 経由のマルチターン会話を使うため USE_STRANDS=true が必須です。"
@@ -196,6 +207,7 @@ jobs:
           fi
           OVERRIDES="Environment=$ENVIRONMENT OidcIssuer=$OIDC_ISSUER OidcAudience=$OIDC_AUDIENCE"
           [ -n "$LIFF_ORIGIN" ]           && OVERRIDES="$OVERRIDES LiffOrigin=$LIFF_ORIGIN"
+          [ -n "$COGNITO_USER_POOL_ARN" ] && OVERRIDES="$OVERRIDES CognitoUserPoolArn=$COGNITO_USER_POOL_ARN"
           [ -n "$LINE_CHANNEL_ID" ]       && OVERRIDES="$OVERRIDES LineChannelId=$LINE_CHANNEL_ID"
           [ -n "$USE_STRANDS" ]           && OVERRIDES="$OVERRIDES UseStrands=$USE_STRANDS"
           [ -n "$TUTOR_SESSION_BACKEND" ] && OVERRIDES="$OVERRIDES TutorSessionBackend=$TUTOR_SESSION_BACKEND"
