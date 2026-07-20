@@ -49,6 +49,7 @@ memoru-liff/
 ├── backend/               # バックエンド (AWS SAM)
 │   ├── src/
 │   │   ├── api/           # Lambda ハンドラー（APIGatewayHttpResolver）
+│   │   ├── auth/          # Cognito トリガー（PreSignUp サインアップ許可リスト）
 │   │   ├── models/        # Pydantic モデル
 │   │   ├── services/      # ビジネスロジック層
 │   │   ├── utils/         # ユーティリティ

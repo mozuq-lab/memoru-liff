@@ -133,6 +133,8 @@ new CognitoStack(app, 'MemoruCognitoDev', {
 > **注意**: `cognitoDomainPrefix` はグローバルで一意である必要がある。`memoru-dev` が既に使用されている場合は、環境変数 `MEMORU_DEV_COGNITO_DOMAIN_PREFIX=memoru-dev-<任意の識別子>` を `export` して上書きする（app.ts を編集する必要はない）。
 >
 > dev 環境の app.ts 値（`localhost` ベースの callback URL・プレースホルダの Keycloak ドメイン）は実環境固有の値を含まないため、public リポジトリにコミットされたままで問題ない。CloudFront ドメイン等を callback に追加したい場合は Step 7 を参照。
+>
+> **任意（サインアップ許可リストの dev 検証）**: dev でも PreSignUp トリガーを配線して検証する場合は、SAM backend デプロイ後に `export MEMORU_DEV_PRESIGNUP_LAMBDA_ARN=<PreSignupFunctionArn>` を設定して `MemoruCognitoDev` を再デプロイする。未設定ならトリガーなし（従来どおりサインアップ可）。prod の必須手順は [deployment-guide-prod.md](./deployment-guide-prod.md) §4 を参照。
 
 ### 2.2 デプロイの実行
 
